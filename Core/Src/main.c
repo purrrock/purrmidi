@@ -139,8 +139,6 @@ int main(void)
 
 DebugPrint("\r\n=== PurrMidi I2S test ===\r\n");
 DebugPrint("STM32 started\r\n");
-    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-	
 GenerateTone(audio_buffer, AUDIO_BUFFER_SIZE);
 
 HAL_StatusTypeDef status = HAL_I2S_Transmit_DMA(
@@ -152,7 +150,6 @@ HAL_StatusTypeDef status = HAL_I2S_Transmit_DMA(
 if (status == HAL_OK)
 {
     DebugPrint("HAL_I2S_Transmit_DMA: OK\r\n");
-    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
 }
 else
 {
@@ -161,7 +158,6 @@ else
 }
 
 DebugPrint("I2S DMA started\r\n");
-    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
 
   /* USER CODE END 2 */
 
@@ -173,24 +169,7 @@ DebugPrint("I2S DMA started\r\n");
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
-    HAL_Delay(1000);
-
-    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-
-    char msg[128];
-
-    snprintf(
-        msg,
-        sizeof(msg),
-        "I2S half=%lu full=%lu state=%d\r\n",
-        i2s_half_count,
-        i2s_full_count,
-        (int)HAL_I2S_GetState(&hi2s2)
-    );
-
-    DebugPrint(msg);
-    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-  }
+   }
   /* USER CODE END 3 */
 }
 
