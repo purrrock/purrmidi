@@ -57,6 +57,19 @@ static void USB_DebugPrint(const char *text)
       HAL_MAX_DELAY
   );
 }
+
+static void USB_DebugState(USBH_HandleTypeDef *phost)
+{
+  char msg[128];
+
+  snprintf(msg, sizeof(msg),
+           "USB state=%d enum=%d speed=%d\r\n",
+           phost->gState,
+           phost->EnumState,
+           phost->device.speed);
+
+  USB_DebugPrint(msg);
+}
 /* USER CODE END 0 */
 
 /*
@@ -120,10 +133,11 @@ static void USBH_UserProcess  (USBH_HandleTypeDef *phost, uint8_t id)
     USB_DebugPrint("USB: configuration selected\r\n");
     break;
 
-  case HOST_USER_DISCONNECTION:
-    USB_DebugPrint("USB: device disconnected\r\n");
-    Appli_state = APPLICATION_DISCONNECT;
-    break;
+case HOST_USER_DISCONNECTION:
+  USB_DebugPrint("USB: device disconnected\r\n");
+  USB_DebugState(phost);
+  Appli_state = APPLICATION_DISCONNECT;
+  break;
 
   case HOST_USER_CLASS_ACTIVE:
     USB_DebugPrint("USB: class active\r\n");
@@ -131,37 +145,12 @@ static void USBH_UserProcess  (USBH_HandleTypeDef *phost, uint8_t id)
     break;
 
   case HOST_USER_CONNECTION:
-  {
-    char msg[128];
+  USB_DebugPrint("USB: device connected\r\n");
+  USB_DebugState(phost);
+  Appli_state = APPLICATION_START;
+  break;
 
-    USB_DebugPrint("USB: device connected\r\n");
-
-    snprintf(msg, sizeof(msg),
-             "USB: VID=0x%04X PID=0x%04X\r\n",
-             phost->device.DevDesc.idVendor,
-             phost->device.DevDesc.idProduct);
-    USB_DebugPrint(msg);
-
-    snprintf(msg, sizeof(msg),
-             "USB: class=0x%02X subclass=0x%02X protocol=0x%02X\r\n",
-             phost->device.DevDesc.bDeviceClass,
-             phost->device.DevDesc.bDeviceSubClass,
-             phost->device.DevDesc.bDeviceProtocol);
-    USB_DebugPrint(msg);
-
-    snprintf(msg, sizeof(msg),
-             "USB: EP0=%u max packet\r\n",
-             phost->device.DevDesc.bMaxPacketSize);
-    USB_DebugPrint(msg);
-
-    Appli_state = APPLICATION_START;
-    break;
   }
-
-  default:
-    break;
-  }
-
   /* USER CODE END CALL_BACK_1 */
 }
 
