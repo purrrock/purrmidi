@@ -25,7 +25,9 @@
 #include "usbh_hid.h"
 
 /* USER CODE BEGIN Includes */
-
+#include "usart.h"
+#include <stdio.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* USER CODE BEGIN PV */
@@ -46,7 +48,15 @@ ApplicationTypeDef Appli_state = APPLICATION_IDLE;
  * -- Insert your variables declaration here --
  */
 /* USER CODE BEGIN 0 */
-
+static void USB_DebugPrint(const char *text)
+{
+  HAL_UART_Transmit(
+      &huart2,
+      (uint8_t *)text,
+      (uint16_t)strlen(text),
+      HAL_MAX_DELAY
+  );
+}
 /* USER CODE END 0 */
 
 /*
@@ -103,26 +113,55 @@ void MX_USB_HOST_Process(void)
 static void USBH_UserProcess  (USBH_HandleTypeDef *phost, uint8_t id)
 {
   /* USER CODE BEGIN CALL_BACK_1 */
+
   switch(id)
   {
-  case HOST_USER_SELECT_CONFIGURATION:
+case HOST_USER_SELECT_CONFIGURATION:
+{
+  char msg[128];
+
+  USB_DebugPrint("USB: configuration selected\r\n");
+
+  snprintf(msg, sizeof(msg),
+           "USB: VID=0x%04X PID=0x%04X\r\n",
+           phost->device.DevDesc.idVendor,
+           phost->device.DevDesc.idProduct);
+  USB_DebugPrint(msg);
+
+  snprintf(msg, sizeof(msg),
+           "USB: class=0x%02X subclass=0x%02X protocol=0x%02X\r\n",
+           phost->device.DevDesc.bDeviceClass,
+           phost->device.DevDesc.bDeviceSubClass,
+           phost->device.DevDesc.bDeviceProtocol);
+  USB_DebugPrint(msg);
+
+  snprintf(msg, sizeof(msg),
+           "USB: EP0=%u max packet\r\n",
+           phost->device.DevDesc.bMaxPacketSize);
+  USB_DebugPrint(msg);
+
   break;
+}
 
   case HOST_USER_DISCONNECTION:
-  Appli_state = APPLICATION_DISCONNECT;
-  break;
+    USB_DebugPrint("USB: device disconnected\r\n");
+    Appli_state = APPLICATION_DISCONNECT;
+    break;
 
   case HOST_USER_CLASS_ACTIVE:
-  Appli_state = APPLICATION_READY;
-  break;
+    USB_DebugPrint("USB: class active\r\n");
+    Appli_state = APPLICATION_READY;
+    break;
 
-  case HOST_USER_CONNECTION:
+case HOST_USER_CONNECTION:
+  USB_DebugPrint("USB: device connected\r\n");
   Appli_state = APPLICATION_START;
   break;
 
   default:
-  break;
+    break;
   }
+
   /* USER CODE END CALL_BACK_1 */
 }
 
