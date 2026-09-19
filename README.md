@@ -1,200 +1,78 @@
+
 # PurrMidi
-
 **PurrMidi** — экспериментальный автономный MIDI-синтезатор на базе STM32.
-
-Цель проекта — создать компактный аппаратный MIDI sound module: подключить USB MIDI-клавиатуру, генерировать звук на микроконтроллере и выводить его через внешний аудио ЦАП.
-
+Цель проекта — создать компактный аппаратный MIDI-модуль (sound module): подключить USB MIDI-клавиатуру, генерировать звук силами микроконтроллера и выводить его через внешний аудио ЦАП.
+Основное направление - качественный звук фортепиано.
 Проект развивается как практический embedded-аудио проект с постепенным переходом от простого прототипа к полноценному полифоническому синтезатору.
 
-## Hardware
+## Аппаратное обеспечение
 
-### Current prototype
+### Текущий прототип
+* **Микроконтроллер (MCU):** STM32F411CEU6.
+* **Аудио ЦАП (DAC):** PCM5102A (стереовыход, аудиоинтерфейс I2S).
+* **MIDI-вход:** USB MIDI-клавиатура.
 
-* **MCU:** STM32F411CEU6
-* **Audio DAC:** PCM5102A
+### Планируемое развитие
+В дальнейшем основной контроллер планируется заменить на **NUCLEO-F446RE (STM32F446RE)**. Данный чип имеет более подходящие ресурсы для аудио DSP и станет основной платформой для последующих этапов проекта.
 
-  * I2S audio interface
-  * stereo output
-* **MIDI input:** USB MIDI keyboard
-* **Controls:** push buttons
-* **Indicators:** LEDs
-* Breadboard and jumper wires
-* Headphones / powered speakers
+## Архитектура программного обеспечения и звуковой тракт
+Разработка ведётся инкрементально: каждый аппаратный блок сначала тестируется отдельно, а затем интегрируется в синтезатор. Проект задуман достаточно компактным, чтобы его можно было понимать и модифицировать на уровне прошивки без использования громоздких внешних фреймворков.
+Прошивка разделяет аппаратно-зависимый код и сам движок синтезатора. Движок не должен напрямую зависеть от API периферии STM32, что позволит разрабатывать и тестировать его независимо от конечного микроконтроллера.
 
-### Planned MCU
+**Основной тракт прохождения сигнала:**
+1. Подключение с USB MIDI-клавиатуры.
+2. Драйвер USB MIDI и парсер MIDI-событий.
+3. Движок синтезатора и аудиомикшер.
+4. Заполнение буфера цифровых PCM-сэмплов.
+5. Передача данных через периферию I2S с использованием DMA.
+6. Внешний аудио ЦАП PCM5102A.
+7. Вывод аналогового звука на наушники или колонки.
 
-В дальнейшем основной контроллер планируется заменить на:
+Использование DMA для непрерывной потоковой передачи аудио позволяет освободить процессор от необходимости ручной отправки каждого сэмпла.
 
-* **NUCLEO-F446RE / STM32F446RE**
-
-STM32F446 имеет более подходящие для аудио DSP ресурсы и станет основной платформой для последующих этапов проекта.
-
-## Concept
-
-Основной тракт:
-
-```text
-USB MIDI Keyboard
-       │
-       ▼
-   MIDI input
-       │
-       ▼
- MIDI event parser
-       │
-       ▼
-  Synthesizer
-       │
-       ▼
- Audio sample buffer
-       │
-       ▼
-      I2S
-       │
-       ▼
-    PCM5102A
-       │
-       ▼
- Headphones / Speakers
-```
-
-Кнопки и светодиоды используются для управления и индикации состояния синтезатора.
-
-## Goals
-
+## План разработки
 Проект развивается поэтапно.
 
-### Phase 1 — Hardware bring-up
+### Этап 1 — Аппаратный запуск (Hardware bring-up)
+* [X] Базовая настройка прошивки и тактирования STM32F411.
+* [X] Отладочный UART.
+* [ ] Вход USB MIDI и парсер MIDI-сообщений.
+* [X] Подключение PCM5102A и интерфейса I2S.
+* [X] Генерация тестового тона.
+* [X] Воспроизведение тестового тона через PCM5102A.
 
-* [X] STM32F411 clock and basic firmware
-* [ ] Debug UART
-* [ ] USB MIDI input
-* [ ] MIDI message parser
-* [X] PCM5102A connection
-* [X] I2S output
-* [X] Generate a test tone
-* [X] Play the test tone through PCM5102A
+### Этап 2 — Базовый синтезатор
+* [ ] Обработка MIDI-событий Note On / Note Off.
+* [ ] Один осциллятор и выбор базовых форм волны.
+* [ ] Несколько одновременных голосов.
+* [ ] Огибающая ADSR.
+* [ ] Регулировка общей громкости (Master volume).
+* [ ] Воспроизведение звука на базе аудиобуфера и DMA.
 
-### Phase 2 — Basic synthesizer
+### Этап 3 — Полноценный инструмент
+* [ ] Полифония.
+* [ ] Обработка скорости нажатия клавиш (Velocity).
+* [ ] Изменение высоты тона (Pitch bend).
+* [ ] Поддержка педали сустейна.
+* [ ] Поддержка послекасания.
+* [ ] Обработка MIDI Control Change.
+* [ ] Пресеты.
 
-* [ ] MIDI Note On / Note Off
-* [ ] Single oscillator
-* [ ] Multiple simultaneous voices
-* [ ] ADSR envelope
-* [ ] Basic waveform selection
-* [ ] Master volume
-* [ ] Audio buffer / DMA based playback
+* [ ] Управление с помощью кнопок и светодиодная индикация.
 
-### Phase 3 — Playable instrument
 
-* [ ] Polyphony
-* [ ] Velocity handling
-* [ ] Pitch bend
-* [ ] Sustain pedal
-* [ ] MIDI Control Change
-* [ ] Presets
-* [ ] Button controls
-* [ ] LED status indication
+### Этап 4 — Звуковой движок
+Возможные технологии синтеза:
+* Субтрактивный синтез.
+* Таблично-волновой синтез (wavetable).
+* Воспроизведение сэмплов.
+* Цифровые фильтры, генераторы низкой частоты (LFO), модуляция и эффекты.
 
-### Phase 4 — Sound engine
+Точная архитектура звукового движка будет зависеть от возможностей целевого микроконтроллера и требований к звучанию.
 
-Possible synthesis techniques:
+## Текущий статус
+**Ранняя стадия разработки.**
+Текущий приоритет — проверка аппаратной части и создание минимально работающего тракта: клавиатура → микроконтроллер → тон → I2S → ЦАП → звук. Как только этот базовый путь заработает надёжно, начнётся постепенная разработка движка синтезатора.
 
-* subtractive synthesis
-* wavetable synthesis
-* sample playback
-* digital filters
-* LFO
-* modulation
-* effects
-
-The exact architecture will be determined by the capabilities of the target MCU and the requirements of the sound engine.
-
-## Software Architecture
-
-The firmware should keep hardware-specific code separate from the synthesizer itself.
-
-A possible architecture:
-
-```text
-USB MIDI
-   │
-   ▼
- MIDI driver
-   │
-   ▼
- MIDI parser
-   │
-   ▼
- MIDI events
-   │
-   ▼
- Synth engine
-   │
-   ▼
- Audio mixer
-   │
-   ▼
- Audio output
-   │
-   ▼
- I2S + DMA
-```
-
-The synthesizer engine should not depend directly on STM32 peripheral APIs.
-
-This should make it possible to develop and test the audio engine independently from the final MCU and hardware configuration.
-
-## Audio
-
-The PCM5102A is used as the external audio DAC.
-
-The MCU generates digital PCM samples and transfers them to the DAC using I2S.
-
-The intended audio path is:
-
-```text
-Synthesizer
-    │
-    │ PCM samples
-    ▼
-Audio buffer
-    │
-    │ DMA
-    ▼
-I2S peripheral
-    │
-    ▼
-PCM5102A
-    │
-    ▼
-Analog audio
-```
-
-DMA should be used for continuous audio streaming so that the CPU is not required to manually transmit every sample.
-
-## Development
-
-The initial development platform is the STM32F411CEU6 on a breadboard.
-
-Development will proceed incrementally: each hardware block is first brought up and tested independently before integrating it into the synthesizer.
-
-The project is intended to remain small enough to understand and modify at the firmware level rather than relying on a large external synthesizer framework.
-
-## Repository
-
-Source code:
-
-[github.com/purrrock/purrmidi](https://github.com/purrrock/purrmidi?utm_source=chatgpt.com)
-
-## Status
-
-**Early development.**
-
-The current priority is hardware bring-up and establishing a minimal end-to-end path:
-
-```text
-MIDI keyboard → STM32 → synthesized tone → I2S → PCM5102A → audio output
-```
-
-Once this path works reliably, the synthesizer engine can be developed incrementally.
+## Репозиторий
+Исходный код проекта: github.com/purrrock/purrmidi
