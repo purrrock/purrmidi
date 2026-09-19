@@ -21,6 +21,7 @@
 #include "dma.h"
 #include "i2s.h"
 #include "usart.h"
+#include "usb_otg.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -131,6 +132,7 @@ int main(void)
   MX_DMA_Init();
   MX_I2S2_Init();
   MX_USART2_UART_Init();
+  MX_USB_OTG_FS_HCD_Init();
   /* USER CODE BEGIN 2 */
 
 DebugPrint("\r\n=== PurrMidi I2S test ===\r\n");
