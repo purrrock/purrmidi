@@ -26,6 +26,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,6 +53,8 @@
 /* USER CODE BEGIN PV */
 static int16_t audio_buffer[AUDIO_BUFFER_SIZE];
 static float tone_phase = 0.0f;
+static volatile uint32_t i2s_half_count = 0;
+static volatile uint32_t i2s_full_count = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -61,7 +65,15 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+static void DebugPrint(const char *text)
+{
+    HAL_UART_Transmit(
+        &huart2,
+        (uint8_t *)text,
+        (uint16_t)strlen(text),
+        HAL_MAX_DELAY
+    );
+}
 static void GenerateTone(int16_t *buffer, uint32_t sample_count)
 {
     const float phase_step =
@@ -121,15 +133,31 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
+DebugPrint("\r\n=== PurrMidi I2S test ===\r\n");
+DebugPrint("STM32 started\r\n");
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+	
 GenerateTone(audio_buffer, AUDIO_BUFFER_SIZE);
 
-if (HAL_I2S_Transmit_DMA(
-        &hi2s2,
-        (uint16_t *)audio_buffer,
-        AUDIO_BUFFER_SIZE) != HAL_OK)
+HAL_StatusTypeDef status = HAL_I2S_Transmit_DMA(
+    &hi2s2,
+    (uint16_t *)audio_buffer,
+    AUDIO_BUFFER_SIZE
+);
+
+if (status == HAL_OK)
 {
+    DebugPrint("HAL_I2S_Transmit_DMA: OK\r\n");
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+}
+else
+{
+    DebugPrint("HAL_I2S_Transmit_DMA: ERROR\r\n");
     Error_Handler();
 }
+
+DebugPrint("I2S DMA started\r\n");
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
 
   /* USER CODE END 2 */
 
@@ -140,6 +168,23 @@ if (HAL_I2S_Transmit_DMA(
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    HAL_Delay(1000);
+
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+
+    char msg[128];
+
+    snprintf(
+        msg,
+        sizeof(msg),
+        "I2S half=%lu full=%lu state=%d\r\n",
+        i2s_half_count,
+        i2s_full_count,
+        (int)HAL_I2S_GetState(&hi2s2)
+    );
+
+    DebugPrint(msg);
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
   }
   /* USER CODE END 3 */
 }
@@ -196,7 +241,12 @@ void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
 {
     if (hi2s->Instance == SPI2)
     {
-        GenerateTone(audio_buffer, AUDIO_BUFFER_SIZE / 2);
+        i2s_half_count++;
+
+        GenerateTone(
+            audio_buffer,
+            AUDIO_BUFFER_SIZE / 2
+        );
     }
 }
 
@@ -204,6 +254,8 @@ void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
 {
     if (hi2s->Instance == SPI2)
     {
+        i2s_full_count++;
+
         GenerateTone(
             &audio_buffer[AUDIO_BUFFER_SIZE / 2],
             AUDIO_BUFFER_SIZE / 2
