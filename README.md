@@ -66,14 +66,14 @@ USB MIDI Keyboard
 
 ### Phase 1 — Hardware bring-up
 
-* [ ] STM32F411 clock and basic firmware
+* [X] STM32F411 clock and basic firmware
 * [ ] Debug UART
 * [ ] USB MIDI input
 * [ ] MIDI message parser
-* [ ] PCM5102A connection
-* [ ] I2S output
-* [ ] Generate a test tone
-* [ ] Play the test tone through PCM5102A
+* [X] PCM5102A connection
+* [X] I2S output
+* [X] Generate a test tone
+* [X] Play the test tone through PCM5102A
 
 ### Phase 2 — Basic synthesizer
 
