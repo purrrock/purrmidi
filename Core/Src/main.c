@@ -25,7 +25,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <math.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -35,7 +35,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define AUDIO_SAMPLE_RATE 48000U
+#define TONE_FREQUENCY    440.0f
+#define AUDIO_BUFFER_SIZE 1024U
+#define AUDIO_AMPLITUDE   12000.0f
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -46,7 +49,8 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+static int16_t audio_buffer[AUDIO_BUFFER_SIZE];
+static float tone_phase = 0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -57,6 +61,29 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+static void GenerateTone(int16_t *buffer, uint32_t sample_count)
+{
+    const float phase_step =
+        2.0f * 3.14159265359f *
+        TONE_FREQUENCY /
+        (float)AUDIO_SAMPLE_RATE;
+
+    for (uint32_t i = 0; i < sample_count; i += 2)
+    {
+        int16_t sample = (int16_t)(
+            sinf(tone_phase) * AUDIO_AMPLITUDE
+        );
+
+        buffer[i]     = sample;  // Left
+        buffer[i + 1] = sample;  // Right
+
+        tone_phase += phase_step;
+
+        if (tone_phase >= 2.0f * 3.14159265359f)
+            tone_phase -= 2.0f * 3.14159265359f;
+    }
+}
 
 /* USER CODE END 0 */
 
@@ -93,6 +120,16 @@ int main(void)
   MX_I2S2_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+
+GenerateTone(audio_buffer, AUDIO_BUFFER_SIZE);
+
+if (HAL_I2S_Transmit_DMA(
+        &hi2s2,
+        (uint16_t *)audio_buffer,
+        AUDIO_BUFFER_SIZE) != HAL_OK)
+{
+    Error_Handler();
+}
 
   /* USER CODE END 2 */
 
@@ -158,6 +195,25 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
+{
+    if (hi2s->Instance == SPI2)
+    {
+        GenerateTone(audio_buffer, AUDIO_BUFFER_SIZE / 2);
+    }
+}
+
+void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
+{
+    if (hi2s->Instance == SPI2)
+    {
+        GenerateTone(
+            &audio_buffer[AUDIO_BUFFER_SIZE / 2],
+            AUDIO_BUFFER_SIZE / 2
+        );
+    }
+}
 
 /* USER CODE END 4 */
 
