@@ -116,32 +116,9 @@ static void USBH_UserProcess  (USBH_HandleTypeDef *phost, uint8_t id)
 
   switch(id)
   {
-case HOST_USER_SELECT_CONFIGURATION:
-{
-  char msg[128];
-
-  USB_DebugPrint("USB: configuration selected\r\n");
-
-  snprintf(msg, sizeof(msg),
-           "USB: VID=0x%04X PID=0x%04X\r\n",
-           phost->device.DevDesc.idVendor,
-           phost->device.DevDesc.idProduct);
-  USB_DebugPrint(msg);
-
-  snprintf(msg, sizeof(msg),
-           "USB: class=0x%02X subclass=0x%02X protocol=0x%02X\r\n",
-           phost->device.DevDesc.bDeviceClass,
-           phost->device.DevDesc.bDeviceSubClass,
-           phost->device.DevDesc.bDeviceProtocol);
-  USB_DebugPrint(msg);
-
-  snprintf(msg, sizeof(msg),
-           "USB: EP0=%u max packet\r\n",
-           phost->device.DevDesc.bMaxPacketSize);
-  USB_DebugPrint(msg);
-
-  break;
-}
+  case HOST_USER_SELECT_CONFIGURATION:
+    USB_DebugPrint("USB: configuration selected\r\n");
+    break;
 
   case HOST_USER_DISCONNECTION:
     USB_DebugPrint("USB: device disconnected\r\n");
@@ -153,10 +130,33 @@ case HOST_USER_SELECT_CONFIGURATION:
     Appli_state = APPLICATION_READY;
     break;
 
-case HOST_USER_CONNECTION:
-  USB_DebugPrint("USB: device connected\r\n");
-  Appli_state = APPLICATION_START;
-  break;
+  case HOST_USER_CONNECTION:
+  {
+    char msg[128];
+
+    USB_DebugPrint("USB: device connected\r\n");
+
+    snprintf(msg, sizeof(msg),
+             "USB: VID=0x%04X PID=0x%04X\r\n",
+             phost->device.DevDesc.idVendor,
+             phost->device.DevDesc.idProduct);
+    USB_DebugPrint(msg);
+
+    snprintf(msg, sizeof(msg),
+             "USB: class=0x%02X subclass=0x%02X protocol=0x%02X\r\n",
+             phost->device.DevDesc.bDeviceClass,
+             phost->device.DevDesc.bDeviceSubClass,
+             phost->device.DevDesc.bDeviceProtocol);
+    USB_DebugPrint(msg);
+
+    snprintf(msg, sizeof(msg),
+             "USB: EP0=%u max packet\r\n",
+             phost->device.DevDesc.bMaxPacketSize);
+    USB_DebugPrint(msg);
+
+    Appli_state = APPLICATION_START;
+    break;
+  }
 
   default:
     break;
