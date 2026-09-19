@@ -1,9 +1,8 @@
 /* USER CODE BEGIN Header */
 /**
   ******************************************************************************
-  * @file    usb_otg.h
-  * @brief   This file contains all the function prototypes for
-  *          the usb_otg.c file
+  * @file           : usbh_platform.h
+  * @brief          : Header for usbh_platform.c file.
   ******************************************************************************
   * @attention
   *
@@ -17,36 +16,27 @@
   ******************************************************************************
   */
 /* USER CODE END Header */
+
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef __USB_OTG_H__
-#define __USB_OTG_H__
+#ifndef __USBH_PLATFORM_H__
+#define __USBH_PLATFORM_H__
 
 #ifdef __cplusplus
-extern "C" {
+ extern "C" {
 #endif
 
 /* Includes ------------------------------------------------------------------*/
-#include "main.h"
+#include "usb_host.h"
 
-/* USER CODE BEGIN Includes */
+/* USER CODE BEGIN INCLUDE */
 
-/* USER CODE END Includes */
+/* USER CODE END INCLUDE */
 
-extern HCD_HandleTypeDef hhcd_USB_OTG_FS;
-
-/* USER CODE BEGIN Private defines */
-
-/* USER CODE END Private defines */
-
-void MX_USB_OTG_FS_HCD_Init(void);
-
-/* USER CODE BEGIN Prototypes */
-
-/* USER CODE END Prototypes */
+void MX_DriverVbusFS(uint8_t state);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* __USB_OTG_H__ */
+#endif /* __USBH_PLATFORM_H__ */
 

@@ -21,7 +21,7 @@
 #include "dma.h"
 #include "i2s.h"
 #include "usart.h"
-#include "usb_otg.h"
+#include "usb_host.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -60,6 +60,8 @@ static volatile uint32_t i2s_full_count = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+void MX_USB_HOST_Process(void);
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -132,7 +134,7 @@ int main(void)
   MX_DMA_Init();
   MX_I2S2_Init();
   MX_USART2_UART_Init();
-  MX_USB_OTG_FS_HCD_Init();
+  MX_USB_HOST_Init();
   /* USER CODE BEGIN 2 */
 
 DebugPrint("\r\n=== PurrMidi I2S test ===\r\n");
@@ -168,6 +170,7 @@ DebugPrint("I2S DMA started\r\n");
   while (1)
   {
     /* USER CODE END WHILE */
+    MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
     HAL_Delay(1000);
