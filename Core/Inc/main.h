@@ -59,10 +59,6 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define Debug_LED_Pin GPIO_PIN_13
 #define Debug_LED_GPIO_Port GPIOC
-#define USB_VBUS_Pin GPIO_PIN_9
-#define USB_VBUS_GPIO_Port GPIOA
-#define USB_ID_Pin GPIO_PIN_10
-#define USB_ID_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 
