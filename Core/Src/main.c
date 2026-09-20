@@ -18,17 +18,14 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "dma.h"
-#include "i2s.h"
 #include "usart.h"
 #include "usb_host.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <math.h>
 #include <stdio.h>
-#include <string.h>
+#include "usbh_midi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -38,10 +35,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define AUDIO_SAMPLE_RATE 48000U
-#define TONE_FREQUENCY    440.0f
-#define AUDIO_BUFFER_SIZE 1024U
-#define AUDIO_AMPLITUDE   12000.0f
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -52,10 +46,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-static int16_t audio_buffer[AUDIO_BUFFER_SIZE];
-static float tone_phase = 0.0f;
-static volatile uint32_t i2s_half_count = 0;
-static volatile uint32_t i2s_full_count = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -68,37 +59,15 @@ void MX_USB_HOST_Process(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-static void DebugPrint(const char *text)
-{
-    HAL_UART_Transmit(
-        &huart2,
-        (uint8_t *)text,
-        (uint16_t)strlen(text),
-        HAL_MAX_DELAY
-    );
+// Перенаправление printf в UART2
+int _write(int file, char *ptr, int len) {
+    HAL_UART_Transmit(&huart2, (uint8_t*)ptr, len, HAL_MAX_DELAY);
+    return len;
 }
-static void GenerateTone(int16_t *buffer, uint32_t sample_count)
-{
-    const float phase_step =
-        2.0f * 3.14159265359f *
-        TONE_FREQUENCY /
-        (float)AUDIO_SAMPLE_RATE;
 
-    for (uint32_t i = 0; i < sample_count; i += 2)
-    {
-        int16_t sample = (int16_t)(
-            sinf(tone_phase) * AUDIO_AMPLITUDE
-        );
-
-        buffer[i]     = sample;  // Left
-        buffer[i + 1] = sample;  // Right
-
-        tone_phase += phase_step;
-
-        if (tone_phase >= 2.0f * 3.14159265359f)
-            tone_phase -= 2.0f * 3.14159265359f;
-    }
-}
+// Указываем компилятору, что эти переменные определены в usb_host.c
+extern ApplicationTypeDef Appli_state;
+extern USBH_HandleTypeDef hUsbHostFS;
 
 /* USER CODE END 0 */
 
@@ -131,34 +100,14 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DMA_Init();
-  MX_I2S2_Init();
   MX_USART2_UART_Init();
   MX_USB_HOST_Init();
   /* USER CODE BEGIN 2 */
-
-DebugPrint("\r\n=== PurrMidi I2S test ===\r\n");
-DebugPrint("STM32 started\r\n");
-GenerateTone(audio_buffer, AUDIO_BUFFER_SIZE);
-
-HAL_StatusTypeDef status = HAL_I2S_Transmit_DMA(
-    &hi2s2,
-    (uint16_t *)audio_buffer,
-    AUDIO_BUFFER_SIZE
-);
-
-if (status == HAL_OK)
-{
-    DebugPrint("HAL_I2S_Transmit_DMA: OK\r\n");
-}
-else
-{
-    DebugPrint("HAL_I2S_Transmit_DMA: ERROR\r\n");
-    Error_Handler();
-}
-
-DebugPrint("I2S DMA started\r\n");
-
+  	printf("\r\n=======================================\r\n");
+    printf("STM32 USB Host Mouse Init...\r\n");
+    printf("USART is working perfectly!\r\n");
+    printf("Waiting for USB device to be attached...\r\n");
+    printf("=======================================\r\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -169,7 +118,41 @@ DebugPrint("I2S DMA started\r\n");
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
-   }
+ if (Appli_state == APPLICATION_READY) {
+        
+        // Массив для хранения 4 байт USB MIDI пакета
+        uint8_t midi_rx_buffer[4]; 
+        
+        // Функция USBH_MIDI_Receive читает данные из конечной точки USB.
+        // Точное название функции зависит от конкретного скачанного драйвера,
+        // обычно это USBH_MIDI_Receive или USBH_MIDI_Read.
+        if (USBH_MIDI_Receive(&hUsbHostFS, midi_rx_buffer, 4) == USBH_OK) {
+            
+            // Парсинг 4-байтового пакета:
+            // Байт 0: Cable Number (младшие 4 бита) + Code Index Number (старшие 4 бита)
+            // Байт 1: MIDI Статус (например, 0x90 для Note On)
+            // Байт 2: Данные 1 (Номер ноты)
+            // Байт 3: Данные 2 (Velocity - сила нажатия)
+            
+            uint8_t cin = midi_rx_buffer[0] & 0x0F;
+            uint8_t note = midi_rx_buffer[2];
+            uint8_t velocity = midi_rx_buffer[3];
+
+            // Code Index Number (CIN) 0x09 означает Note On
+            if (cin == 0x09 && velocity > 0) {
+                printf("[MIDI] Note ON  | Note: %3d | Velocity: %3d\r\n", note, velocity);
+            } 
+            // CIN 0x08 означает Note Off (или Note On с Velocity = 0 на некоторых клавиатурах)
+            else if (cin == 0x08 || (cin == 0x09 && velocity == 0)) {
+                printf("[MIDI] Note OFF | Note: %3d\r\n", note);
+            }
+            // CIN 0x0B означает Control Change (крутилки, колесо питча, педаль)
+            else if (cin == 0x0B) {
+                printf("[MIDI] CC       | Ctrl: %3d | Value:  %3d\r\n", note, velocity);
+            }
+        }
+    }
+  }
   /* USER CODE END 3 */
 }
 
@@ -185,19 +168,20 @@ void SystemClock_Config(void)
   /** Configure the main internal regulator output voltage
   */
   __HAL_RCC_PWR_CLK_ENABLE();
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLM = 25;
-  RCC_OscInitStruct.PLL.PLLN = 192;
+  RCC_OscInitStruct.PLL.PLLM = 4;
+  RCC_OscInitStruct.PLL.PLLN = 72;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 4;
+  RCC_OscInitStruct.PLL.PLLQ = 3;
+  RCC_OscInitStruct.PLL.PLLR = 2;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -212,39 +196,13 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
 }
 
 /* USER CODE BEGIN 4 */
-
-void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
-{
-    if (hi2s->Instance == SPI2)
-    {
-        i2s_half_count++;
-
-        GenerateTone(
-            audio_buffer,
-            AUDIO_BUFFER_SIZE / 2
-        );
-    }
-}
-
-void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
-{
-    if (hi2s->Instance == SPI2)
-    {
-        i2s_full_count++;
-
-        GenerateTone(
-            &audio_buffer[AUDIO_BUFFER_SIZE / 2],
-            AUDIO_BUFFER_SIZE / 2
-        );
-    }
-}
 
 /* USER CODE END 4 */
 

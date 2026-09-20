@@ -25,9 +25,8 @@
 #include "usbh_hid.h"
 
 /* USER CODE BEGIN Includes */
-#include "usart.h"
+#include "usbh_midi.h"
 #include <stdio.h>
-#include <string.h>
 /* USER CODE END Includes */
 
 /* USER CODE BEGIN PV */
@@ -48,28 +47,7 @@ ApplicationTypeDef Appli_state = APPLICATION_IDLE;
  * -- Insert your variables declaration here --
  */
 /* USER CODE BEGIN 0 */
-static void USB_DebugPrint(const char *text)
-{
-  HAL_UART_Transmit(
-      &huart2,
-      (uint8_t *)text,
-      (uint16_t)strlen(text),
-      HAL_MAX_DELAY
-  );
-}
 
-static void USB_DebugState(USBH_HandleTypeDef *phost)
-{
-  char msg[128];
-
-  snprintf(msg, sizeof(msg),
-           "USB state=%d enum=%d speed=%d\r\n",
-           phost->gState,
-           phost->EnumState,
-           phost->device.speed);
-
-  USB_DebugPrint(msg);
-}
 /* USER CODE END 0 */
 
 /*
@@ -99,7 +77,8 @@ void MX_USB_HOST_Init(void)
   {
     Error_Handler();
   }
-  if (USBH_RegisterClass(&hUsbHostFS, USBH_HID_CLASS) != USBH_OK)
+// ЗАМЕНИЛ сгенерированный класс на USBH_MIDI_CLASS
+  if (USBH_RegisterClass(&hUsbHostFS, USBH_MIDI_CLASS) != USBH_OK)
   {
     Error_Handler();
   }
@@ -126,30 +105,33 @@ void MX_USB_HOST_Process(void)
 static void USBH_UserProcess  (USBH_HandleTypeDef *phost, uint8_t id)
 {
   /* USER CODE BEGIN CALL_BACK_1 */
-
-  switch(id)
+switch(id)
   {
   case HOST_USER_SELECT_CONFIGURATION:
-    USB_DebugPrint("USB: configuration selected\r\n");
     break;
 
-case HOST_USER_DISCONNECTION:
-  USB_DebugPrint("USB: device disconnected\r\n");
-  USB_DebugState(phost);
-  Appli_state = APPLICATION_DISCONNECT;
-  break;
+  case HOST_USER_DISCONNECTION:
+    Appli_state = APPLICATION_DISCONNECT;
+    printf("[USB] Device Disconnected!\r\n");
+    break;
 
   case HOST_USER_CLASS_ACTIVE:
-    USB_DebugPrint("USB: class active\r\n");
     Appli_state = APPLICATION_READY;
+    printf("[USB] MIDI Device Connected and Ready!\r\n");
+    
+    // Извлекаем и выводим VID и PID из дескриптора устройства
+    printf("[USB] VID: 0x%04X | PID: 0x%04X\r\n", 
+           phost->device.DevDesc.idVendor, 
+           phost->device.DevDesc.idProduct);
     break;
 
   case HOST_USER_CONNECTION:
-  USB_DebugPrint("USB: device connected\r\n");
-  USB_DebugState(phost);
-  Appli_state = APPLICATION_START;
-  break;
+    Appli_state = APPLICATION_START;
+    printf("[USB] Device Attached. Enumerating...\r\n");
+    break;
 
+  default:
+    break;
   }
   /* USER CODE END CALL_BACK_1 */
 }
