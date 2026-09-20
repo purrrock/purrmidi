@@ -25,6 +25,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+// #include "usbh_hid.h"
 #include "usbh_midi.h"
 /* USER CODE END Includes */
 
@@ -65,10 +66,23 @@ int _write(int file, char *ptr, int len) {
     return len;
 }
 
-// Указываем компилятору, что эти переменные определены в usb_host.c
 extern ApplicationTypeDef Appli_state;
 extern USBH_HandleTypeDef hUsbHostFS;
 
+uint8_t midi_rx_buffer[4]; 
+
+void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost) {
+    uint8_t cin = midi_rx_buffer[0] & 0x0F;
+    uint8_t note = midi_rx_buffer[2];
+    uint8_t velocity = midi_rx_buffer[3];
+
+    if (cin == 0x09 && velocity > 0) {
+        printf("[MIDI] Note ON  | Note: %3d | Velocity: %3d\r\n", note, velocity);
+    } else if (cin == 0x08 || (cin == 0x09 && velocity == 0)) {
+        printf("[MIDI] Note OFF | Note: %3d\r\n", note);
+    }
+    USBH_MIDI_Receive(&hUsbHostFS, midi_rx_buffer, 4);
+}
 /* USER CODE END 0 */
 
 /**
@@ -118,39 +132,19 @@ int main(void)
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
- if (Appli_state == APPLICATION_READY) {
-        
-        // Массив для хранения 4 байт USB MIDI пакета
-        uint8_t midi_rx_buffer[4]; 
-        
-        // Функция USBH_MIDI_Receive читает данные из конечной точки USB.
-        // Точное название функции зависит от конкретного скачанного драйвера,
-        // обычно это USBH_MIDI_Receive или USBH_MIDI_Read.
-        if (USBH_MIDI_Receive(&hUsbHostFS, midi_rx_buffer, 4) == USBH_OK) {
-            
-            // Парсинг 4-байтового пакета:
-            // Байт 0: Cable Number (младшие 4 бита) + Code Index Number (старшие 4 бита)
-            // Байт 1: MIDI Статус (например, 0x90 для Note On)
-            // Байт 2: Данные 1 (Номер ноты)
-            // Байт 3: Данные 2 (Velocity - сила нажатия)
-            
-            uint8_t cin = midi_rx_buffer[0] & 0x0F;
-            uint8_t note = midi_rx_buffer[2];
-            uint8_t velocity = midi_rx_buffer[3];
+    // Переносим объявление сюда, чтобы переменная была видна и в if, и в else
+    static uint8_t is_receiving = 0; 
 
-            // Code Index Number (CIN) 0x09 означает Note On
-            if (cin == 0x09 && velocity > 0) {
-                printf("[MIDI] Note ON  | Note: %3d | Velocity: %3d\r\n", note, velocity);
-            } 
-            // CIN 0x08 означает Note Off (или Note On с Velocity = 0 на некоторых клавиатурах)
-            else if (cin == 0x08 || (cin == 0x09 && velocity == 0)) {
-                printf("[MIDI] Note OFF | Note: %3d\r\n", note);
-            }
-            // CIN 0x0B означает Control Change (крутилки, колесо питча, педаль)
-            else if (cin == 0x0B) {
-                printf("[MIDI] CC       | Ctrl: %3d | Value:  %3d\r\n", note, velocity);
-            }
+    if (Appli_state == APPLICATION_READY) {
+        
+        if (!is_receiving) {
+            // Стартуем асинхронное чтение один раз
+            USBH_MIDI_Receive(&hUsbHostFS, midi_rx_buffer, 4);
+            is_receiving = 1;
         }
+    } else {
+        // Сбрасываем флаг, если устройство отключили
+        is_receiving = 0; 
     }
   }
   /* USER CODE END 3 */

@@ -22,7 +22,11 @@
 
 #include "usb_host.h"
 #include "usbh_core.h"
+#include "usbh_audio.h"
+#include "usbh_cdc.h"
+#include "usbh_msc.h"
 #include "usbh_hid.h"
+#include "usbh_mtp.h"
 
 /* USER CODE BEGIN Includes */
 #include "usbh_midi.h"
@@ -69,7 +73,9 @@ static void USBH_UserProcess(USBH_HandleTypeDef *phost, uint8_t id);
 void MX_USB_HOST_Init(void)
 {
   /* USER CODE BEGIN USB_HOST_Init_PreTreatment */
-
+if (USBH_RegisterClass(&hUsbHostFS, USBH_MIDI_CLASS) != USBH_OK) {
+    Error_Handler();
+}
   /* USER CODE END USB_HOST_Init_PreTreatment */
 
   /* Init host Library, add supported class and start the library. */
@@ -77,8 +83,23 @@ void MX_USB_HOST_Init(void)
   {
     Error_Handler();
   }
-// ЗАМЕНИЛ сгенерированный класс на USBH_MIDI_CLASS
-  if (USBH_RegisterClass(&hUsbHostFS, USBH_MIDI_CLASS) != USBH_OK)
+  if (USBH_RegisterClass(&hUsbHostFS, USBH_AUDIO_CLASS) != USBH_OK)
+  {
+    Error_Handler();
+  }
+  if (USBH_RegisterClass(&hUsbHostFS, USBH_CDC_CLASS) != USBH_OK)
+  {
+    Error_Handler();
+  }
+  if (USBH_RegisterClass(&hUsbHostFS, USBH_MSC_CLASS) != USBH_OK)
+  {
+    Error_Handler();
+  }
+  if (USBH_RegisterClass(&hUsbHostFS, USBH_HID_CLASS) != USBH_OK)
+  {
+    Error_Handler();
+  }
+  if (USBH_RegisterClass(&hUsbHostFS, USBH_MTP_CLASS) != USBH_OK)
   {
     Error_Handler();
   }
@@ -108,26 +129,28 @@ static void USBH_UserProcess  (USBH_HandleTypeDef *phost, uint8_t id)
 switch(id)
   {
   case HOST_USER_SELECT_CONFIGURATION:
+    // Срабатывает для ЛЮБОГО распознанного USB-устройства после энумерации
+    printf("[USB] Enumeration done. VID: 0x%04X | PID: 0x%04X\r\n", 
+           phost->device.DevDesc.idVendor, 
+           phost->device.DevDesc.idProduct);
     break;
 
   case HOST_USER_DISCONNECTION:
     Appli_state = APPLICATION_DISCONNECT;
     printf("[USB] Device Disconnected!\r\n");
+        printf("VID: 0x%04X | PID: 0x%04X\r\n", phost->device.DevDesc.idVendor, phost->device.DevDesc.idProduct);
     break;
 
   case HOST_USER_CLASS_ACTIVE:
     Appli_state = APPLICATION_READY;
-    printf("[USB] MIDI Device Connected and Ready!\r\n");
-    
-    // Извлекаем и выводим VID и PID из дескриптора устройства
-    printf("[USB] VID: 0x%04X | PID: 0x%04X\r\n", 
-           phost->device.DevDesc.idVendor, 
-           phost->device.DevDesc.idProduct);
+    printf("[USB] Device Connected and Ready!\r\n");
+            printf("VID: 0x%04X | PID: 0x%04X\r\n", phost->device.DevDesc.idVendor, phost->device.DevDesc.idProduct);
     break;
 
   case HOST_USER_CONNECTION:
     Appli_state = APPLICATION_START;
     printf("[USB] Device Attached. Enumerating...\r\n");
+            printf("VID: 0x%04X | PID: 0x%04X\r\n", phost->device.DevDesc.idVendor, phost->device.DevDesc.idProduct);
     break;
 
   default:
