@@ -104,55 +104,51 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
 
 		USBH_memset(MIDI_Handle, 0, sizeof(MIDI_HandleTypeDef)); // clear memory for MIDI_Handle 		
 
-		if(phost->device.CfgDesc.Itf_Desc[phost->device.current_interface].Ep_Desc[0].bEndpointAddress & 0x80)
-		{
-			MIDI_Handle->InEp = (phost->device.CfgDesc.Itf_Desc[phost->device.current_interface].Ep_Desc[0].bEndpointAddress);
-			MIDI_Handle->InEpSize  = phost->device.CfgDesc.Itf_Desc[phost->device.current_interface].Ep_Desc[0].wMaxPacketSize;
-		}
-		else
-		{
-			MIDI_Handle->OutEp = (phost->device.CfgDesc.Itf_Desc[phost->device.current_interface].Ep_Desc[0].bEndpointAddress);
-			MIDI_Handle->OutEpSize  = phost->device.CfgDesc.Itf_Desc[phost->device.current_interface].Ep_Desc[0].wMaxPacketSize;
-		}
+		// Находим реальное количество конечных точек в MIDI интерфейсе
+// Сбрасываем адреса
+MIDI_Handle->InEp = 0;
+MIDI_Handle->OutEp = 0;
 
-		if(phost->device.CfgDesc.Itf_Desc[phost->device.current_interface].Ep_Desc[1].bEndpointAddress & 0x80)
-		{
-			MIDI_Handle->InEp = (phost->device.CfgDesc.Itf_Desc[phost->device.current_interface].Ep_Desc[1].bEndpointAddress);
-			MIDI_Handle->InEpSize  = phost->device.CfgDesc.Itf_Desc[phost->device.current_interface].Ep_Desc[1].wMaxPacketSize;
-		}
-		else
-		{
-			MIDI_Handle->OutEp = (phost->device.CfgDesc.Itf_Desc[phost->device.current_interface].Ep_Desc[1].bEndpointAddress);
-			MIDI_Handle->OutEpSize  = phost->device.CfgDesc.Itf_Desc[phost->device.current_interface].Ep_Desc[1].wMaxPacketSize;
-		}
+// Глобальный скан: перебираем все интерфейсы и все конечные точки устройства
+for (uint8_t iface = 0; iface < phost->device.CfgDesc.bNumInterfaces; iface++) {
+    uint8_t num_ep = phost->device.CfgDesc.Itf_Desc[iface].bNumEndpoints;
+    
+    for (uint8_t i = 0; i < num_ep; i++) {
+        uint8_t ep_addr = phost->device.CfgDesc.Itf_Desc[iface].Ep_Desc[i].bEndpointAddress;
+        uint16_t ep_size = phost->device.CfgDesc.Itf_Desc[iface].Ep_Desc[i].wMaxPacketSize;
+		// Принудительное ограничение для USB Full Speed (макс. 64 байта для Bulk)
+		if (ep_size > 64) { ep_size = 64; }
+		uint8_t ep_type = phost->device.CfgDesc.Itf_Desc[iface].Ep_Desc[i].bmAttributes & 0x03U;
 
-		MIDI_Handle->OutPipe = USBH_AllocPipe(phost, MIDI_Handle->OutEp);
-		MIDI_Handle->InPipe = USBH_AllocPipe(phost, MIDI_Handle->InEp);
+        // Нас интересуют только Bulk-каналы (стандарт для USB MIDI)
+        if (ep_type == USB_EP_TYPE_BULK) {
+            if (ep_addr & 0x80) { // Бит 7 установлен = направление IN (в микроконтроллер)
+                MIDI_Handle->InEp = ep_addr;
+                MIDI_Handle->InEpSize = ep_size;
+            } else { // Бит 7 сброшен = направление OUT (из микроконтроллера)
+                MIDI_Handle->OutEp = ep_addr;
+                MIDI_Handle->OutEpSize = ep_size;
+            }
+        }
+    }
+}
 
+// Выделяем и открываем каналы, если они были найдены
+if (MIDI_Handle->OutEp != 0) {
+    MIDI_Handle->OutPipe = USBH_AllocPipe(phost, MIDI_Handle->OutEp);
+    USBH_OpenPipe(phost, MIDI_Handle->OutPipe, MIDI_Handle->OutEp, phost->device.address, phost->device.speed, USB_EP_TYPE_BULK, MIDI_Handle->OutEpSize);
+    USBH_LL_SetToggle(phost, MIDI_Handle->OutPipe, 0);
+}
 
-		/* Open the new channels */
-		USBH_OpenPipe  (phost,
-				MIDI_Handle->OutPipe,
-				MIDI_Handle->OutEp,
-				phost->device.address,
-				phost->device.speed,
-				USB_EP_TYPE_BULK,
-				MIDI_Handle->OutEpSize);
+if (MIDI_Handle->InEp != 0) {
+    MIDI_Handle->InPipe = USBH_AllocPipe(phost, MIDI_Handle->InEp);
+    USBH_OpenPipe(phost, MIDI_Handle->InPipe, MIDI_Handle->InEp, phost->device.address, phost->device.speed, USB_EP_TYPE_BULK, MIDI_Handle->InEpSize);
+    USBH_LL_SetToggle(phost, MIDI_Handle->InPipe, 0);
+}
 
-		USBH_OpenPipe  (phost,
-				MIDI_Handle->InPipe,
-				MIDI_Handle->InEp,
-				phost->device.address,
-				phost->device.speed,
-				USB_EP_TYPE_BULK,
-				MIDI_Handle->InEpSize);
-
-		//USB_MIDI_ChangeConnectionState(1);
-		MIDI_Handle->state = MIDI_IDLE_STATE;
-
-
-		USBH_LL_SetToggle  (phost, MIDI_Handle->InPipe,0);
-		USBH_LL_SetToggle  (phost, MIDI_Handle->OutPipe,0);
+MIDI_Handle->state = MIDI_IDLE_STATE;
+status = USBH_OK;
+// конец изменения
 		status = USBH_OK;
 	}
 	return status;
@@ -501,6 +497,11 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
 			osMessagePut ( phost->os_event, USBH_CLASS_EVENT, 0);
 #endif
 		}
+		else if (URB_Status == USBH_URB_NOTREADY) 
+{
+    // Если клавиатура ответила NAK, не зависаем, а запускаем чтение заново
+    MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
+}
 		break;
 
 	default:

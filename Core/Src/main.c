@@ -69,19 +69,34 @@ int _write(int file, char *ptr, int len) {
 extern ApplicationTypeDef Appli_state;
 extern USBH_HandleTypeDef hUsbHostFS;
 
-uint8_t midi_rx_buffer[4]; 
+uint8_t midi_rx_buffer[64]; 
 
 void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost) {
-    uint8_t cin = midi_rx_buffer[0] & 0x0F;
-    uint8_t note = midi_rx_buffer[2];
-    uint8_t velocity = midi_rx_buffer[3];
+    // Узнаем, сколько байт реально прислала клавиатура (может быть 4, 8, 12... до 64)
+    uint16_t length = USBH_MIDI_GetLastReceivedDataSize(phost);
 
-    if (cin == 0x09 && velocity > 0) {
-        printf("[MIDI] Note ON  | Note: %3d | Velocity: %3d\r\n", note, velocity);
-    } else if (cin == 0x08 || (cin == 0x09 && velocity == 0)) {
-        printf("[MIDI] Note OFF | Note: %3d\r\n", note);
+    // Перебираем пакеты шагом по 4 байта
+    for (uint16_t i = 0; i < length; i += 4) {
+        uint8_t cin = midi_rx_buffer[i] & 0x0F;
+        
+        // Пропускаем пустые пакеты (padding), которыми устройство может добивать буфер
+        if (cin == 0x00) {
+            continue; 
+        }
+
+        // Читаем данные со смещением i
+        uint8_t note = midi_rx_buffer[i + 2];
+        uint8_t velocity = midi_rx_buffer[i + 3];
+
+        if (cin == 0x09 && velocity > 0) {
+            printf("[MIDI] Note ON  | Note: %3d | Velocity: %3d\r\n", note, velocity);
+        } else if (cin == 0x08 || (cin == 0x09 && velocity == 0)) {
+            printf("[MIDI] Note OFF | Note: %3d\r\n", note);
+        }
     }
-    USBH_MIDI_Receive(&hUsbHostFS, midi_rx_buffer, 4);
+    
+    // Перезапускаем чтение новых 64 байт
+    USBH_MIDI_Receive(&hUsbHostFS, midi_rx_buffer, 64);
 }
 /* USER CODE END 0 */
 
@@ -139,7 +154,7 @@ int main(void)
         
         if (!is_receiving) {
             // Стартуем асинхронное чтение один раз
-            USBH_MIDI_Receive(&hUsbHostFS, midi_rx_buffer, 4);
+            USBH_MIDI_Receive(&hUsbHostFS, midi_rx_buffer, 64);
             is_receiving = 1;
         }
     } else {
