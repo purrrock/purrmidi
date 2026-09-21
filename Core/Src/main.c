@@ -60,7 +60,7 @@ static volatile uint32_t midi_queue_overruns = 0;
 static volatile uint32_t midi_on_received = 0;
 static volatile uint32_t midi_off_received = 0;
 
-#define MIDI_EVENT_QUEUE_SIZE 32
+#define MIDI_EVENT_QUEUE_SIZE 256
 typedef struct
 {
     uint8_t status;
@@ -104,12 +104,12 @@ void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
     uint16_t length = USBH_MIDI_GetLastReceivedDataSize(phost);
     
     // --- НИЗКОУРОВНЕВАЯ ДИАГНОСТИКА ---
-    printf("[RAW RX, len=%d]: ", length);
-    for (uint16_t i = 0; i < length; i++)
-    {
-        printf("%02X ", midi_rx_buffer[i]);
-    }
-    printf("\r\n");
+    // printf("[RAW RX, len=%d]: ", length);
+    // for (uint16_t i = 0; i < length; i++)
+    // {
+    //    printf("%02X ", midi_rx_buffer[i]);
+    // }
+    // printf("\r\n");
     // ----------------------------------
 
     for (uint16_t i = 0; i + 3 < length; i += 4)
