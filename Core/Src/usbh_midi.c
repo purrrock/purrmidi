@@ -476,27 +476,18 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
 
 
 		/*Check the status done for reception*/
-		if(URB_Status == USBH_URB_DONE )
-		{
+if (URB_Status == USBH_URB_DONE)
+{
+    length = USBH_LL_GetLastXferSize(phost, MIDI_Handle->InPipe);
 
+    MIDI_Handle->data_rx_state = MIDI_IDLE;
 
-			length = USBH_LL_GetLastXferSize(phost, MIDI_Handle->InPipe);
+    USBH_MIDI_ReceiveCallback(phost);
 
-			if(((MIDI_Handle->RxDataLength - length) > 0) && (length > MIDI_Handle->InEpSize))
-			{
-				MIDI_Handle->RxDataLength -= length ;
-				MIDI_Handle->pRxData += length;
-				MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
-			}
-			else
-			{
-				MIDI_Handle->data_rx_state = MIDI_IDLE;
-				USBH_MIDI_ReceiveCallback(phost);
-			}
 #if (USBH_USE_OS == 1)
-			osMessagePut ( phost->os_event, USBH_CLASS_EVENT, 0);
+    osMessagePut(phost->os_event, USBH_CLASS_EVENT, 0);
 #endif
-		}
+}
 		else if (URB_Status == USBH_URB_NOTREADY) 
 {
     // Если клавиатура ответила NAK, не зависаем, а запускаем чтение заново

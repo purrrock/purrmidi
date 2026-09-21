@@ -48,6 +48,19 @@
 
 /* USER CODE BEGIN PV */
 
+#define MIDI_EVENT_QUEUE_SIZE 32
+typedef struct
+{
+    uint8_t status;
+    uint8_t data1;
+    uint8_t data2;
+} MIDI_Event_t;
+
+static volatile MIDI_Event_t midi_event_queue[MIDI_EVENT_QUEUE_SIZE];
+static volatile uint8_t midi_queue_head = 0;
+static volatile uint8_t midi_queue_tail = 0;
+static volatile uint32_t midi_queue_overruns = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -71,33 +84,61 @@ extern USBH_HandleTypeDef hUsbHostFS;
 
 uint8_t midi_rx_buffer[64]; 
 
-void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost) {
-    // Узнаем, сколько байт реально прислала клавиатура (может быть 4, 8, 12... до 64)
+void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
+{
     uint16_t length = USBH_MIDI_GetLastReceivedDataSize(phost);
-
-    // Перебираем пакеты шагом по 4 байта
-    for (uint16_t i = 0; i < length; i += 4) {
+    for (uint16_t i = 0; i + 3 < length; i += 4)
+    {
         uint8_t cin = midi_rx_buffer[i] & 0x0F;
-        
-        // Пропускаем пустые пакеты (padding), которыми устройство может добивать буфер
-        if (cin == 0x00) {
-            continue; 
+        if (cin == 0x00)
+        {
+            continue;
         }
-
-        // Читаем данные со смещением i
-        uint8_t note = midi_rx_buffer[i + 2];
-        uint8_t velocity = midi_rx_buffer[i + 3];
-
-        if (cin == 0x09 && velocity > 0) {
-            printf("[MIDI] Note ON  | Note: %3d | Velocity: %3d\r\n", note, velocity);
-        } else if (cin == 0x08 || (cin == 0x09 && velocity == 0)) {
-            printf("[MIDI] Note OFF | Note: %3d\r\n", note);
-        }
+        uint8_t status   = midi_rx_buffer[i + 1];
+        uint8_t data1    = midi_rx_buffer[i + 2];
+        uint8_t data2    = midi_rx_buffer[i + 3];
+        MIDI_QueueEvent(status, data1, data2);
     }
-    
-    // Перезапускаем чтение новых 64 байт
-    USBH_MIDI_Receive(&hUsbHostFS, midi_rx_buffer, 64);
+    /*
+     * Очень важно:
+     * снова заказать USB-приём сразу после обработки буфера.
+     */
+    USBH_MIDI_Receive(phost, midi_rx_buffer, sizeof(midi_rx_buffer));
 }
+
+// функция помещения события в очередь
+static void MIDI_QueueEvent(uint8_t status, uint8_t data1, uint8_t data2)
+{
+    uint8_t next = (uint8_t)((midi_queue_head + 1) % MIDI_EVENT_QUEUE_SIZE);
+
+    if (next == midi_queue_tail)
+    {
+        midi_queue_overruns++;
+        return;
+    }
+
+    midi_event_queue[midi_queue_head].status = status;
+    midi_event_queue[midi_queue_head].data1 = data1;
+    midi_event_queue[midi_queue_head].data2 = data2;
+
+    midi_queue_head = next;
+}
+// и функция извлечения:
+static uint8_t MIDI_QueueGet(MIDI_Event_t *event)
+{
+    if (midi_queue_tail == midi_queue_head)
+    {
+        return 0;
+    }
+
+    *event = midi_event_queue[midi_queue_tail];
+
+    midi_queue_tail =
+        (uint8_t)((midi_queue_tail + 1) % MIDI_EVENT_QUEUE_SIZE);
+
+    return 1;
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -147,20 +188,45 @@ int main(void)
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
-    // Переносим объявление сюда, чтобы переменная была видна и в if, и в else
-    static uint8_t is_receiving = 0; 
+MIDI_Event_t event;
 
-    if (Appli_state == APPLICATION_READY) {
-        
-        if (!is_receiving) {
-            // Стартуем асинхронное чтение один раз
-            USBH_MIDI_Receive(&hUsbHostFS, midi_rx_buffer, 64);
-            is_receiving = 1;
+while (MIDI_QueueGet(&event))
+{
+    uint8_t command = event.status & 0xF0;
+
+    if (command == 0x90)
+    {
+        if (event.data2 > 0)
+        {
+            printf("[MIDI] Note ON  | Note: %3d | Velocity: %3d\r\n",
+                   event.data1,
+                   event.data2);
         }
-    } else {
-        // Сбрасываем флаг, если устройство отключили
-        is_receiving = 0; 
+        else
+        {
+            printf("[MIDI] Note OFF | Note: %3d\r\n",
+                   event.data1);
+        }
     }
+    else if (command == 0x80)
+    {
+        printf("[MIDI] Note OFF | Note: %3d\r\n",
+               event.data1);
+    }
+}
+static ApplicationTypeDef previous_state = APPLICATION_IDLE;
+
+if (Appli_state != previous_state)
+{
+    if (Appli_state == APPLICATION_READY)
+    {
+        USBH_MIDI_Receive(&hUsbHostFS,
+                          midi_rx_buffer,
+                          sizeof(midi_rx_buffer));
+    }
+
+    previous_state = Appli_state;
+}
   }
   /* USER CODE END 3 */
 }
