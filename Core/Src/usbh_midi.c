@@ -455,10 +455,12 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
         }
 		else if (URB_Status == USBH_URB_NOTREADY) 
         {
-            // ожидание SOF!
-            if (midi_sof_flag == 1)
+			// Независимый таймер вместо аппаратного флага SOF,
+            // который отключается при некоторых генерациях CubeMX
+            static uint32_t last_nak_time = 0;
+            if (HAL_GetTick() - last_nak_time >= 1)
             {
-                midi_sof_flag = 0;
+                last_nak_time = HAL_GetTick();
                 MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
             }
         }
