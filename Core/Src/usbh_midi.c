@@ -11,6 +11,7 @@
 
 /*------------------------------------------------------------------------------------------------------------------------------*/
 
+static volatile uint8_t midi_sof_flag = 0;
 
 /** @defgroup USBH_MIDI_CORE_Private_FunctionPrototypes
  * @{
@@ -263,6 +264,7 @@ static USBH_StatusTypeDef USBH_MIDI_Process (USBH_HandleTypeDef *phost)
   */
 static USBH_StatusTypeDef USBH_MIDI_SOFProcess (USBH_HandleTypeDef *phost)
 {
+  midi_sof_flag = 1;
   return USBH_OK;  
 }
   
@@ -426,57 +428,52 @@ static void MIDI_ProcessTransmission(USBH_HandleTypeDef *phost)
  *  @param  pdev: Selected device
  * @retval None
  */
-
 static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
 {
-	MIDI_HandleTypeDef *MIDI_Handle =  phost->pActiveClass->pData;
-	USBH_URBStateTypeDef URB_Status = USBH_URB_IDLE;
-	uint16_t length;
+    MIDI_HandleTypeDef *MIDI_Handle =  phost->pActiveClass->pData;
+    USBH_URBStateTypeDef URB_Status = USBH_URB_IDLE;
+    uint16_t length;
 
-	switch(MIDI_Handle->data_rx_state)
-	{
+    switch(MIDI_Handle->data_rx_state)
+    {
+    case MIDI_RECEIVE_DATA:
+        // Опрашиваем клавиатуру строго 1 раз в миллисекунду по аппаратному таймеру SOF
+        if (midi_sof_flag == 1)
+        {
+            midi_sof_flag = 0;
+            USBH_BulkReceiveData (phost,
+                    MIDI_Handle->pRxData,
+                    MIDI_Handle->InEpSize,
+                    MIDI_Handle->InPipe);
+            MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA_WAIT;
+        }
+        break;
 
-	case MIDI_RECEIVE_DATA:
+    case MIDI_RECEIVE_DATA_WAIT:
+        URB_Status = USBH_LL_GetURBState(phost, MIDI_Handle->InPipe);
 
-		USBH_BulkReceiveData (phost,
-				MIDI_Handle->pRxData,
-				MIDI_Handle->InEpSize,
-				MIDI_Handle->InPipe);
+        if (URB_Status == USBH_URB_DONE)
+        {
+            length = USBH_LL_GetLastXferSize(phost, MIDI_Handle->InPipe);
+            MIDI_Handle->data_rx_state = MIDI_IDLE;
+            USBH_MIDI_ReceiveCallback(phost);
+        }
+        else if (URB_Status == USBH_URB_NOTREADY) 
+        {
+            // Устройство ответило NAK (нет нот). 
+            // Сбрасываем статус, но новый запрос уйдет ТОЛЬКО в следующем кадре SOF
+            MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
+        }
+        else if (URB_Status == USBH_URB_ERROR || URB_Status == USBH_URB_STALL)
+        {
+            // Защита от зависаний при редких ошибках шины
+            MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
+        }
+        break;
 
-		MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA_WAIT;
-		//BSP_LED_On(LED_Red); //ok only here
-
-		break;
-
-	case MIDI_RECEIVE_DATA_WAIT:
-
-		URB_Status = USBH_LL_GetURBState(phost, MIDI_Handle->InPipe);
-
-
-
-		/*Check the status done for reception*/
-if (URB_Status == USBH_URB_DONE)
-{
-    length = USBH_LL_GetLastXferSize(phost, MIDI_Handle->InPipe);
-
-    MIDI_Handle->data_rx_state = MIDI_IDLE;
-
-    USBH_MIDI_ReceiveCallback(phost);
-
-#if (USBH_USE_OS == 1)
-    osMessagePut(phost->os_event, USBH_CLASS_EVENT, 0);
-#endif
-}
-		else if (URB_Status == USBH_URB_NOTREADY) 
-{
-    // Если клавиатура ответила NAK, не зависаем, а запускаем чтение заново
-    MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
-}
-		break;
-
-	default:
-		break;
-	}
+    default:
+        break;
+    }
 }
 
 

@@ -50,11 +50,15 @@
 
 static volatile uint32_t note_on_count = 0;
 static volatile uint32_t note_off_count = 0;
+static volatile uint32_t midi_other_count = 0;
 
 static volatile uint32_t midi_usb_packets = 0;
 static volatile uint32_t midi_events = 0;
 static volatile uint32_t midi_events_processed = 0;
 static volatile uint32_t midi_queue_overruns = 0;
+
+static volatile uint32_t midi_on_received = 0;
+static volatile uint32_t midi_off_received = 0;
 
 #define MIDI_EVENT_QUEUE_SIZE 32
 typedef struct
@@ -90,26 +94,8 @@ int _write(int file, char *ptr, int len) {
 extern ApplicationTypeDef Appli_state;
 extern USBH_HandleTypeDef hUsbHostFS;
 
-uint8_t midi_rx_buffer[64]; 
-
-/* void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
-{
-    uint16_t length = USBH_MIDI_GetLastReceivedDataSize(phost);
-    for (uint16_t i = 0; i + 3 < length; i += 4)
-    {
-        uint8_t cin = midi_rx_buffer[i] & 0x0F;
-        if (cin == 0x00)
-        {
-            continue;
-        }
-        uint8_t status   = midi_rx_buffer[i + 1];
-        uint8_t data1    = midi_rx_buffer[i + 2];
-        uint8_t data2    = midi_rx_buffer[i + 3];
-        MIDI_QueueEvent(status, data1, data2);
-    }
-    USBH_MIDI_Receive(phost, midi_rx_buffer, sizeof(midi_rx_buffer));
-}
-*/
+// объявление буфера с выравниванием по 32-битной границе:
+__ALIGN_BEGIN uint8_t midi_rx_buffer[64] __ALIGN_END;
 
 void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
 {
@@ -131,10 +117,19 @@ void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
         uint8_t data2  = midi_rx_buffer[i + 3];
 
         midi_events++;
+uint8_t command = status & 0xF0;
 
+if (command == 0x90 && data2 != 0)
+{
+    midi_on_received++;
+}
+else if (command == 0x80 ||
+         (command == 0x90 && data2 == 0))
+{
+    midi_off_received++;
+}
         MIDI_QueueEvent(status, data1, data2);
     }
-
     USBH_MIDI_Receive(phost,
                       midi_rx_buffer,
                       sizeof(midi_rx_buffer));
@@ -209,11 +204,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_USB_HOST_Init();
   /* USER CODE BEGIN 2 */
-  	printf("\r\n=======================================\r\n");
-    printf("STM32 USB Host Mouse Init...\r\n");
-    printf("USART is working perfectly!\r\n");
     printf("Waiting for USB device to be attached...\r\n");
-    printf("=======================================\r\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -228,24 +219,24 @@ int main(void)
     /* USER CODE BEGIN 3 */
 MIDI_Event_t event;
 
-if (MIDI_QueueGet(&event))
+while (MIDI_QueueGet(&event))
 {
- //     midi_events_processed++;
+ //   printf("[MIDI] %02X %02X %02X\r\n", event.status, event.data1,  event.data2);
   HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
- 
-  uint8_t command = event.status & 0xF0;
-
-if (command == 0x90 && event.data2 != 0)
-{
-    note_on_count++;
-    // printf("[MIDI] Note ON  | Note: %3d | Velocity: %3d\r\n", event.data1, event.data2);
-}
-else if (command == 0x80 || (command == 0x90 && event.data2 == 0))
-{
-    note_off_count++;
-    // printf("[MIDI] Note OFF | Note: %3d\r\n", event.data1);
-}
-
+    uint8_t command = event.status & 0xF0;
+    if (command == 0x90 && event.data2 != 0)
+    {
+        note_on_count++;
+    }
+    else if (command == 0x80 ||
+             (command == 0x90 && event.data2 == 0))
+    {
+        note_off_count++;
+    }
+    else
+    {
+        midi_other_count++;
+    }
 }
 
 if (Appli_state != previous_state)
@@ -259,22 +250,26 @@ if (Appli_state != previous_state)
 
     previous_state = Appli_state;
 }
+
     static uint32_t last_report = 0;
 
     if (HAL_GetTick() - last_report >= 10000)
     {
         last_report = HAL_GetTick();
 
-        printf("[MIDI] USB packets: %lu | events: %lu | processed: %lu | overruns: %lu\r\n",
-               midi_usb_packets,
-               midi_events,
-               midi_events_processed,
-               midi_queue_overruns);
+printf("[MIDI] USB packets=%lu events=%lu processed=%lu overruns=%lu\r\n",
+       midi_usb_packets,
+       midi_events,
+       midi_events_processed,
+       midi_queue_overruns);
 
-
-        printf("[MIDI] Notes ON=%lu Notes OFF=%lu\r\n",
+printf("[MIDI] RX: ON=%lu OFF=%lu | APP: ON=%lu OFF=%lu OTHER=%lu TOTAL=%lu\r\n",
+       midi_on_received,
+       midi_off_received,
        note_on_count,
-       note_off_count);
+       note_off_count,
+       midi_other_count,
+       note_on_count + note_off_count + midi_other_count);
     } 
 
 }
