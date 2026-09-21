@@ -85,7 +85,7 @@ extern USBH_HandleTypeDef hUsbHostFS;
 
 uint8_t midi_rx_buffer[64]; 
 
-void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
+/* void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
 {
     uint16_t length = USBH_MIDI_GetLastReceivedDataSize(phost);
     for (uint16_t i = 0; i + 3 < length; i += 4)
@@ -100,11 +100,40 @@ void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
         uint8_t data2    = midi_rx_buffer[i + 3];
         MIDI_QueueEvent(status, data1, data2);
     }
-    /*
-     * Очень важно:
-     * снова заказать USB-приём сразу после обработки буфера.
-     */
     USBH_MIDI_Receive(phost, midi_rx_buffer, sizeof(midi_rx_buffer));
+}
+*/
+
+static volatile uint32_t midi_usb_packets = 0;
+static volatile uint32_t midi_events = 0;
+
+void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
+{
+    midi_usb_packets++;
+
+    uint16_t length = USBH_MIDI_GetLastReceivedDataSize(phost);
+
+    for (uint16_t i = 0; i + 3 < length; i += 4)
+    {
+        uint8_t cin = midi_rx_buffer[i] & 0x0F;
+
+        if (cin == 0x00)
+        {
+            continue;
+        }
+
+        uint8_t status = midi_rx_buffer[i + 1];
+        uint8_t data1  = midi_rx_buffer[i + 2];
+        uint8_t data2  = midi_rx_buffer[i + 3];
+
+        midi_events++;
+
+        MIDI_QueueEvent(status, data1, data2);
+    }
+
+    USBH_MIDI_Receive(phost,
+                      midi_rx_buffer,
+                      sizeof(midi_rx_buffer));
 }
 
 // функция помещения события в очередь
@@ -183,6 +212,7 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
   ApplicationTypeDef previous_state = APPLICATION_IDLE;
   while (1)
   {
