@@ -183,6 +183,7 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  ApplicationTypeDef previous_state = APPLICATION_IDLE;
   while (1)
   {
     /* USER CODE END WHILE */
@@ -193,7 +194,9 @@ MIDI_Event_t event;
 
 if (MIDI_QueueGet(&event))
 {
-    uint8_t command = event.status & 0xF0;
+  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+ /*  
+  uint8_t command = event.status & 0xF0;
 
     if (command == 0x90)
     {
@@ -213,9 +216,8 @@ if (MIDI_QueueGet(&event))
     {
         printf("[MIDI] Note OFF | Note: %3d\r\n",
                event.data1);
-    }
+    } */
 }
-static ApplicationTypeDef previous_state = APPLICATION_IDLE;
 
 if (Appli_state != previous_state)
 {
