@@ -191,7 +191,7 @@ int main(void)
     /* USER CODE BEGIN 3 */
 MIDI_Event_t event;
 
-while (MIDI_QueueGet(&event))
+if (MIDI_QueueGet(&event))
 {
     uint8_t command = event.status & 0xF0;
 
