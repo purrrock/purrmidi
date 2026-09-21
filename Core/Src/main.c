@@ -238,13 +238,12 @@ if (MIDI_QueueGet(&event))
 if (command == 0x90 && event.data2 != 0)
 {
     note_on_count++;
-    printf("[MIDI] Note ON  | Note: %3d | Velocity: %3d\r\n", event.data1, event.data2);
+    // printf("[MIDI] Note ON  | Note: %3d | Velocity: %3d\r\n", event.data1, event.data2);
 }
-else if (command == 0x80 ||
-         (command == 0x90 && event.data2 == 0))
+else if (command == 0x80 || (command == 0x90 && event.data2 == 0))
 {
     note_off_count++;
-    printf("[MIDI] Note OFF | Note: %3d\r\n", event.data1);
+    // printf("[MIDI] Note OFF | Note: %3d\r\n", event.data1);
 }
 
 }
