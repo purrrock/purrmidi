@@ -20,7 +20,6 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "usbh_core.h"
-#include "usbh_platform.h"
 
 /* USER CODE BEGIN Includes */
 
@@ -80,11 +79,10 @@ void HAL_HCD_MspInit(HCD_HandleTypeDef* hcdHandle)
 
     __HAL_RCC_GPIOA_CLK_ENABLE();
     /**USB_OTG_FS GPIO Configuration
-    PA8     ------> USB_OTG_FS_SOF
     PA11     ------> USB_OTG_FS_DM
     PA12     ------> USB_OTG_FS_DP
     */
-    GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_11|GPIO_PIN_12;
+    GPIO_InitStruct.Pin = GPIO_PIN_11|GPIO_PIN_12;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
@@ -114,11 +112,10 @@ void HAL_HCD_MspDeInit(HCD_HandleTypeDef* hcdHandle)
     __HAL_RCC_USB_OTG_FS_CLK_DISABLE();
 
     /**USB_OTG_FS GPIO Configuration
-    PA8     ------> USB_OTG_FS_SOF
     PA11     ------> USB_OTG_FS_DM
     PA12     ------> USB_OTG_FS_DP
     */
-    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_8|GPIO_PIN_11|GPIO_PIN_12);
+    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_11|GPIO_PIN_12);
 
     /* Peripheral interrupt Deinit*/
     HAL_NVIC_DisableIRQ(OTG_FS_IRQn);
@@ -215,7 +212,7 @@ USBH_StatusTypeDef USBH_LL_Init(USBH_HandleTypeDef *phost)
   hhcd_USB_OTG_FS.Init.speed = HCD_SPEED_FULL;
   hhcd_USB_OTG_FS.Init.dma_enable = DISABLE;
   hhcd_USB_OTG_FS.Init.phy_itface = HCD_PHY_EMBEDDED;
-  hhcd_USB_OTG_FS.Init.Sof_enable = ENABLE;
+  hhcd_USB_OTG_FS.Init.Sof_enable = DISABLE;
   if (HAL_HCD_Init(&hhcd_USB_OTG_FS) != HAL_OK)
   {
     Error_Handler( );
@@ -469,14 +466,30 @@ USBH_URBStateTypeDef USBH_LL_GetURBState(USBH_HandleTypeDef *phost, uint8_t pipe
   */
 USBH_StatusTypeDef USBH_LL_DriverVBUS(USBH_HandleTypeDef *phost, uint8_t state)
 {
-  if (phost->id == HOST_FS) {
-    MX_DriverVbusFS(state);
-  }
 
   /* USER CODE BEGIN 0 */
 
   /* USER CODE END 0*/
 
+  if (phost->id == HOST_FS)
+  {
+    if (state == 0)
+    {
+      /* Drive high Charge pump */
+      /* ToDo: Add IOE driver control */
+      /* USER CODE BEGIN DRIVE_HIGH_CHARGE_FOR_FS */
+
+      /* USER CODE END DRIVE_HIGH_CHARGE_FOR_FS */
+    }
+    else
+    {
+      /* Drive low Charge pump */
+      /* ToDo: Add IOE driver control */
+      /* USER CODE BEGIN DRIVE_LOW_CHARGE_FOR_FS */
+
+      /* USER CODE END DRIVE_LOW_CHARGE_FOR_FS */
+    }
+  }
   HAL_Delay(200);
   return USBH_OK;
 }
