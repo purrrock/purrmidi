@@ -73,6 +73,25 @@ static void USBH_UserProcess(USBH_HandleTypeDef *phost, uint8_t id);
 void MX_USB_HOST_Init(void)
 {
   /* USER CODE BEGIN USB_HOST_Init_PreTreatment */
+  
+  // 1. Инициализируем ядро
+  if (USBH_Init(&hUsbHostFS, USBH_UserProcess, HOST_FS) != USBH_OK) {
+    Error_Handler();
+  }
+  
+  // 2. Регистрируем НАШ класс MIDI
+  if (USBH_RegisterClass(&hUsbHostFS, USBH_MIDI_CLASS) != USBH_OK) {
+    Error_Handler();
+  }
+  
+  // 3. Запускаем хост
+  if (USBH_Start(&hUsbHostFS) != USBH_OK) {
+    Error_Handler();
+  }
+  
+  // 4. ПРЕРЫВАЕМ ФУНКЦИЮ, чтобы сгенерированный код ниже никогда не выполнился
+  return;
+  
   /* USER CODE END USB_HOST_Init_PreTreatment */
 
   /* Init host Library, add supported class and start the library. */
@@ -80,27 +99,35 @@ void MX_USB_HOST_Init(void)
   {
     Error_Handler();
   }
-  
-  // РЕГИСТРАЦИЯ MIDI СТРОГО ПОСЛЕ USBH_Init
-  if (USBH_RegisterClass(&hUsbHostFS, USBH_MIDI_CLASS) != USBH_OK)
+  if (USBH_RegisterClass(&hUsbHostFS, USBH_AUDIO_CLASS) != USBH_OK)
   {
     Error_Handler();
   }
-  
-  // ВСЕ ОСТАЛЬНЫЕ КЛАССЫ ДОЛЖНЫ БЫТЬ УДАЛЕНЫ ИЛИ ЗАКОММЕНТИРОВАНЫ
-  /*
-  if (USBH_RegisterClass(&hUsbHostFS, USBH_AUDIO_CLASS) != USBH_OK) { Error_Handler(); }
-  if (USBH_RegisterClass(&hUsbHostFS, USBH_CDC_CLASS) != USBH_OK) { Error_Handler(); }
-  if (USBH_RegisterClass(&hUsbHostFS, USBH_MSC_CLASS) != USBH_OK) { Error_Handler(); }
-  if (USBH_RegisterClass(&hUsbHostFS, USBH_HID_CLASS) != USBH_OK) { Error_Handler(); }
-  if (USBH_RegisterClass(&hUsbHostFS, USBH_MTP_CLASS) != USBH_OK) { Error_Handler(); }
-  */
-
+  if (USBH_RegisterClass(&hUsbHostFS, USBH_CDC_CLASS) != USBH_OK)
+  {
+    Error_Handler();
+  }
+  if (USBH_RegisterClass(&hUsbHostFS, USBH_MSC_CLASS) != USBH_OK)
+  {
+    Error_Handler();
+  }
+  if (USBH_RegisterClass(&hUsbHostFS, USBH_HID_CLASS) != USBH_OK)
+  {
+    Error_Handler();
+  }
+  if (USBH_RegisterClass(&hUsbHostFS, USBH_MTP_CLASS) != USBH_OK)
+  {
+    Error_Handler();
+  }
   if (USBH_Start(&hUsbHostFS) != USBH_OK)
   {
     Error_Handler();
   }
+  /* USER CODE BEGIN USB_HOST_Init_PostTreatment */
+
+  /* USER CODE END USB_HOST_Init_PostTreatment */
 }
+
 /*
  * Background task
  */
