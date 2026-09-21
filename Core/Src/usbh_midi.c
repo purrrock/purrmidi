@@ -460,13 +460,12 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
         else if (URB_Status == USBH_URB_NOTREADY) 
         {
             // 2. Устройство ответило NAK (нет нот). 
-            // Вот ТЕПЕРЬ мы ждем аппаратного флага SOF (1 мс) перед следующим запросом,
-            // чтобы не устроить NAK-шторм и не повесить шину.
-            if (midi_sof_flag == 1)
-            {
-                midi_sof_flag = 0;
+            // if (midi_sof_flag == 1)
+            // {
+            //    midi_sof_flag = 0;
+				// Мгновенный перезапуск опроса без ожидания SOF
                 MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
-            }
+            // }
         }
         else if (URB_Status == USBH_URB_ERROR || URB_Status == USBH_URB_STALL)
         {
