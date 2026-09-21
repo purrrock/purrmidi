@@ -102,6 +102,15 @@ void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
     midi_usb_packets++;
 
     uint16_t length = USBH_MIDI_GetLastReceivedDataSize(phost);
+    
+    // --- НИЗКОУРОВНЕВАЯ ДИАГНОСТИКА ---
+    printf("[RAW RX, len=%d]: ", length);
+    for (uint16_t i = 0; i < length; i++)
+    {
+        printf("%02X ", midi_rx_buffer[i]);
+    }
+    printf("\r\n");
+    // ----------------------------------
 
     for (uint16_t i = 0; i + 3 < length; i += 4)
     {

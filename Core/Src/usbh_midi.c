@@ -428,6 +428,7 @@ static void MIDI_ProcessTransmission(USBH_HandleTypeDef *phost)
  *  @param  pdev: Selected device
  * @retval None
  */
+
 static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
 {
     MIDI_HandleTypeDef *MIDI_Handle =  phost->pActiveClass->pData;
@@ -437,16 +438,12 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
     switch(MIDI_Handle->data_rx_state)
     {
     case MIDI_RECEIVE_DATA:
-        // Опрашиваем клавиатуру строго 1 раз в миллисекунду по аппаратному таймеру SOF
-        if (midi_sof_flag == 1)
-        {
-            midi_sof_flag = 0;
-            USBH_BulkReceiveData (phost,
-                    MIDI_Handle->pRxData,
-                    MIDI_Handle->InEpSize,
-                    MIDI_Handle->InPipe);
-            MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA_WAIT;
-        }
+        // 1. Отправляем запрос на чтение мгновенно, без ожидания таймера
+        USBH_BulkReceiveData (phost,
+                MIDI_Handle->pRxData,
+                MIDI_Handle->InEpSize,
+                MIDI_Handle->InPipe);
+        MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA_WAIT;
         break;
 
     case MIDI_RECEIVE_DATA_WAIT:
@@ -457,16 +454,23 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
             length = USBH_LL_GetLastXferSize(phost, MIDI_Handle->InPipe);
             MIDI_Handle->data_rx_state = MIDI_IDLE;
             USBH_MIDI_ReceiveCallback(phost);
+            // Если пакет прочитан успешно, callback запустит чтение заново.
+            // Благодаря отсутствию задержки, следующий пакет вытянется моментально.
         }
         else if (URB_Status == USBH_URB_NOTREADY) 
         {
-            // Устройство ответило NAK (нет нот). 
-            // Сбрасываем статус, но новый запрос уйдет ТОЛЬКО в следующем кадре SOF
-            MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
+            // 2. Устройство ответило NAK (нет нот). 
+            // Вот ТЕПЕРЬ мы ждем аппаратного флага SOF (1 мс) перед следующим запросом,
+            // чтобы не устроить NAK-шторм и не повесить шину.
+            if (midi_sof_flag == 1)
+            {
+                midi_sof_flag = 0;
+                MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
+            }
         }
         else if (URB_Status == USBH_URB_ERROR || URB_Status == USBH_URB_STALL)
         {
-            // Защита от зависаний при редких ошибках шины
+            printf("[USB HW] URB Error/Stall = %d\r\n", URB_Status);
             MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
         }
         break;
@@ -475,7 +479,6 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
         break;
     }
 }
-
 
 /*------------------------------------------------------------------------------------------------------------------------------*/
 
