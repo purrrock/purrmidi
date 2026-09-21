@@ -68,7 +68,8 @@ void SystemClock_Config(void);
 void MX_USB_HOST_Process(void);
 
 /* USER CODE BEGIN PFP */
-
+static void MIDI_QueueEvent(uint8_t status, uint8_t data1, uint8_t data2);
+static uint8_t MIDI_QueueGet(MIDI_Event_t *event);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
