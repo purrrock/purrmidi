@@ -166,6 +166,7 @@ typedef struct _MIDI_Process
 	uint8_t			InEp;
 	uint16_t		OutEpSize;
 	uint16_t		InEpSize;
+	uint8_t			InEpType;
 
 	uint8_t			*pTxData;
 	uint8_t			*pRxData;
