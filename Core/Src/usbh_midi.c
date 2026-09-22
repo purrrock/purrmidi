@@ -104,6 +104,7 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
                 if (ep_addr & 0x80) { 
                     MIDI_Handle->InEp = ep_addr;
                     MIDI_Handle->InEpSize = ep_size;
+                    MIDI_Handle->InEpType = current_ep_type;
                     in_ep_type = current_ep_type;
                 } else { 
                     MIDI_Handle->OutEp = ep_addr;
@@ -455,14 +456,18 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
         }
 		else if (URB_Status == USBH_URB_NOTREADY) 
         {
-			// Независимый таймер вместо аппаратного флага SOF,
-            // который отключается при некоторых генерациях CubeMX
-            static uint32_t last_nak_time = 0;
-            if (HAL_GetTick() - last_nak_time >= 1)
+            if (MIDI_Handle->InEpType == USB_EP_TYPE_INTR)
             {
-                last_nak_time = HAL_GetTick();
-                MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
+			    // Независимый таймер вместо аппаратного флага SOF,
+                // который отключается при некоторых генерациях CubeMX
+                static uint32_t last_nak_time = 0;
+                if (HAL_GetTick() - last_nak_time >= 1)
+                {
+                    last_nak_time = HAL_GetTick();
+                    MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
+                }
             }
+            // For Bulk, we don't resubmit, hardware handles it
         }
         else if (URB_Status == USBH_URB_ERROR || URB_Status == USBH_URB_STALL)
         {
