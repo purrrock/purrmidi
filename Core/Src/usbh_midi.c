@@ -81,7 +81,6 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
 		USBH_memset(MIDI_Handle, 0, sizeof(MIDI_HandleTypeDef)); // clear memory for MIDI_Handle 		
 
 		// Находим реальное количество конечных точек в MIDI интерфейсе
-// ... (предыдущий код до сброса адресов)
         MIDI_Handle->InEp = 0;
         MIDI_Handle->OutEp = 0;
 

@@ -53,14 +53,17 @@
 static volatile uint32_t note_on_count = 0;
 static volatile uint32_t note_off_count = 0;
 static volatile uint32_t midi_other_count = 0;
-
 static volatile uint32_t midi_usb_packets = 0;
 static volatile uint32_t midi_events = 0;
 static volatile uint32_t midi_events_processed = 0;
 static volatile uint32_t midi_queue_overruns = 0;
-
 static volatile uint32_t midi_on_received = 0;
 static volatile uint32_t midi_off_received = 0;
+static volatile uint32_t midi_usb_bytes = 0;
+static volatile uint32_t midi_usb_bad_length = 0;
+static volatile uint32_t midi_note_on_packets = 0;
+static volatile uint32_t midi_note_off_packets = 0;
+static volatile uint32_t midi_usb_max_length = 0;
 
 #define MIDI_EVENT_QUEUE_SIZE 256
 typedef struct
@@ -102,18 +105,20 @@ __ALIGN_BEGIN uint8_t midi_rx_buffer[64] __ALIGN_END;
 void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
 {
     midi_usb_packets++;
-
     uint16_t length = USBH_MIDI_GetLastReceivedDataSize(phost);
-    
-    // --- НИЗКОУРОВНЕВАЯ ДИАГНОСТИКА ---
-    // printf("[RAW RX, len=%d]: ", length);
-    // for (uint16_t i = 0; i < length; i++)
-    // {
-    //    printf("%02X ", midi_rx_buffer[i]);
-    // }
-    // printf("\r\n");
-    // ----------------------------------
 
+if (length > midi_usb_max_length)
+{
+    midi_usb_max_length = length;
+}
+
+    midi_usb_bytes += length;
+
+    if ((length & 3U) != 0U)
+    {
+        midi_usb_bad_length++;
+    }
+    
     for (uint16_t i = 0; i + 3 < length; i += 4)
     {
         uint8_t cin = midi_rx_buffer[i] & 0x0F;
@@ -127,19 +132,21 @@ void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
         uint8_t data1  = midi_rx_buffer[i + 2];
         uint8_t data2  = midi_rx_buffer[i + 3];
 
-        midi_events++;
+midi_events++;
+
 uint8_t command = status & 0xF0;
 
 if (command == 0x90 && data2 != 0)
 {
-    midi_on_received++;
+    midi_note_on_packets++;
 }
 else if (command == 0x80 ||
          (command == 0x90 && data2 == 0))
 {
-    midi_off_received++;
+    midi_note_off_packets++;
 }
-        MIDI_QueueEvent(status, data1, data2);
+
+MIDI_QueueEvent(status, data1, data2);
     }
     USBH_MIDI_Receive(phost,
                       midi_rx_buffer,
@@ -269,16 +276,23 @@ if (Appli_state != previous_state)
     if (HAL_GetTick() - last_report >= 10000)
     {
         last_report = HAL_GetTick();
+printf("[USB] packets=%lu bytes=%lu max_len=%lu bad_len=%lu\r\n",
+       midi_usb_packets,
+       midi_usb_bytes,
+       midi_usb_max_length,
+       midi_usb_bad_length);
 
-printf("[MIDI] USB packets=%lu events=%lu processed=%lu overruns=%lu\r\n",
+printf("[MIDI] packets=%lu events=%lu ON=%lu OFF=%lu\r\n",
        midi_usb_packets,
        midi_events,
+       midi_note_on_packets,
+       midi_note_off_packets);
+
+printf("[QUEUE] processed=%lu overruns=%lu\r\n",
        midi_events_processed,
        midi_queue_overruns);
 
-printf("[MIDI] RX: ON=%lu OFF=%lu | APP: ON=%lu OFF=%lu OTHER=%lu TOTAL=%lu\r\n",
-       midi_on_received,
-       midi_off_received,
+printf("[APP] ON=%lu OFF=%lu OTHER=%lu TOTAL=%lu\r\n",
        note_on_count,
        note_off_count,
        midi_other_count,
