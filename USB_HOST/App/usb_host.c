@@ -29,7 +29,8 @@
 #include "usbh_mtp.h"
 
 /* USER CODE BEGIN Includes */
-
+#include "usbh_midi.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* USER CODE BEGIN PV */
@@ -72,6 +73,24 @@ static void USBH_UserProcess(USBH_HandleTypeDef *phost, uint8_t id);
 void MX_USB_HOST_Init(void)
 {
   /* USER CODE BEGIN USB_HOST_Init_PreTreatment */
+
+  // 1. Инициализируем ядро
+  if (USBH_Init(&hUsbHostFS, USBH_UserProcess, HOST_FS) != USBH_OK) {
+    Error_Handler();
+  }
+
+  // 2. Регистрируем НАШ класс MIDI
+  if (USBH_RegisterClass(&hUsbHostFS, USBH_MIDI_CLASS) != USBH_OK) {
+    Error_Handler();
+  }
+
+  // 3. Запускаем хост
+  if (USBH_Start(&hUsbHostFS) != USBH_OK) {
+    Error_Handler();
+  }
+
+  // 4. ПРЕРЫВАЕМ ФУНКЦИЮ, чтобы сгенерированный код ниже никогда не выполнился
+  return;
 
   /* USER CODE END USB_HOST_Init_PreTreatment */
 
@@ -123,25 +142,30 @@ void MX_USB_HOST_Process(void)
 static void USBH_UserProcess  (USBH_HandleTypeDef *phost, uint8_t id)
 {
   /* USER CODE BEGIN CALL_BACK_1 */
-  switch(id)
+switch(id)
   {
   case HOST_USER_SELECT_CONFIGURATION:
-  break;
+    // Срабатывает для ЛЮБОГО распознанного USB-устройства после энумерации
+    break;
 
   case HOST_USER_DISCONNECTION:
-  Appli_state = APPLICATION_DISCONNECT;
-  break;
+    Appli_state = APPLICATION_DISCONNECT;
+    printf("[USB] Device Disconnected!\r\n");
+    break;
 
   case HOST_USER_CLASS_ACTIVE:
-  Appli_state = APPLICATION_READY;
-  break;
+    Appli_state = APPLICATION_READY;
+    printf("[USB] Device Connected and Ready!\r\n");
+    printf("VID: 0x%04X | PID: 0x%04X\r\n", phost->device.DevDesc.idVendor, phost->device.DevDesc.idProduct);
+    break;
 
   case HOST_USER_CONNECTION:
-  Appli_state = APPLICATION_START;
-  break;
+    Appli_state = APPLICATION_START;
+    printf("[USB] Device Attached. Enumerating...\r\n");
+    break;
 
   default:
-  break;
+    break;
   }
   /* USER CODE END CALL_BACK_1 */
 }
