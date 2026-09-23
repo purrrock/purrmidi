@@ -1,129 +1,197 @@
-# PurrMidi — Initial Pinout
+# PurrMidi — Начальная распиновка
 
-Target: **WeAct STM32H743VIT6 Mini**
 
-Only connections required for the initial bring-up are listed here. SD, Flash, TFT, camera and other unused peripherals are deliberately omitted.
+
+Целевая платформа: **WeAct STM32H743VIT6 Mini**
+
+Здесь перечислены только те подключения, которые необходимы для первого запуска (bring-up). Слот для SD-карт, внешняя память Flash, дисплей TFT, камера и другая неиспользуемая периферия намеренно исключены из этого списка.
 
 ## USB MIDI Host
 
-| STM32H743 | Function | Connection |
+
+
+| STM32H743 | Функция | Подключение |
 |---|---|---|
 | PA11 | USB_OTG_FS_DM | USB D− |
 | PA12 | USB_OTG_FS_DP | USB D+ |
-| PA10 | USB ID | reserved |
-| PA9 | USB/VBUS-related | reserved |
+| PA10 | USB ID | зарезервировано |
+| PA9 | связан с USB/VBUS | зарезервировано |
 
 ### VBUS
 
-The MIDI keyboard needs **5 V USB VBUS** supplied by the host.
 
-Before connecting it, verify on the physical board:
-- USB-C VBUS routing;
-- availability of 5 V when externally powered;
-- ability to source 5 V to the host device;
-- current limiting/load switch, if present.
 
-Do not assume host VBUS is available until measured.
+MIDI-клавиатуре требуется питание **5 В USB VBUS**, которое должен подавать хост (микроконтроллер).
+
+Перед подключением клавиатуры проверьте на физической плате:
+
+* разводку линии VBUS от разъема USB-C;
+
+
+* наличие 5 В при внешнем питании платы;
+
+
+* способность платы отдавать 5 В подключенному хост-устройству;
+
+
+* наличие ограничения тока / переключателя нагрузки (load switch), если таковой имеется.
+
+
+
+Не подключайте клавиатуру, предполагая, что питание VBUS от хоста доступно, пока не измерите его.
 
 ## PCM5102A
 
-Use **SAI1 Block B**.
 
-| STM32H743 | Function | PCM5102A |
+
+Используется **SAI1 Block A** *(прим.: блок изменен с B на A в связи с ограничениями 100-пинового корпуса)*:
+
+| STM32H743 | Функция | PCM5102A |
 |---|---|---|
-| PF8 | SAI1_SCK_B | BCK |
-| PF9 | SAI1_FS_B | LRCK / WS |
-| PF6 | SAI1_SD_B | DIN |
-| PF7 | SAI1_MCLK_B | not connected |
+| PE5 *(было PF8)* | SAI1_SCK_A | BCK |
+| PE4 *(было PF9)* | SAI1_FS_A | LRCK / WS |
+| PE6 *(было PF6)* | SAI1_SD_A | DIN |
 
-Power:
-- PCM5102A GND → GND
-- PCM5102A VCC → appropriate supply
-- OUTL/OUTR → audio output
+Питание:
 
-Initial format:
-- I2S / Philips
-- 48 kHz
-- stereo
-- 32-bit container
-- MCLK unused
+* PCM5102A GND → GND (Земля)
 
-## Diagnostic UART
+
+* PCM5102A VCC → соответствующий источник питания
+
+
+* OUTL/OUTR → аудиовыход
+
+
+
+Начальный формат:
+
+* I2S / Philips
+
+
+* 48 кГц
+
+
+* Стерео
+
+
+* 32-битный контейнер
+
+
+* MCLK не используется
+
+
+
+## Диагностический UART
+
+
 
 USART3:
 
-| STM32H743 | Function | USB-UART |
+| STM32H743 | Функция | USB-UART адаптер |
 |---|---|---|
 | PB10 | USART3_TX | RX |
 | PB11 | USART3_RX | TX |
 | GND | GND | GND |
 
-Format: `115200 8N1`
+Формат: `115200 8N1`
 
-Used for startup, USB, MIDI and synthesizer diagnostics.
+Используется для диагностики процесса запуска, USB, MIDI и синтезатора.
 
-## Audio DMA
+## Аудио DMA
 
-| Resource | Assignment |
+
+
+| Ресурс | Назначение |
 |---|---|
-| Controller | DMA2 |
-| Stream | Stream4 |
-| Request | SAI1_B |
-| Direction | Memory → Peripheral |
-| Mode | Circular |
+| Контроллер | DMA2 |
+| Поток (Stream) | Stream 4 (или Stream 0) |
+| Запрос | SAI1_A *(было SAI1_B)* |
+| Направление | Память → Периферия |
+| Режим | Циклический (Circular) |
 
-DMA2 Stream4 is reserved for audio.
+Указанный поток контроллера DMA зарезервирован для вывода аудио.
 
-## SWD
+## SWD (Интерфейс отладки)
 
-| Pin | Function |
+
+
+| Пин | Функция |
 |---|---|
 | PA13 | SWDIO |
 | PA14 | SWCLK |
-| NRST | Reset |
+| NRST | Reset (Сброс) |
 
-Keep SWD available.
+Интерфейс SWD должен оставаться доступным.
 
-## Initial summary
+## Начальная сводка
 
-### Connected now
+
+
+### Подключено сейчас
+
+
 
 ```text
 USB:
 PA11  USB D−
 PA12  USB D+
 
-Audio:
-PF6   PCM5102A DIN
-PF8   PCM5102A BCK
-PF9   PCM5102A LRCK
+Аудио:
+PE6   PCM5102A DIN
+PE5   PCM5102A BCK
+PE4   PCM5102A LRCK
 
 UART:
 PB10  USART3_TX
 PB11  USART3_RX
+
 ```
 
-### Reserved
+
+### Зарезервировано
+
+
 
 ```text
-PA9   USB/VBUS/boot-related
-PA10  USB ID / boot-related
+PA9   USB/VBUS/связано с загрузкой
+PA10  USB ID / связано с загрузкой
 PA13  SWDIO
 PA14  SWCLK
-PF7   SAI1 MCLK (unused)
-DMA2 Stream4  audio
+
 ```
 
-## Not used initially
 
-- microSD / SDMMC
-- onboard ST7735 TFT
-- 8 MB QSPI Flash
-- 8 MB SPI Flash
-- DCMI camera
-- additional buttons
-- rotary encoder
-- additional LEDs
-- other control interfaces
+## Не используется на начальном этапе
 
-These are added only after the USB MIDI → synthesizer → PCM5102A path is stable.
+
+
+* слот microSD / SDMMC
+
+
+* встроенный экран ST7735 TFT
+
+
+* 8 МБ QSPI Flash
+
+
+* 8 МБ SPI Flash
+
+
+* DCMI камера
+
+
+* дополнительные кнопки
+
+
+* энкодер (rotary encoder)
+
+
+* дополнительные светодиоды
+
+
+* другие интерфейсы управления
+
+
+
+Все эти элементы будут добавлены только после того, как тракт `USB MIDI` → `синтезатор` → `PCM5102A` начнет работать стабильно.

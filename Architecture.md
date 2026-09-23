@@ -1,149 +1,277 @@
-# PurrMidi — Architecture
+# PurrMidi — Архитектура
 
-## Target hardware
+
+
+## Целевое оборудование
+
+
 
 **WeAct STM32H743VIT6 Mini**
-- STM32H743VIT6, Cortex-M7
-- CPU up to 480 MHz
-- 2 MB Flash, 1 MB RAM
-- HSE 25 MHz, LSE 32.768 kHz
 
-**Audio DAC:** PCM5102A
+* STM32H743VIT6, ядро Cortex-M7
+
+
+* Частота процессора до 480 МГц
+
+
+* 2 МБ Flash-памяти, 1 МБ RAM
+
+
+* Внешний кварц (HSE) 25 МГц, часовой кварц (LSE) 32.768 кГц
+
+
+
+**Аудио ЦАП:** PCM5102A
 
 ```text
-USB MIDI keyboard
+USB MIDI-клавиатура
         │
         ▼
 STM32H743 USB Host
         │
         ▼
-MIDI parser / event queue
+Парсер MIDI / очередь событий
         │
         ▼
-Software synthesizer
+Программный синтезатор
         │
         ▼
-Audio buffer + DMA
+Аудиобуфер + DMA
         │
         ▼
-SAI1 Block B
+SAI1 Block A
         │
         ▼
 PCM5102A
         │
         ▼
-Audio output
+Аудиовыход
+
 ```
 
-## Initial scope
+## Начальный этап
 
-First milestone uses only:
-- USB MIDI Host
-- MIDI event reception and diagnostics
-- software synthesizer
-- SAI audio output
-- PCM5102A
-- USART3 diagnostic console
 
-TFT, microSD, SPI/QSPI Flash, camera and additional controls are intentionally excluded from the initial configuration.
+
+Первая контрольная точка использует только:
+
+* USB MIDI Host
+
+
+* Прием MIDI-событий и диагностику
+
+
+* Программный синтезатор
+
+
+* Вывод аудио через SAI
+
+
+* PCM5102A
+
+
+* Диагностическую консоль USART3
+
+
+
+Экран (TFT), слот microSD, внешняя память SPI/QSPI Flash, камера и дополнительные элементы управления намеренно исключены из первоначальной конфигурации.
 
 ## USB MIDI Host
 
-- PA11 — USB_OTG_FS_DM
-- PA12 — USB_OTG_FS_DP
-- PA10 — USB ID / reserved
-- PA9 — USB/VBUS/boot-related / reserved
 
-USB Host requires suitable **5 V VBUS power** for the connected MIDI keyboard. The exact VBUS power path on the physical WeAct board must be verified before relying on it.
 
-## Diagnostic UART
+* PA11 — USB_OTG_FS_DM
+
+
+* PA12 — USB_OTG_FS_DP
+
+
+* PA10 — USB ID / зарезервировано
+
+
+* PA9 — связанные с USB/VBUS/загрузкой / зарезервировано
+
+
+
+Для подключенной MIDI-клавиатуры USB Host требует подходящего **питания 5 В VBUS**. Перед тем как полагаться на него, необходимо проверить точный путь питания VBUS на физической плате WeAct.
+
+## Диагностический UART
+
+
 
 USART3:
-- PB10 — TX
-- PB11 — RX
-- 115200 8N1
 
-USART3 is used so PA9/PA10 remain reserved for USB/boot-related functions.
+* PB10 — TX
 
-## Audio
 
-Use **SAI1 Block B**:
+* PB11 — RX
 
-- PF6 — SAI1_SD_B → PCM5102A DIN
-- PF8 — SAI1_SCK_B → PCM5102A BCK
-- PF9 — SAI1_FS_B → PCM5102A LRCK/WS
-- PF7 — MCLK unused
 
-Initial format:
-- I2S / Philips
-- stereo
-- 48 kHz
-- 32-bit container
-- TX only
-- MCLK disabled
+* 115200 8N1
 
-## Audio DMA
 
-- DMA2 Stream4
-- request: SAI1_B
-- circular mode
 
-DMA buffers belong in D2 SRAM1/SRAM2, not DTCM.
+USART3 используется для того, чтобы выводы PA9/PA10 оставались зарезервированными для функций USB и загрузчика.
 
-Recommended:
-- D2 SRAM1: `0x30000000`
-- D2 SRAM2: `0x30020000`
+## Аудио
 
-Keep buffers aligned to the 32-byte Cortex-M7 cache line.
 
-DMA2 Stream4 is reserved for audio.
 
-## H743 memory policy
+Используется **SAI1 Block A**
 
-| Memory | Address | Initial use |
+* PE6 — SAI1_SD_B → PCM5102A DIN
+
+
+* PE5 — SAI1_SCK_B → PCM5102A BCK 
+
+
+* PE4 — SAI1_FS_B → PCM5102A LRCK/WS 
+
+
+* PF7 — MCLK не используется
+
+
+
+Начальный формат:
+
+* I2S / Philips
+
+
+* Стерео
+
+
+* 48 кГц
+
+
+* 32-битный контейнер
+
+
+* Только передача (TX only)
+
+
+* MCLK отключен
+
+
+
+## Аудио DMA
+
+
+
+* DMA2 Stream4
+
+
+* Запрос: SAI1_A
+
+
+* Циклический режим (circular mode)
+
+
+
+Буферы DMA должны располагаться в доменах D2 SRAM1/SRAM2, а не в DTCM.
+
+Рекомендуется:
+
+* D2 SRAM1: `0x30000000`
+
+* D2 SRAM2: `0x30020000`
+
+
+Буферы следует выравнивать по 32-байтовой линии кэша Cortex-M7.
+DMA2 Stream4 зарезервирован для аудио.
+
+## Политика распределения памяти H743
+
+
+
+| Память | Адрес | Начальное использование |
 |---|---:|---|
-| DTCM RAM | `0x20000000` | CPU-only MIDI/event state |
-| AXI SRAM | `0x24000000` | general/sample data |
-| D2 SRAM1 | `0x30000000` | audio DMA |
-| D2 SRAM2 | `0x30020000` | audio DMA |
-| D2 SRAM3 | `0x30040000` | USB/peripheral buffers |
-| D3 SRAM4 | `0x38000000` | later use |
+| DTCM RAM | `0x20000000` | Состояние MIDI/событий (только для CPU) |
+| AXI SRAM | `0x24000000` | Общие данные / данные сэмплов |
+| D2 SRAM1 | `0x30000000` | Аудио DMA |
+| D2 SRAM2 | `0x30020000` | Аудио DMA |
+| D2 SRAM3 | `0x30040000` | Буферы USB / периферии |
+| D3 SRAM4 | `0x38000000` | Для дальнейшего использования |
 
-DMA1/DMA2 cannot directly access DTCM.
+DMA1/DMA2 не могут напрямую обращаться к памяти DTCM.
 
-Keep D-cache enabled. DMA memory should use either MPU non-cacheable regions or explicit cache maintenance. For dedicated audio buffers, a non-cacheable MPU region is preferable.
+D-cache должен оставаться включенным. Память DMA должна использовать либо некэшируемые регионы MPU (non-cacheable regions), либо явное обслуживание кэша. Для выделенных аудиобуферов предпочтительнее использовать некэшируемый регион MPU.
 
-## Clock
+## Тактирование
 
-Target:
-- HSE 25 MHz
-- CPU 480 MHz
-- USB clock 48 MHz
-- stable SAI clock for 48 kHz audio
 
-Exact PLL configuration is part of H743 bring-up.
 
-## Reserved resources
+Целевые значения:
 
-- PA9/PA10 — USB/boot-related
-- PA11/PA12 — USB
-- PA13/PA14 — SWD
-- PF6/PF8/PF9 — audio
-- PB10/PB11 — diagnostic UART
-- DMA2 Stream4 — audio
+* HSE 25 МГц
 
-Keep SWD available.
 
-## Development order
+* CPU 480 МГц
 
-1. MCU starts with intended clock.
-2. USART3 works.
-3. SAI1 Block B generates test audio.
-4. PCM5102A produces sound.
-5. USB Host detects MIDI keyboard.
-6. MIDI packets are parsed and reported.
-7. MIDI events enter a reliable queue.
-8. Synthesizer generates audio.
-9. Audio DMA remains stable under MIDI load.
 
-Only then add other board peripherals.
+* USB clock 48 МГц
+
+
+* Стабильная частота SAI для аудио 48 кГц
+
+
+
+Точная конфигурация PLL является частью процесса запуска H743.
+
+## Зарезервированные ресурсы
+
+
+
+* PA9/PA10 — связанные с USB/загрузкой
+
+
+* PA11/PA12 — USB
+
+
+* PA13/PA14 — SWD (отладка)
+
+
+* PE4/PE5/PE6 — аудио 
+
+
+* PB10/PB11 — диагностический UART
+
+
+* DMA2 Stream4 — аудио
+
+
+
+Интерфейс SWD должен оставаться доступным.
+
+## Порядок разработки
+
+
+
+1. Микроконтроллер запускается с нужной частотой тактирования.
+
+
+2. Работает USART3.
+
+
+3. SAI1 Block A генерирует тестовое аудио.
+
+
+4. PCM5102A выводит звук.
+
+
+5. USB Host обнаруживает MIDI-клавиатуру.
+
+
+6. MIDI-пакеты парсятся и выводятся в консоль.
+
+
+7. MIDI-события попадают в надежную очередь.
+
+
+8. Синтезатор генерирует аудиосигнал.
+
+
+9. Аудио DMA остается стабильным под нагрузкой MIDI.
+
+
+
+Только после этого добавляется остальная периферия платы.
