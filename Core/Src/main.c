@@ -108,8 +108,41 @@ void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
         }
 
         uint8_t status = midi_rx_buffer[i + 1];
-        uint8_t data1  = midi_rx_buffer[i + 2];
-        uint8_t data2  = midi_rx_buffer[i + 3];
+        uint8_t data1  = 0;
+        uint8_t data2  = 0;
+
+        switch (cin)
+        {
+            case 0x1:
+            case 0x5:
+            case 0xF:
+                // 1 byte message (status only)
+                break;
+
+            case 0x2:
+            case 0x6:
+            case 0xC:
+            case 0xD:
+                // 2 byte message (status + data1)
+                data1 = midi_rx_buffer[i + 2];
+                break;
+
+            case 0x3:
+            case 0x4:
+            case 0x7:
+            case 0x8:
+            case 0x9:
+            case 0xA:
+            case 0xB:
+            case 0xE:
+                // 3 byte message (status + data1 + data2)
+                data1 = midi_rx_buffer[i + 2];
+                data2 = midi_rx_buffer[i + 3];
+                break;
+
+            default:
+                continue;
+        }
 
         midi_events++;
         MIDI_QueueEvent(status, data1, data2);
