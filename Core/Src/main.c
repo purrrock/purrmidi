@@ -26,7 +26,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
+#include "usbh_midi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,6 +49,24 @@
 
 /* USER CODE BEGIN PV */
 
+static volatile uint32_t note_on_count = 0;
+static volatile uint32_t note_off_count = 0;
+static volatile uint32_t midi_usb_packets = 0;
+static volatile uint32_t midi_events = 0;
+static volatile uint32_t midi_queue_overruns = 0;
+
+#define MIDI_EVENT_QUEUE_SIZE 256
+typedef struct
+{
+    uint8_t status;
+    uint8_t data1;
+    uint8_t data2;
+} MIDI_Event_t;
+
+static volatile MIDI_Event_t midi_event_queue[MIDI_EVENT_QUEUE_SIZE];
+static volatile uint8_t midi_queue_head = 0;
+static volatile uint8_t midi_queue_tail = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -56,11 +75,83 @@ static void MPU_Config(void);
 void MX_USB_HOST_Process(void);
 
 /* USER CODE BEGIN PFP */
-
+static void MIDI_QueueEvent(uint8_t status, uint8_t data1, uint8_t data2);
+static uint8_t MIDI_QueueGet(MIDI_Event_t *event);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+// Перенаправление printf в UART
+int _write(int file, char *ptr, int len) {
+    HAL_UART_Transmit(&huart3, (uint8_t*)ptr, len, HAL_MAX_DELAY);
+    return len;
+}
+
+extern ApplicationTypeDef Appli_state;
+extern USBH_HandleTypeDef hUsbHostFS;
+
+// объявление буфера с выравниванием по 32-битной границе:
+__ALIGN_BEGIN uint8_t midi_rx_buffer[64] __ALIGN_END;
+
+void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
+{
+    midi_usb_packets++;
+    uint16_t length = USBH_MIDI_GetLastReceivedDataSize(phost);
+
+    for (uint16_t i = 0; i + 3 < length; i += 4)
+    {
+        uint8_t cin = midi_rx_buffer[i] & 0x0F;
+
+        if (cin == 0x00)
+        {
+            continue;
+        }
+
+        uint8_t status = midi_rx_buffer[i + 1];
+        uint8_t data1  = midi_rx_buffer[i + 2];
+        uint8_t data2  = midi_rx_buffer[i + 3];
+
+        midi_events++;
+        MIDI_QueueEvent(status, data1, data2);
+    }
+
+    USBH_MIDI_Receive(phost,
+                      midi_rx_buffer,
+                      sizeof(midi_rx_buffer));
+}
+
+// функция помещения события в очередь
+static void MIDI_QueueEvent(uint8_t status, uint8_t data1, uint8_t data2)
+{
+    uint8_t next = (uint8_t)((midi_queue_head + 1) % MIDI_EVENT_QUEUE_SIZE);
+
+    if (next == midi_queue_tail)
+    {
+        midi_queue_overruns++;
+        return;
+    }
+
+    midi_event_queue[midi_queue_head].status = status;
+    midi_event_queue[midi_queue_head].data1 = data1;
+    midi_event_queue[midi_queue_head].data2 = data2;
+
+    midi_queue_head = next;
+}
+// и функция извлечения:
+static uint8_t MIDI_QueueGet(MIDI_Event_t *event)
+{
+    if (midi_queue_tail == midi_queue_head)
+    {
+        return 0;
+    }
+
+    *event = midi_event_queue[midi_queue_tail];
+
+    midi_queue_tail =
+        (uint8_t)((midi_queue_tail + 1) % MIDI_EVENT_QUEUE_SIZE);
+
+    return 1;
+}
 
 /* USER CODE END 0 */
 
@@ -101,17 +192,62 @@ int main(void)
   MX_SAI1_Init();
   MX_USB_HOST_Init();
   /* USER CODE BEGIN 2 */
-
+  printf("Waiting for USB device to be attached...\r\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
+  ApplicationTypeDef previous_state = APPLICATION_IDLE;
   while (1)
   {
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
+MIDI_Event_t event;
+
+while (MIDI_QueueGet(&event))
+{
+ //   printf("[MIDI] %02X %02X %02X\r\n", event.status, event.data1,  event.data2);
+    uint8_t command = event.status & 0xF0;
+    if (command == 0x90 && event.data2 != 0)
+    {
+        note_on_count++;
+    }
+    else if (command == 0x80 ||
+             (command == 0x90 && event.data2 == 0))
+    {
+        note_off_count++;
+    }
+}
+
+if (Appli_state != previous_state)
+{
+    if (Appli_state == APPLICATION_READY)
+    {
+        USBH_MIDI_Receive(&hUsbHostFS,
+                          midi_rx_buffer,
+                          sizeof(midi_rx_buffer));
+    }
+
+    previous_state = Appli_state;
+}
+
+    static uint32_t last_report = 0;
+
+    if (HAL_GetTick() - last_report >= 10000)
+    {
+        last_report = HAL_GetTick();
+
+        printf("[STATS] USB pkts: %lu | MIDI evts: %lu | ON: %lu | OFF: %lu | Overruns: %lu\r\n",
+               midi_usb_packets,
+               midi_events,
+               note_on_count,
+               note_off_count,
+               midi_queue_overruns);
+    }
+
   }
   /* USER CODE END 3 */
 }
