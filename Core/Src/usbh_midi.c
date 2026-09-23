@@ -112,9 +112,9 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
             }
 		}
 
-		if (MIDI_Handle->InEp == 0 || MIDI_Handle->OutEp == 0)
+		if (MIDI_Handle->InEp == 0)
 		{
-			USBH_DbgLog("Cannot Find the MIDI Endpoints");
+			USBH_DbgLog("Cannot Find the MIDI IN Endpoint");
 			USBH_free(MIDI_Handle);
 			phost->pActiveClass->pData = 0;
 			return USBH_FAIL;

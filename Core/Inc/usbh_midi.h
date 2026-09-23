@@ -42,9 +42,6 @@
 #define USB_MIDI_DATA_IN_SIZE           64
 #define USB_MIDI_DATA_OUT_SIZE          64
 
-// endpoint assignments (don't change!)
-#define USB_MIDI_DATA_OUT_EP 0x02
-#define USB_MIDI_DATA_IN_EP  0x81
 /** @defgroup USBH_MIDI_CORE_Exported_Defines
  * @{
  */
