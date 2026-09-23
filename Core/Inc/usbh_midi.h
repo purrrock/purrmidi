@@ -142,6 +142,7 @@ typedef enum
 	MIDI_SEND_DATA_WAIT,
 	MIDI_RECEIVE_DATA,
 	MIDI_RECEIVE_DATA_WAIT,
+	MIDI_RECEIVE_DATA_WAIT_STALL,
 }
 MIDI_DataStateTypeDef;
 
@@ -163,7 +164,10 @@ typedef struct _MIDI_Process
 	uint8_t			InEp;
 	uint16_t		OutEpSize;
 	uint16_t		InEpSize;
+	uint8_t			OutEpType;
 	uint8_t			InEpType;
+	uint16_t		LastRxLength;
+	uint8_t			RxStallRetryCounter;
 
 	uint8_t			*pTxData;
 	uint8_t			*pRxData;
@@ -176,6 +180,8 @@ typedef struct _MIDI_Process
 MIDI_HandleTypeDef;
 
 /*---------------------------Exported_FunctionsPrototype-------------------------------------*/
+
+void USBH_MIDI_TransmitErrorCallback(USBH_HandleTypeDef *phost);
 
 USBH_StatusTypeDef  USBH_MIDI_Transmit(USBH_HandleTypeDef *phost,
                                       uint8_t *pbuff,
