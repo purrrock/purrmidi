@@ -127,7 +127,13 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
 		if (MIDI_Handle->OutEp != 0) {
 			MIDI_Handle->OutPipe = USBH_AllocPipe(phost, MIDI_Handle->OutEp);
 			if (MIDI_Handle->OutPipe != 0xFFFFU && MIDI_Handle->OutPipe != 0) {
-				USBH_OpenPipe(phost, MIDI_Handle->OutPipe, MIDI_Handle->OutEp, phost->device.address, phost->device.speed, out_ep_type, MIDI_Handle->OutEpSize);
+				if (USBH_OpenPipe(phost, MIDI_Handle->OutPipe, MIDI_Handle->OutEp, phost->device.address, phost->device.speed, out_ep_type, MIDI_Handle->OutEpSize) != USBH_OK) {
+					USBH_DbgLog("Cannot open pipe for MIDI OUT Endpoint");
+					USBH_FreePipe(phost, MIDI_Handle->OutPipe);
+					USBH_free(MIDI_Handle);
+					phost->pActiveClass->pData = 0;
+					return USBH_FAIL;
+				}
 				USBH_LL_SetToggle(phost, MIDI_Handle->OutPipe, 0);
 			} else {
 				USBH_DbgLog("Cannot allocate pipe for MIDI OUT Endpoint");
@@ -140,7 +146,17 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
 		if (MIDI_Handle->InEp != 0) {
 			MIDI_Handle->InPipe = USBH_AllocPipe(phost, MIDI_Handle->InEp);
 			if (MIDI_Handle->InPipe != 0xFFFFU && MIDI_Handle->InPipe != 0) {
-				USBH_OpenPipe(phost, MIDI_Handle->InPipe, MIDI_Handle->InEp, phost->device.address, phost->device.speed, in_ep_type, MIDI_Handle->InEpSize);
+				if (USBH_OpenPipe(phost, MIDI_Handle->InPipe, MIDI_Handle->InEp, phost->device.address, phost->device.speed, in_ep_type, MIDI_Handle->InEpSize) != USBH_OK) {
+					USBH_DbgLog("Cannot open pipe for MIDI IN Endpoint");
+					if (MIDI_Handle->OutPipe != 0xFFFFU && MIDI_Handle->OutPipe != 0) {
+						USBH_ClosePipe(phost, MIDI_Handle->OutPipe);
+						USBH_FreePipe(phost, MIDI_Handle->OutPipe);
+					}
+					USBH_FreePipe(phost, MIDI_Handle->InPipe);
+					USBH_free(MIDI_Handle);
+					phost->pActiveClass->pData = 0;
+					return USBH_FAIL;
+				}
 				USBH_LL_SetToggle(phost, MIDI_Handle->InPipe, 0);
 			} else {
 				USBH_DbgLog("Cannot allocate pipe for MIDI IN Endpoint");
@@ -580,13 +596,11 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
         }
         else if (URB_Status == USBH_URB_STALL)
         {
-            printf("[USB HW] URB Stall = %d\r\n", URB_Status);
 			MIDI_Handle->RxStallRetryCounter = 3; /* Limit retries */
             MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA_WAIT_STALL;
         }
         else if (URB_Status == USBH_URB_ERROR)
         {
-            printf("[USB HW] URB Error = %d\r\n", URB_Status);
             MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
         }
         break;
@@ -622,6 +636,16 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
  * @retval None
  */
 __weak void USBH_MIDI_TransmitCallback(USBH_HandleTypeDef *phost)
+{
+
+}
+
+/**
+ * @brief  The function informs user that an error occurred during data transmission.
+ *  @param  pdev: Selected device
+ * @retval None
+ */
+__weak void USBH_MIDI_TransmitErrorCallback(USBH_HandleTypeDef *phost)
 {
 
 }
