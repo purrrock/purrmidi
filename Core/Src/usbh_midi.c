@@ -12,8 +12,6 @@
 
 /*------------------------------------------------------------------------------------------------------------------------------*/
 
-static volatile uint8_t midi_sof_flag = 0;
-
 /** @defgroup USBH_MIDI_CORE_Private_FunctionPrototypes
  * @{
  */
@@ -112,6 +110,14 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
                     out_ep_type = current_ep_type;
                 }
             }
+		}
+
+		if (MIDI_Handle->InEp == 0 || MIDI_Handle->OutEp == 0)
+		{
+			USBH_DbgLog("Cannot Find the MIDI Endpoints");
+			USBH_free(MIDI_Handle);
+			phost->pActiveClass->pData = 0;
+			return USBH_FAIL;
 		}
 
 		// Выделяем и открываем каналы, передавая сохраненные типы
@@ -261,7 +267,6 @@ static USBH_StatusTypeDef USBH_MIDI_Process (USBH_HandleTypeDef *phost)
   */
 static USBH_StatusTypeDef USBH_MIDI_SOFProcess (USBH_HandleTypeDef *phost)
 {
-  midi_sof_flag = 1;
   return USBH_OK;
 }
 
@@ -435,11 +440,21 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
     switch(MIDI_Handle->data_rx_state)
     {
     case MIDI_RECEIVE_DATA:
-        // 1. Отправляем запрос на чтение мгновенно, без ожидания таймера
-        USBH_BulkReceiveData (phost,
-                MIDI_Handle->pRxData,
-                MIDI_Handle->InEpSize,
-                MIDI_Handle->InPipe);
+        // 1. Отправляем запрос на чтение в зависимости от типа конечной точки
+        if (MIDI_Handle->InEpType == USB_EP_TYPE_INTR)
+        {
+            USBH_InterruptReceiveData(phost,
+                    MIDI_Handle->pRxData,
+                    MIDI_Handle->InEpSize,
+                    MIDI_Handle->InPipe);
+        }
+        else
+        {
+            USBH_BulkReceiveData (phost,
+                    MIDI_Handle->pRxData,
+                    MIDI_Handle->InEpSize,
+                    MIDI_Handle->InPipe);
+        }
         MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA_WAIT;
         break;
 
