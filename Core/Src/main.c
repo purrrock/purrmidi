@@ -54,6 +54,7 @@ static volatile uint32_t note_off_count = 0;
 static volatile uint32_t midi_usb_packets = 0;
 static volatile uint32_t midi_events = 0;
 static volatile uint32_t midi_queue_overruns = 0;
+static volatile uint32_t midi_receive_errors = 0;
 
 #define MIDI_EVENT_QUEUE_SIZE 256
 typedef struct
@@ -83,8 +84,10 @@ static uint8_t MIDI_QueueGet(MIDI_Event_t *event);
 /* USER CODE BEGIN 0 */
 // Перенаправление printf в UART
 int _write(int file, char *ptr, int len) {
-    HAL_UART_Transmit(&huart3, (uint8_t*)ptr, len, HAL_MAX_DELAY);
-    return len;
+    if (HAL_UART_Transmit(&huart3, (uint8_t*)ptr, len, 10) == HAL_OK) {
+        return len;
+    }
+    return 0;
 }
 
 extern ApplicationTypeDef Appli_state;
@@ -148,9 +151,12 @@ void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
         MIDI_QueueEvent(status, data1, data2);
     }
 
-    USBH_MIDI_Receive(phost,
-                      midi_rx_buffer,
-                      sizeof(midi_rx_buffer));
+    if (USBH_MIDI_Receive(phost,
+                          midi_rx_buffer,
+                          sizeof(midi_rx_buffer)) != USBH_OK)
+    {
+        midi_receive_errors++;
+    }
 }
 
 // функция помещения события в очередь
@@ -259,9 +265,12 @@ if (Appli_state != previous_state)
 {
     if (Appli_state == APPLICATION_READY)
     {
-        USBH_MIDI_Receive(&hUsbHostFS,
-                          midi_rx_buffer,
-                          sizeof(midi_rx_buffer));
+        if (USBH_MIDI_Receive(&hUsbHostFS,
+                              midi_rx_buffer,
+                              sizeof(midi_rx_buffer)) != USBH_OK)
+        {
+            midi_receive_errors++;
+        }
     }
 
     previous_state = Appli_state;
@@ -273,12 +282,13 @@ if (Appli_state != previous_state)
     {
         last_report = HAL_GetTick();
 
-        printf("[STATS] USB pkts: %lu | MIDI evts: %lu | ON: %lu | OFF: %lu | Overruns: %lu\r\n",
+        printf("[STATS] USB pkts: %lu | MIDI evts: %lu | ON: %lu | OFF: %lu | Overruns: %lu | RX errors: %lu\r\n",
                midi_usb_packets,
                midi_events,
                note_on_count,
                note_off_count,
-               midi_queue_overruns);
+               midi_queue_overruns,
+               midi_receive_errors);
     }
 
   }
