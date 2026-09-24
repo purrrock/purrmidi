@@ -85,7 +85,6 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
         MIDI_Handle->OutEp = 0;
 
         uint8_t in_ep_type = USB_EP_TYPE_BULK;
-        uint8_t out_ep_type = USB_EP_TYPE_BULK;
 
         // ВМЕСТО перебора всех интерфейсов, смотрим ТОЛЬКО в найденный MIDI-интерфейс (переменная interface)
         uint8_t num_ep = phost->device.CfgDesc.Itf_Desc[interface].bNumEndpoints;
@@ -108,7 +107,6 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
                 } else {
                     MIDI_Handle->OutEp = ep_addr;
                     MIDI_Handle->OutEpSize = ep_size;
-                    out_ep_type = current_ep_type;
                 }
             }
 		}
@@ -122,12 +120,6 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
 		}
 
 		// Выделяем и открываем каналы, передавая сохраненные типы
-		if (MIDI_Handle->OutEp != 0) {
-			MIDI_Handle->OutPipe = USBH_AllocPipe(phost, MIDI_Handle->OutEp);
-			USBH_OpenPipe(phost, MIDI_Handle->OutPipe, MIDI_Handle->OutEp, phost->device.address, phost->device.speed, out_ep_type, MIDI_Handle->OutEpSize);
-			USBH_LL_SetToggle(phost, MIDI_Handle->OutPipe, 0);
-		}
-
 		if (MIDI_Handle->InEp != 0) {
 			MIDI_Handle->InPipe = USBH_AllocPipe(phost, MIDI_Handle->InEp);
 
