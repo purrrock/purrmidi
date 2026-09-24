@@ -162,8 +162,6 @@ USBH_StatusTypeDef USBH_MIDI_InterfaceDeInit (USBH_HandleTypeDef *phost)
 
 	if ( MIDI_Handle->OutPipe)
 	{
-		USBH_ClosePipe(phost, MIDI_Handle->OutPipe);
-		USBH_FreePipe  (phost, MIDI_Handle->OutPipe);
 		MIDI_Handle->OutPipe = 0;     /* Reset the Channel as Free */
 	}
 
@@ -217,7 +215,6 @@ USBH_StatusTypeDef  USBH_MIDI_Stop(USBH_HandleTypeDef *phost)
     MIDI_Handle->state = MIDI_IDLE_STATE;
 
     USBH_ClosePipe(phost, MIDI_Handle->InPipe);
-    USBH_ClosePipe(phost, MIDI_Handle->OutPipe);
   }
   return USBH_OK;
 }
