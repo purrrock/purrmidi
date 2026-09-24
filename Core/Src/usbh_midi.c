@@ -130,8 +130,25 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
 
 		if (MIDI_Handle->InEp != 0) {
 			MIDI_Handle->InPipe = USBH_AllocPipe(phost, MIDI_Handle->InEp);
-			USBH_OpenPipe(phost, MIDI_Handle->InPipe, MIDI_Handle->InEp, phost->device.address, phost->device.speed, in_ep_type, MIDI_Handle->InEpSize);
-			USBH_LL_SetToggle(phost, MIDI_Handle->InPipe, 0);
+
+			if (MIDI_Handle->InPipe == 0x00U || MIDI_Handle->InPipe == 0xFFU || (uint16_t)MIDI_Handle->InPipe == 0xFFFFU)
+			{
+				USBH_DbgLog("Cannot allocate Pipe for MIDI IN Endpoint");
+				USBH_free(MIDI_Handle);
+				phost->pActiveClass->pData = NULL;
+				return USBH_FAIL;
+			}
+
+			if (USBH_OpenPipe(phost, MIDI_Handle->InPipe, MIDI_Handle->InEp, phost->device.address, phost->device.speed, in_ep_type, MIDI_Handle->InEpSize) != USBH_OK)
+			{
+				USBH_DbgLog("Cannot open Pipe for MIDI IN Endpoint");
+				USBH_FreePipe(phost, MIDI_Handle->InPipe);
+				USBH_free(MIDI_Handle);
+				phost->pActiveClass->pData = NULL;
+				return USBH_FAIL;
+			}
+
+			USBH_LL_SetToggle(phost, MIDI_Handle->InPipe, 0U);
 		}
 
 		MIDI_Handle->state = MIDI_IDLE_STATE;
