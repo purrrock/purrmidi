@@ -172,6 +172,7 @@ typedef struct _MIDI_Process
 	MIDI_DataStateTypeDef		data_tx_state;
 	MIDI_DataStateTypeDef		data_rx_state;
 	uint8_t						Rx_Poll;
+	uint16_t					LastRxLength;
 }
 MIDI_HandleTypeDef;
 

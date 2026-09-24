@@ -78,6 +78,7 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
 		}
 
 		USBH_memset(MIDI_Handle, 0, sizeof(MIDI_HandleTypeDef)); // clear memory for MIDI_Handle
+		MIDI_Handle->LastRxLength = 0;
 
 		// Находим реальное количество конечных точек в MIDI интерфейсе
         MIDI_Handle->InEp = 0;
@@ -283,7 +284,7 @@ uint16_t USBH_MIDI_GetLastReceivedDataSize(USBH_HandleTypeDef *phost)
 
 	if(phost->gState == HOST_CLASS)
 	{
-		return USBH_LL_GetLastXferSize(phost, MIDI_Handle->InPipe);
+		return MIDI_Handle->LastRxLength;
 	}
 	else
 	{
@@ -482,7 +483,7 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
 
         if (URB_Status == USBH_URB_DONE)
         {
-            // length = USBH_LL_GetLastXferSize(phost, MIDI_Handle->InPipe);
+            MIDI_Handle->LastRxLength = USBH_LL_GetLastXferSize(phost, MIDI_Handle->InPipe);
             MIDI_Handle->data_rx_state = MIDI_IDLE;
             USBH_MIDI_ReceiveCallback(phost);
             // Если пакет прочитан успешно, callback запустит чтение заново.
