@@ -171,10 +171,6 @@ MIDI_HandleTypeDef;
 
 /*---------------------------Exported_FunctionsPrototype-------------------------------------*/
 
-USBH_StatusTypeDef  USBH_MIDI_Transmit(USBH_HandleTypeDef *phost,
-                                      uint8_t *pbuff,
-                                      uint16_t length);
-
 USBH_StatusTypeDef  USBH_MIDI_Receive(USBH_HandleTypeDef *phost,
                                      uint8_t *pbuff,
                                      uint16_t length);
@@ -183,8 +179,6 @@ USBH_StatusTypeDef  USBH_MIDI_Receive(USBH_HandleTypeDef *phost,
 uint16_t            USBH_MIDI_GetLastReceivedDataSize(USBH_HandleTypeDef *phost);
 
 USBH_StatusTypeDef  USBH_MIDI_Stop(USBH_HandleTypeDef *phost);
-
-void USBH_MIDI_TransmitCallback(USBH_HandleTypeDef *phost);
 
 void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost);
 
