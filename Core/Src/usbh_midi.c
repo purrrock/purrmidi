@@ -358,24 +358,15 @@ static void MIDI_ProcessTransmission(USBH_HandleTypeDef *phost)
 
 	case MIDI_SEND_DATA:
 		MIDI_Handle->data_tx_state = MIDI_SEND_DATA_WAIT;
+
 		break;
 
 	case MIDI_SEND_DATA_WAIT:
 
-		URB_Status = USBH_URB_DONE;
-
 		/*Check the status done for transmission*/
 		if(URB_Status == USBH_URB_DONE )
 		{
-			if(MIDI_Handle->TxDataLength > USB_MIDI_DATA_OUT_SIZE)
-			{
-				MIDI_Handle->TxDataLength -= USB_MIDI_DATA_OUT_SIZE ;
-				MIDI_Handle->pTxData += USB_MIDI_DATA_OUT_SIZE;
-			}
-			else
-			{
-				MIDI_Handle->TxDataLength = 0;
-			}
+			MIDI_Handle->TxDataLength = 0;
 
 			if( MIDI_Handle->TxDataLength > 0)
 			{
