@@ -514,12 +514,34 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
             }
             MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA_WAIT;
         }
-        else if (URB_Status == USBH_URB_ERROR || URB_Status == USBH_URB_STALL)
+        else if (URB_Status == USBH_URB_ERROR)
         {
-            printf("[USB HW] URB Error/Stall = %d\r\n", URB_Status);
-            MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
+            MIDI_Handle->data_rx_state = MIDI_IDLE;
+        }
+        else if (URB_Status == USBH_URB_STALL)
+        {
+            MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA_STALL;
         }
         break;
+
+    case MIDI_RECEIVE_DATA_STALL:
+    {
+        USBH_StatusTypeDef req_status = USBH_ClrFeature(phost, MIDI_Handle->InEp);
+        if (req_status == USBH_OK)
+        {
+            USBH_LL_SetToggle(phost, MIDI_Handle->InPipe, 0U);
+            MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
+        }
+        else if (req_status == USBH_BUSY)
+        {
+            /* Keep MIDI_RECEIVE_DATA_STALL state */
+        }
+        else
+        {
+            MIDI_Handle->data_rx_state = MIDI_IDLE;
+        }
+        break;
+    }
 
     default:
         break;
