@@ -326,6 +326,11 @@ USBH_StatusTypeDef  USBH_MIDI_Transmit(USBH_HandleTypeDef *phost, uint8_t *pbuff
  */
 USBH_StatusTypeDef  USBH_MIDI_Receive(USBH_HandleTypeDef *phost, uint8_t *pbuff, uint16_t length)
 {
+	if (pbuff == NULL || length == 0)
+	{
+		return USBH_FAIL;
+	}
+
 	USBH_StatusTypeDef Status = USBH_BUSY;
 	MIDI_HandleTypeDef *MIDI_Handle =  phost->pActiveClass->pData;
 
