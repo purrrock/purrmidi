@@ -310,21 +310,11 @@ uint16_t USBH_MIDI_GetLastReceivedDataSize(USBH_HandleTypeDef *phost)
  */
 USBH_StatusTypeDef  USBH_MIDI_Transmit(USBH_HandleTypeDef *phost, uint8_t *pbuff, uint16_t length)
 {
-	USBH_StatusTypeDef Status = USBH_BUSY;
-	MIDI_HandleTypeDef *MIDI_Handle =  phost->pActiveClass->pData;
+	(void)phost;
+	(void)pbuff;
+	(void)length;
 
-	if((MIDI_Handle->state == MIDI_IDLE_STATE) || (MIDI_Handle->state == MIDI_TRANSFER_DATA))
-	{
-		MIDI_Handle->pTxData = pbuff;
-		MIDI_Handle->TxDataLength = length;
-		MIDI_Handle->state = MIDI_TRANSFER_DATA;
-		MIDI_Handle->data_tx_state = MIDI_SEND_DATA;
-		Status = USBH_OK;
-#if (USBH_USE_OS == 1)
-		osMessagePut ( phost->os_event, USBH_CLASS_EVENT, 0);
-#endif
-	}
-	return Status;
+	return USBH_FAIL;
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------*/
