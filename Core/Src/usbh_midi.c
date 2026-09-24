@@ -440,23 +440,32 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
     switch(MIDI_Handle->data_rx_state)
     {
     case MIDI_RECEIVE_DATA:
+    {
         // 1. Отправляем запрос на чтение в зависимости от типа конечной точки
+        uint16_t rx_length = MIDI_Handle->RxDataLength;
+
+        if (rx_length > MIDI_Handle->InEpSize)
+        {
+            rx_length = MIDI_Handle->InEpSize;
+        }
+
         if (MIDI_Handle->InEpType == USB_EP_TYPE_INTR)
         {
             USBH_InterruptReceiveData(phost,
                     MIDI_Handle->pRxData,
-                    MIDI_Handle->InEpSize,
+                    rx_length,
                     MIDI_Handle->InPipe);
         }
         else
         {
             USBH_BulkReceiveData (phost,
                     MIDI_Handle->pRxData,
-                    MIDI_Handle->InEpSize,
+                    rx_length,
                     MIDI_Handle->InPipe);
         }
         MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA_WAIT;
         break;
+    }
 
     case MIDI_RECEIVE_DATA_WAIT:
         URB_Status = USBH_LL_GetURBState(phost, MIDI_Handle->InPipe);
