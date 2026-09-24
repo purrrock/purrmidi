@@ -26,8 +26,6 @@ static USBH_StatusTypeDef USBH_MIDI_SOFProcess(USBH_HandleTypeDef *phost);
 
 static USBH_StatusTypeDef USBH_MIDI_ClassRequest (USBH_HandleTypeDef *phost);
 
-static void MIDI_ProcessTransmission(USBH_HandleTypeDef *phost);
-
 static void MIDI_ProcessReception(USBH_HandleTypeDef *phost);
 
 /*-------------------------------------------------------------------------*/
@@ -234,7 +232,6 @@ static USBH_StatusTypeDef USBH_MIDI_Process (USBH_HandleTypeDef *phost)
 
 	case MIDI_TRANSFER_DATA:
 
-		MIDI_ProcessTransmission(phost);
 		MIDI_ProcessReception(phost);
 		break;
 
@@ -339,59 +336,6 @@ USBH_StatusTypeDef  USBH_MIDI_Receive(USBH_HandleTypeDef *phost, uint8_t *pbuff,
 #endif
 	}
 	return Status;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------*/
-
-/**
- * @brief  The function is responsible for sending data to the device
- *  @param  pdev: Selected device
- * @retval None
- */
-static void MIDI_ProcessTransmission(USBH_HandleTypeDef *phost)
-{
-	MIDI_HandleTypeDef *MIDI_Handle =  phost->pActiveClass->pData;
-	USBH_URBStateTypeDef URB_Status = USBH_URB_IDLE;
-
-	switch(MIDI_Handle->data_tx_state)
-	{
-
-	case MIDI_SEND_DATA:
-		MIDI_Handle->data_tx_state = MIDI_SEND_DATA_WAIT;
-
-		break;
-
-	case MIDI_SEND_DATA_WAIT:
-
-		/*Check the status done for transmission*/
-		if(URB_Status == USBH_URB_DONE )
-		{
-			MIDI_Handle->TxDataLength = 0;
-
-			if( MIDI_Handle->TxDataLength > 0)
-			{
-				MIDI_Handle->data_tx_state = MIDI_SEND_DATA;
-			}
-			else
-			{
-				MIDI_Handle->data_tx_state = MIDI_IDLE;
-				USBH_MIDI_TransmitCallback(phost);
-			}
-#if (USBH_USE_OS == 1)
-			osMessagePut ( phost->os_event, USBH_CLASS_EVENT, 0);
-#endif
-		}
-		else if( URB_Status == USBH_URB_NOTREADY )
-		{
-			MIDI_Handle->data_tx_state = MIDI_SEND_DATA;
-#if (USBH_USE_OS == 1)
-			osMessagePut ( phost->os_event, USBH_CLASS_EVENT, 0);
-#endif
-		}
-		break;
-	default:
-		break;
-	}
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------*/
