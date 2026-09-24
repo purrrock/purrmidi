@@ -491,18 +491,28 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
         }
 		else if (URB_Status == USBH_URB_NOTREADY)
         {
+            uint16_t rx_length = MIDI_Handle->RxDataLength;
+
+            if (rx_length > MIDI_Handle->InEpSize)
+            {
+                rx_length = MIDI_Handle->InEpSize;
+            }
+
             if (MIDI_Handle->InEpType == USB_EP_TYPE_INTR)
             {
-			    // Независимый таймер вместо аппаратного флага SOF,
-                // который отключается при некоторых генерациях CubeMX
-                static uint32_t last_nak_time = 0;
-                if (HAL_GetTick() - last_nak_time >= 1)
-                {
-                    last_nak_time = HAL_GetTick();
-                    MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
-                }
+                USBH_InterruptReceiveData(phost,
+                        MIDI_Handle->pRxData,
+                        rx_length,
+                        MIDI_Handle->InPipe);
             }
-            // For Bulk, we don't resubmit, hardware handles it
+            else
+            {
+                USBH_BulkReceiveData (phost,
+                        MIDI_Handle->pRxData,
+                        rx_length,
+                        MIDI_Handle->InPipe);
+            }
+            MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA_WAIT;
         }
         else if (URB_Status == USBH_URB_ERROR || URB_Status == USBH_URB_STALL)
         {
