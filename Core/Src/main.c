@@ -150,13 +150,6 @@ void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
         midi_events++;
         MIDI_QueueEvent(status, data1, data2);
     }
-
-    if (USBH_MIDI_Receive(phost,
-                          midi_rx_buffer,
-                          sizeof(midi_rx_buffer)) != USBH_OK)
-    {
-        midi_receive_errors++;
-    }
 }
 
 // функция помещения события в очередь

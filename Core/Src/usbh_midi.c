@@ -152,17 +152,17 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
  */
 USBH_StatusTypeDef USBH_MIDI_InterfaceDeInit (USBH_HandleTypeDef *phost)
 {
-	MIDI_HandleTypeDef *MIDI_Handle =  phost->pActiveClass->pData;
-
-	if ( MIDI_Handle->InPipe)
+	if (phost->pActiveClass != NULL && phost->pActiveClass->pData != NULL)
 	{
-		USBH_ClosePipe(phost, MIDI_Handle->InPipe);
-		USBH_FreePipe  (phost, MIDI_Handle->InPipe);
-		MIDI_Handle->InPipe = 0;     /* Reset the Channel as Free */
-	}
+		MIDI_HandleTypeDef *MIDI_Handle =  phost->pActiveClass->pData;
 
-	if(phost->pActiveClass->pData)
-	{
+		if ( MIDI_Handle->InPipe)
+		{
+			USBH_ClosePipe(phost, MIDI_Handle->InPipe);
+			USBH_FreePipe  (phost, MIDI_Handle->InPipe);
+			MIDI_Handle->InPipe = 0;     /* Reset the Channel as Free */
+		}
+
 		USBH_free (phost->pActiveClass->pData);
 		phost->pActiveClass->pData = 0;
 	}
@@ -319,7 +319,7 @@ USBH_StatusTypeDef  USBH_MIDI_Receive(USBH_HandleTypeDef *phost, uint8_t *pbuff,
 	USBH_StatusTypeDef Status = USBH_BUSY;
 	MIDI_HandleTypeDef *MIDI_Handle =  phost->pActiveClass->pData;
 
-	if (MIDI_Handle->data_rx_state != MIDI_RECEIVE_DATA && MIDI_Handle->data_rx_state == MIDI_RECEIVE_DATA_WAIT)
+	if (MIDI_Handle->data_rx_state != MIDI_IDLE)
 	{
 		return USBH_BUSY;
 	}
@@ -388,10 +388,8 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
         if (URB_Status == USBH_URB_DONE)
         {
             MIDI_Handle->LastRxLength = USBH_LL_GetLastXferSize(phost, MIDI_Handle->InPipe);
-            MIDI_Handle->data_rx_state = MIDI_IDLE;
             USBH_MIDI_ReceiveCallback(phost);
-            // Если пакет прочитан успешно, callback запустит чтение заново.
-            // Благодаря отсутствию задержки, следующий пакет вытянется моментально.
+            MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
         }
 		else if (URB_Status == USBH_URB_NOTREADY)
         {
