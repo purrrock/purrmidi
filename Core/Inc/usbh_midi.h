@@ -159,10 +159,7 @@ typedef struct _MIDI_Process
 {
 	MIDI_StateTypeDef			state;
 	uint8_t			InPipe;
-	uint8_t			OutPipe;
-	uint8_t			OutEp;
 	uint8_t			InEp;
-	uint16_t		OutEpSize;
 	uint16_t		InEpSize;
 	uint8_t			InEpType;
 

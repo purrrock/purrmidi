@@ -26,8 +26,6 @@ static USBH_StatusTypeDef USBH_MIDI_SOFProcess(USBH_HandleTypeDef *phost);
 
 static USBH_StatusTypeDef USBH_MIDI_ClassRequest (USBH_HandleTypeDef *phost);
 
-static void MIDI_ProcessTransmission(USBH_HandleTypeDef *phost);
-
 static void MIDI_ProcessReception(USBH_HandleTypeDef *phost);
 
 /*-------------------------------------------------------------------------*/
@@ -82,7 +80,6 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
 
 		// Находим реальное количество конечных точек в MIDI интерфейсе
         MIDI_Handle->InEp = 0;
-        MIDI_Handle->OutEp = 0;
 
         uint8_t in_ep_type = USB_EP_TYPE_BULK;
 
@@ -104,9 +101,6 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
                     MIDI_Handle->InEpSize = ep_size;
                     MIDI_Handle->InEpType = current_ep_type;
                     in_ep_type = current_ep_type;
-                } else {
-                    MIDI_Handle->OutEp = ep_addr;
-                    MIDI_Handle->OutEpSize = ep_size;
                 }
             }
 		}
@@ -159,11 +153,6 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
 USBH_StatusTypeDef USBH_MIDI_InterfaceDeInit (USBH_HandleTypeDef *phost)
 {
 	MIDI_HandleTypeDef *MIDI_Handle =  phost->pActiveClass->pData;
-
-	if ( MIDI_Handle->OutPipe)
-	{
-		MIDI_Handle->OutPipe = 0;     /* Reset the Channel as Free */
-	}
 
 	if ( MIDI_Handle->InPipe)
 	{
@@ -243,7 +232,6 @@ static USBH_StatusTypeDef USBH_MIDI_Process (USBH_HandleTypeDef *phost)
 
 	case MIDI_TRANSFER_DATA:
 
-		MIDI_ProcessTransmission(phost);
 		MIDI_ProcessReception(phost);
 		break;
 
@@ -348,86 +336,6 @@ USBH_StatusTypeDef  USBH_MIDI_Receive(USBH_HandleTypeDef *phost, uint8_t *pbuff,
 #endif
 	}
 	return Status;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------*/
-
-/**
- * @brief  The function is responsible for sending data to the device
- *  @param  pdev: Selected device
- * @retval None
- */
-static void MIDI_ProcessTransmission(USBH_HandleTypeDef *phost)
-{
-	MIDI_HandleTypeDef *MIDI_Handle =  phost->pActiveClass->pData;
-	USBH_URBStateTypeDef URB_Status = USBH_URB_IDLE;
-
-	switch(MIDI_Handle->data_tx_state)
-	{
-
-	case MIDI_SEND_DATA:
-		if(MIDI_Handle->TxDataLength > MIDI_Handle->OutEpSize)
-		{
-			USBH_BulkSendData (phost,
-					MIDI_Handle->pTxData,
-					MIDI_Handle->OutEpSize,
-					MIDI_Handle->OutPipe,
-					1);
-		}
-		else
-		{
-			USBH_BulkSendData (phost,
-					MIDI_Handle->pTxData,
-					MIDI_Handle->TxDataLength,
-					MIDI_Handle->OutPipe,
-					1);
-		}
-
-		MIDI_Handle->data_tx_state = MIDI_SEND_DATA_WAIT;
-
-		break;
-
-	case MIDI_SEND_DATA_WAIT:
-
-		URB_Status = USBH_LL_GetURBState(phost, MIDI_Handle->OutPipe);
-
-		/*Check the status done for transmission*/
-		if(URB_Status == USBH_URB_DONE )
-		{
-			if(MIDI_Handle->TxDataLength > MIDI_Handle->OutEpSize)
-			{
-				MIDI_Handle->TxDataLength -= MIDI_Handle->OutEpSize ;
-				MIDI_Handle->pTxData += MIDI_Handle->OutEpSize;
-			}
-			else
-			{
-				MIDI_Handle->TxDataLength = 0;
-			}
-
-			if( MIDI_Handle->TxDataLength > 0)
-			{
-				MIDI_Handle->data_tx_state = MIDI_SEND_DATA;
-			}
-			else
-			{
-				MIDI_Handle->data_tx_state = MIDI_IDLE;
-				USBH_MIDI_TransmitCallback(phost);
-			}
-#if (USBH_USE_OS == 1)
-			osMessagePut ( phost->os_event, USBH_CLASS_EVENT, 0);
-#endif
-		}
-		else if( URB_Status == USBH_URB_NOTREADY )
-		{
-			MIDI_Handle->data_tx_state = MIDI_SEND_DATA;
-#if (USBH_USE_OS == 1)
-			osMessagePut ( phost->os_event, USBH_CLASS_EVENT, 0);
-#endif
-		}
-		break;
-	default:
-		break;
-	}
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------*/
