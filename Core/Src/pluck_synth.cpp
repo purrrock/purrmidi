@@ -22,7 +22,8 @@ static volatile float user_damp       = 0.85f;
 static volatile float pending_damp    = 0.85f;
 
 static volatile bool trigger_pending  = false;
-static volatile bool params_dirty     = true;
+static volatile uint32_t params_sequence = 0;
+static uint32_t applied_sequence      = 0;
 static volatile bool sustain_pedal    = false;
 static volatile int16_t current_note  = -1;
 
@@ -46,7 +47,8 @@ void PluckSynth_Init(void) {
     sustain_pedal   = false;
     current_note    = -1;
     trigger_pending = false;
-    params_dirty    = true;
+    params_sequence  = 0;
+    applied_sequence = 0;
 
     string_voice.SetFreq(pending_freq);
     string_voice.SetAmp(pending_amp);
@@ -80,7 +82,7 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
 
     // Восстанавливаем рабочее время затухания струны и взводим флаг щипка
     active_decay    = user_decay;
-    params_dirty    = true;
+    params_sequence++;
     trigger_pending = true;
 }
 
@@ -91,7 +93,7 @@ void PluckSynth_NoteOff(uint8_t midi_note) {
         if (!sustain_pedal) {
             // Плавное приглушение струны вместо резкого сброса в 0 (без щелчка)
             active_decay = (user_decay < PLUCK_RELEASE_DECAY) ? user_decay : PLUCK_RELEASE_DECAY;
-            params_dirty = true;
+            params_sequence++;
         }
     }
 }
@@ -99,13 +101,13 @@ void PluckSynth_NoteOff(uint8_t midi_note) {
 void PluckSynth_SetDecay(float decay) {
     user_decay   = clamp_f(decay, 0.0f, 1.0f);
     active_decay = user_decay;
-    params_dirty = true;
+    params_sequence++;
 }
 
 void PluckSynth_SetDamp(float damp) {
     user_damp    = clamp_f(damp, 0.0f, 1.0f);
     pending_damp = clamp_f(user_damp, 0.0f, 0.99f);
-    params_dirty = true;
+    params_sequence++;
 }
 
 void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
@@ -126,7 +128,7 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
             sustain_pedal = (value >= 64);
             if (!sustain_pedal && current_note < 0) {
                 active_decay = PLUCK_RELEASE_DECAY;
-                params_dirty = true;
+                params_sequence++;
             }
             break;
 
@@ -138,13 +140,14 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
 int16_t PluckSynth_NextSample(void) {
     float trig = 0.0f;
 
-    // Применяем накопленные изменения параметров атомарно в аудиопотоке
-    if (params_dirty) {
+    // Применяем накопленные изменения параметров в аудиопотоке по счетчику поколений
+    uint32_t current_seq = params_sequence;
+    if (current_seq != applied_sequence) {
         string_voice.SetFreq(pending_freq);
         string_voice.SetAmp(pending_amp);
         string_voice.SetDecay(active_decay);
         string_voice.SetDamp(pending_damp);
-        params_dirty = false;
+        applied_sequence = current_seq;
     }
 
     if (trigger_pending) {
