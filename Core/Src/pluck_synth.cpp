@@ -45,16 +45,18 @@ static float current_control_amp   = 0.5f;
 static float current_control_decay = 0.96f;
 static float current_control_damp  = 0.85f;
 
-// Тройной буфер снимков параметров и механизмы неблокирующего обмена индексами (Lock-Free Triple Buffering)
-static SynthParams params_buffers[3];
-static uint8_t control_write_idx = 0;
-static uint8_t audio_read_idx   = 1;
+#define PARAMS_FIFO_SIZE    16      // Размер FIFO буфера параметров (должен быть степенью двойки)
+#define PARAMS_FIFO_MASK    (PARAMS_FIFO_SIZE - 1)
 
-// shared_state: бит 7 (0x80) указывает на наличие нового snapshot; биты 0..1 (0x03) хранят индекс свободного/актуального буфера
-static std::atomic<uint8_t> shared_state{2};
-
-static constexpr uint8_t NEW_SNAPSHOT_FLAG = 0x80;
-static constexpr uint8_t BUFFER_INDEX_MASK = 0x03;
+// Lock-Free Bounded SPSC FIFO для передачи полных снимков SynthParams из контекста управления в аудиоконтекст.
+// Владение слотами (Slot Ownership Model):
+// - Слоты в диапазоне [params_tail, params_head - 1] принадлежат Consumer (Audio context) и зафиксированы от перезаписи.
+// - Слоты вне этого диапазона свободны и принадлежат Producer (Control context).
+// - Producer проверяет условие (head - tail < PARAMS_FIFO_SIZE). Если FIFO заполнено, Producer отбрасывает пуш,
+//   гарантируя, что слоты Consumer никогда не будут перезаписаны во время чтения или ожидания.
+static SynthParams params_fifo[PARAMS_FIFO_SIZE];
+static std::atomic<uint32_t> params_head{0};
+static std::atomic<uint32_t> params_tail{0};
 
 static NoteOnEvent note_event_fifo[NOTE_EVENT_FIFO_SIZE];
 static std::atomic<uint32_t> fifo_head{0};
@@ -72,17 +74,16 @@ static void CommitParams(float freq, float amp, float decay, float damp) {
     current_control_decay = decay;
     current_control_damp  = damp;
 
-    params_buffers[control_write_idx].freq  = freq;
-    params_buffers[control_write_idx].amp   = amp;
-    params_buffers[control_write_idx].decay = decay;
-    params_buffers[control_write_idx].damp  = damp;
+    uint32_t head = params_head.load(std::memory_order_relaxed);
+    uint32_t tail = params_tail.load(std::memory_order_acquire);
 
-    // Атомарно публикуем индекс своего заполненного буфера вместе с флагом нового снимка (0x80)
-    uint8_t new_state = NEW_SNAPSHOT_FLAG | control_write_idx;
-    uint8_t prev_state = shared_state.exchange(new_state, std::memory_order_acq_rel);
+    // Producer пишет только в гарантированно свободный слот head, если FIFO не заполнено
+    if (head - tail >= PARAMS_FIFO_SIZE) {
+        return;
+    }
 
-    // Извлекаем прошлый индекс буфера (0..2), который переходит в монопольное владение context управления
-    control_write_idx = prev_state & BUFFER_INDEX_MASK;
+    params_fifo[head & PARAMS_FIFO_MASK] = { freq, amp, decay, damp };
+    params_head.store(head + 1, std::memory_order_release);
 }
 
 // Вспомогательные функции lock-free SPSC FIFO для событий NoteOn
@@ -135,13 +136,11 @@ void PluckSynth_Init(void) {
     current_control_decay = 0.96f;
     current_control_damp  = 0.85f;
 
-    params_buffers[0] = { 440.0f, 0.5f, 0.96f, 0.85f };
-    params_buffers[1] = { 440.0f, 0.5f, 0.96f, 0.85f };
-    params_buffers[2] = { 440.0f, 0.5f, 0.96f, 0.85f };
-
-    control_write_idx = 0;
-    audio_read_idx    = 1;
-    shared_state.store(2, std::memory_order_relaxed);
+    for (uint32_t i = 0; i < PARAMS_FIFO_SIZE; i++) {
+        params_fifo[i] = { 440.0f, 0.5f, 0.96f, 0.85f };
+    }
+    params_head.store(0, std::memory_order_relaxed);
+    params_tail.store(0, std::memory_order_relaxed);
 
     sustain_pedal.store(false, std::memory_order_relaxed);
     current_note.store(-1, std::memory_order_relaxed);
@@ -255,20 +254,20 @@ int16_t PluckSynth_NextSample(void) {
         envelope = 1.0f;
         active_audio_note = (int16_t)event.note;
     } else {
-        // Забираем свежий snapshot параметров единой атомарной операцией обмена состояния
-        uint8_t state = shared_state.load(std::memory_order_acquire);
-        if (state & NEW_SNAPSHOT_FLAG) {
-            // Атомарно передаём свой старый audio_read_idx (без флага 0x80) и получаем новый опубликованный snapshot
-            uint8_t prev_state = shared_state.exchange(audio_read_idx, std::memory_order_acq_rel);
-            if (prev_state & NEW_SNAPSHOT_FLAG) {
-                audio_read_idx = prev_state & BUFFER_INDEX_MASK;
+        // Проверяем наличие новых снимков параметров в SPSC FIFO
+        uint32_t head = params_head.load(std::memory_order_acquire);
+        uint32_t tail = params_tail.load(std::memory_order_relaxed);
 
-                const SynthParams& snapshot = params_buffers[audio_read_idx];
-                string_voice.SetFreq(snapshot.freq);
-                string_voice.SetAmp(snapshot.amp);
-                string_voice.SetDecay(snapshot.decay);
-                string_voice.SetDamp(snapshot.damp);
-            }
+        if (head != tail) {
+            // Consumer забирает самый свежий snapshot из (head - 1) & PARAMS_FIFO_MASK
+            const SynthParams& snapshot = params_fifo[(head - 1) & PARAMS_FIFO_MASK];
+            string_voice.SetFreq(snapshot.freq);
+            string_voice.SetAmp(snapshot.amp);
+            string_voice.SetDecay(snapshot.decay);
+            string_voice.SetDamp(snapshot.damp);
+
+            // Продвигаем tail сразу к head, за раз освобождая все накопленные слоты
+            params_tail.store(head, std::memory_order_release);
         }
         trig = 0.0f;
     }
