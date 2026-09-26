@@ -198,13 +198,25 @@ static USBH_StatusTypeDef USBH_MIDI_ClassRequest (USBH_HandleTypeDef *phost)
   */
 USBH_StatusTypeDef  USBH_MIDI_Stop(USBH_HandleTypeDef *phost)
 {
-  MIDI_HandleTypeDef *MIDI_Handle =  phost->pActiveClass->pData;
+  if (phost == NULL || phost->pActiveClass == NULL || phost->pActiveClass->pData == NULL)
+  {
+    return USBH_FAIL;
+  }
 
-  if(phost->gState == HOST_CLASS)
+  MIDI_HandleTypeDef *MIDI_Handle = (MIDI_HandleTypeDef *)phost->pActiveClass->pData;
+
+  if (phost->gState == HOST_CLASS)
   {
     MIDI_Handle->state = MIDI_IDLE_STATE;
+    MIDI_Handle->data_rx_state = MIDI_IDLE;
 
-    USBH_ClosePipe(phost, MIDI_Handle->InPipe);
+    if (MIDI_Handle->InPipe != 0U && MIDI_Handle->InPipe != 0xFFU)
+    {
+      USBH_ClosePipe(phost, MIDI_Handle->InPipe);
+      USBH_OpenPipe(phost, MIDI_Handle->InPipe, MIDI_Handle->InEp,
+                    phost->device.address, phost->device.speed,
+                    MIDI_Handle->InEpType, MIDI_Handle->InEpSize);
+    }
   }
   return USBH_OK;
 }
