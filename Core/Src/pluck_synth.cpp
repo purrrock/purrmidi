@@ -14,6 +14,7 @@ using namespace daisysp;
 #define NOTE_EVENT_FIFO_SIZE    16      // Размер FIFO буфера событий NoteOn (должен быть степенью двойки)
 
 struct NoteOnEvent {
+    uint8_t note;
     float freq;
     float amp;
     float damp;
@@ -24,10 +25,10 @@ struct NoteOnEvent {
 static Pluck string_voice;
 static float pluck_buffer[PLUCK_BUFFER_SIZE];
 
-// Переменные огибающей release
+// Переменные огибающей release (контекст аудиопотока)
 static float release_coeff = 0.0f;
 static float envelope = 0.0f;
-static volatile bool release_active = false;
+static int16_t active_audio_note = -1;
 
 // Переменные синхронизации между main() и прерыванием аудио-DMA
 static volatile float pending_freq    = 440.0f;
@@ -42,10 +43,10 @@ static std::atomic<uint32_t> fifo_head{0};
 static std::atomic<uint32_t> fifo_tail{0};
 static volatile uint32_t dropped_events_count = 0;
 
-static volatile uint32_t params_sequence = 0;
+static std::atomic<uint32_t> params_sequence{0};
 static uint32_t applied_sequence      = 0;
-static volatile bool sustain_pedal    = false;
-static volatile int16_t current_note  = -1;
+static std::atomic<bool> sustain_pedal{false};
+static std::atomic<int16_t> current_note{-1};
 
 // Вспомогательные функции lock-free SPSC FIFO для событий NoteOn
 static bool note_event_fifo_push(const NoteOnEvent& event) {
@@ -86,9 +87,9 @@ void PluckSynth_Init(void) {
     // Инициализация алгоритма Карплуса — Стронга в рекурсивном режиме сглаживания
     string_voice.Init(PLUCK_SAMPLE_RATE, pluck_buffer, PLUCK_BUFFER_SIZE, PLUCK_MODE_RECURSIVE);
 
-    release_coeff   = expf(-1.0f / (PLUCK_SAMPLE_RATE * PLUCK_RELEASE_TIME_SEC));
-    envelope        = 0.0f;
-    release_active  = false;
+    release_coeff     = expf(-1.0f / (PLUCK_SAMPLE_RATE * PLUCK_RELEASE_TIME_SEC));
+    envelope          = 0.0f;
+    active_audio_note = -1;
 
     pending_freq    = 440.0f;
     pending_amp     = 0.5f;
@@ -96,12 +97,12 @@ void PluckSynth_Init(void) {
     active_decay    = 0.96f;
     user_damp       = 0.85f;
     pending_damp    = 0.85f;
-    sustain_pedal   = false;
-    current_note    = -1;
+    sustain_pedal.store(false, std::memory_order_relaxed);
+    current_note.store(-1, std::memory_order_relaxed);
     fifo_head.store(0, std::memory_order_relaxed);
     fifo_tail.store(0, std::memory_order_relaxed);
     dropped_events_count = 0;
-    params_sequence  = 0;
+    params_sequence.store(0, std::memory_order_relaxed);
     applied_sequence = 0;
 
     string_voice.SetFreq(pending_freq);
@@ -117,8 +118,7 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
         return;
     }
 
-    current_note = (int16_t)midi_note;
-    release_active = false;
+    current_note.store((int16_t)midi_note, std::memory_order_relaxed);
 
     // Перевод номера MIDI-ноты в частоту в герцах (функция mtof из DaisySP)
     float freq = mtof((float)midi_note);
@@ -142,9 +142,10 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     pending_amp     = amp;
     pending_damp    = damp;
     active_decay    = decay;
-    params_sequence++;
+    params_sequence.fetch_add(1, std::memory_order_relaxed);
 
     NoteOnEvent event;
+    event.note  = midi_note;
     event.freq  = freq;
     event.amp   = amp;
     event.damp  = damp;
@@ -154,25 +155,21 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
 }
 
 void PluckSynth_NoteOff(uint8_t midi_note) {
-    // Глушим струну только если отпущена именно та нота, которая сейчас звучит
-    if (current_note == (int16_t)midi_note) {
-        current_note = -1;
-        if (!sustain_pedal) {
-            release_active = true;
-        }
-    }
+    // Глушим струну только если отпущена именно та нота, которая сейчас логически активна
+    int16_t expected = (int16_t)midi_note;
+    current_note.compare_exchange_strong(expected, -1, std::memory_order_relaxed);
 }
 
 void PluckSynth_SetDecay(float decay) {
     user_decay   = clamp_f(decay, 0.0f, 1.0f);
     active_decay = user_decay;
-    params_sequence++;
+    params_sequence.fetch_add(1, std::memory_order_relaxed);
 }
 
 void PluckSynth_SetDamp(float damp) {
     user_damp    = clamp_f(damp, 0.0f, 1.0f);
     pending_damp = clamp_f(user_damp, 0.0f, 0.99f);
-    params_sequence++;
+    params_sequence.fetch_add(1, std::memory_order_relaxed);
 }
 
 void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
@@ -190,10 +187,7 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
             break;
 
         case 64: // Sustain Pedal (CC 64)
-            sustain_pedal = (value >= 64);
-            if (!sustain_pedal && current_note < 0) {
-                release_active = true;
-            }
+            sustain_pedal.store(value >= 64, std::memory_order_relaxed);
             break;
 
         default:
@@ -212,10 +206,10 @@ int16_t PluckSynth_NextSample(void) {
         string_voice.SetDamp(event.damp);
         trig = 1.0f;
         envelope = 1.0f;
-        release_active = false;
+        active_audio_note = (int16_t)event.note;
     } else {
         // Применяем накопленные изменения параметров в аудиопотоке по счетчику поколений
-        uint32_t current_seq = params_sequence;
+        uint32_t current_seq = params_sequence.load(std::memory_order_relaxed);
         if (current_seq != applied_sequence) {
             string_voice.SetFreq(pending_freq);
             string_voice.SetAmp(pending_amp);
@@ -229,11 +223,16 @@ int16_t PluckSynth_NextSample(void) {
     // Вычисляем отсчёт физического моделирования струны (-1.0f .. +1.0f)
     float sample_f = string_voice.Process(trig);
 
-    if (release_active) {
-        envelope *= release_coeff;
-        if (envelope < 0.0001f) {
-            envelope = 0.0f;
-            release_active = false;
+    if (active_audio_note >= 0) {
+        int16_t cur_note = current_note.load(std::memory_order_relaxed);
+        bool sus_pedal   = sustain_pedal.load(std::memory_order_relaxed);
+
+        if (cur_note != active_audio_note && !sus_pedal) {
+            envelope *= release_coeff;
+            if (envelope < 0.0001f) {
+                envelope = 0.0f;
+                active_audio_note = -1;
+            }
         }
     }
 
