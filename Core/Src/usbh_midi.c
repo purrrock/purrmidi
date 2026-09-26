@@ -101,6 +101,7 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
                     MIDI_Handle->InEpSize = ep_size;
                     MIDI_Handle->InEpType = current_ep_type;
                     in_ep_type = current_ep_type;
+                    break;
                 }
             }
 		}
@@ -418,7 +419,7 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
         }
         else if (URB_Status == USBH_URB_ERROR)
         {
-            MIDI_Handle->data_rx_state = MIDI_IDLE;
+            MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
         }
         else if (URB_Status == USBH_URB_STALL)
         {
