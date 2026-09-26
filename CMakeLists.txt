@@ -11,7 +11,10 @@ cmake_minimum_required(VERSION 3.22)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
-
+# Включаем поддержку C++ (CXX) в дополнение к C и ASM
+enable_language(C CXX ASM)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Define the build type
 if(NOT CMAKE_BUILD_TYPE)
@@ -37,6 +40,9 @@ add_executable(${CMAKE_PROJECT_NAME})
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
 
+# Подключаем подмодуль DaisySP
+add_subdirectory(Middlewares/Third_Party/DaisySP)
+
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
@@ -45,7 +51,10 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
+	Core/Src/main.c
+    Core/Src/usbh_midi.c
     Core/Src/synth.c
+    Core/Src/pluck_synth.cpp
 )
 
 # Add include paths
@@ -66,4 +75,10 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
 
     # Add user defined libraries
+)
+
+# Линкуем библиотеку DaisySP
+target_link_libraries(${CMAKE_PROJECT_NAME}
+    stm32cubemx
+    DaisySP
 )

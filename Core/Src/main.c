@@ -28,6 +28,8 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include "usbh_midi.h"
+#include "synth.h"       // 
+#include "pluck_synth.h" // Karplus-Strong
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -224,6 +226,8 @@ int main(void)
   MX_SAI1_Init();
   MX_USB_HOST_Init();
   /* USER CODE BEGIN 2 */
+  Synth_Init();      // Инициализация простого синтезатора
+  PluckSynth_Init(); // Инициализация синтезатора струны
   printf("Waiting for USB device to be attached...\r\n");
   /* USER CODE END 2 */
 
