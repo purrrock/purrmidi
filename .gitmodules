@@ -1,0 +1,3 @@
+[submodule "Middlewares/Third_Party/DaisySP"]
+	path = Middlewares/Third_Party/DaisySP
+	url = https://github.com/electro-smith/DaisySP.git
