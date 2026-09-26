@@ -229,7 +229,7 @@ int main(void)
   Synth_Init();      // Инициализация простого синтезатора
   PluckSynth_Init(); // Инициализация синтезатора струны
   // Запуск круговой передачи DMA на ЦАП PCM5102A (пример для SAI1_A)
-   // HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t*)audio_buffer, AUDIO_BUFFER_SIZE);
+  // HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t*)audio_buffer, AUDIO_BUFFER_SIZE);
   printf("Waiting for USB device to be attached...\r\n");
   /* USER CODE END 2 */
 
@@ -271,16 +271,11 @@ if (Appli_state != previous_state)
             midi_receive_errors++;
         }
     }
-
     previous_state = Appli_state;
 }
-
     static uint32_t last_report = 0;
-
     if (HAL_GetTick() - last_report >= 10000)
-    {
-        last_report = HAL_GetTick();
-
+    {   last_report = HAL_GetTick();
         printf("[STATS] USB pkts: %lu | MIDI evts: %lu | ON: %lu | OFF: %lu | Overruns: %lu | RX errors: %lu\r\n",
                midi_usb_packets,
                midi_events,
@@ -289,8 +284,23 @@ if (Appli_state != previous_state)
                midi_queue_overruns,
                midi_receive_errors);
     }
-
   }
+
+  /*
+uint8_t cin      = midi_rx_buffer[0] & 0x0F;
+uint8_t note     = midi_rx_buffer[2];
+uint8_t velocity = midi_rx_buffer[3];
+
+if (cin == 0x09 && velocity > 0) {
+    PluckSynth_NoteOn(note, velocity);
+} 
+else if (cin == 0x08 || (cin == 0x09 && velocity == 0)) {
+    PluckSynth_NoteOff(note);
+} 
+else if (cin == 0x0B) {
+    PluckSynth_ControlChange(note, velocity);
+} */
+
   /* USER CODE END 3 */
 }
 
@@ -353,6 +363,21 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/*
+void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai) {
+    if (hsai->Instance == SAI1_Block_A) {
+        // Заполняем первую половину буфера (AUDIO_BUFFER_FRAMES / 2 стереопар)
+        PluckSynth_FillStereoBuffer(&audio_buffer[0], AUDIO_BUFFER_FRAMES / 2);
+    }
+}
+
+void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai) {
+    if (hsai->Instance == SAI1_Block_A) {
+        // Заполняем вторую половину буфера
+        PluckSynth_FillStereoBuffer(&audio_buffer[AUDIO_BUFFER_FRAMES], AUDIO_BUFFER_FRAMES / 2);
+    }
+} */
 
 /* USER CODE END 4 */
 
