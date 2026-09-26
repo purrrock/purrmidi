@@ -18,6 +18,7 @@ static volatile float pending_freq    = 440.0f;
 static volatile float pending_amp     = 0.5f;
 static volatile float user_decay      = 0.96f;
 static volatile float active_decay    = 0.96f;
+static volatile float user_damp       = 0.85f;
 static volatile float pending_damp    = 0.85f;
 
 static volatile bool trigger_pending  = false;
@@ -40,6 +41,7 @@ void PluckSynth_Init(void) {
     pending_amp     = 0.5f;
     user_decay      = 0.96f;
     active_decay    = 0.96f;
+    user_damp       = 0.85f;
     pending_damp    = 0.85f;
     sustain_pedal   = false;
     current_note    = -1;
@@ -73,8 +75,8 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     pending_amp = 0.05f + 0.95f * norm_vel;
 
     // Чем сильнее удар по клавише, тем ярче звучит струна при щипке
-    float dynamic_damp = pending_damp + (norm_vel * 0.10f);
-    string_voice.SetDamp(clamp_f(dynamic_damp, 0.0f, 0.99f));
+    float dynamic_damp = user_damp + (norm_vel * 0.10f);
+    pending_damp = clamp_f(dynamic_damp, 0.0f, 0.99f);
 
     // Восстанавливаем рабочее время затухания струны и взводим флаг щипка
     active_decay    = user_decay;
@@ -101,7 +103,8 @@ void PluckSynth_SetDecay(float decay) {
 }
 
 void PluckSynth_SetDamp(float damp) {
-    pending_damp = clamp_f(damp, 0.0f, 1.0f);
+    user_damp    = clamp_f(damp, 0.0f, 1.0f);
+    pending_damp = clamp_f(user_damp, 0.0f, 0.99f);
     params_dirty = true;
 }
 
