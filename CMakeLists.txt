@@ -57,6 +57,9 @@ add_library(DaisySP STATIC
     ${DAISYSP_SOURCES}
 )
 
+# Передаем аппаратные флаги микроконтроллера (-mcpu, -mthumb) из CubeMX в DaisySP
+target_link_libraries(DaisySP PRIVATE stm32cubemx)
+
 # Add the DaisySP source directory and all its subdirectories
 # to the include search path.
 file(GLOB_RECURSE DAISYSP_HEADERS CONFIGURE_DEPENDS
