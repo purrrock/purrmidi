@@ -42,8 +42,7 @@ if(NOT EXISTS "${DAISYSP_DIR}/Source")
     )
 endif()
 
-# DaisySP does not need to be added as a CMake subdirectory.
-# Compile its C++ sources directly into a static library.
+# Compile DaisySP C++ sources directly into a static library.
 file(GLOB_RECURSE DAISYSP_SOURCES CONFIGURE_DEPENDS
     "${DAISYSP_DIR}/Source/*.cpp"
 )
@@ -58,8 +57,26 @@ add_library(DaisySP STATIC
     ${DAISYSP_SOURCES}
 )
 
-target_include_directories(DaisySP PUBLIC
+# Add the DaisySP source directory and all its subdirectories
+# to the include search path.
+file(GLOB_RECURSE DAISYSP_HEADERS CONFIGURE_DEPENDS
+    "${DAISYSP_DIR}/Source/*.h"
+    "${DAISYSP_DIR}/Source/*.hpp"
+)
+
+set(DAISYSP_INCLUDE_DIRS
     "${DAISYSP_DIR}/Source"
+)
+
+foreach(HEADER ${DAISYSP_HEADERS})
+    get_filename_component(HEADER_DIR "${HEADER}" DIRECTORY)
+    list(APPEND DAISYSP_INCLUDE_DIRS "${HEADER_DIR}")
+endforeach()
+
+list(REMOVE_DUPLICATES DAISYSP_INCLUDE_DIRS)
+
+target_include_directories(DaisySP PUBLIC
+    ${DAISYSP_INCLUDE_DIRS}
 )
 
 target_compile_features(DaisySP PUBLIC cxx_std_17)
@@ -80,7 +97,8 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Remove an incorrect legacy library dependency when linking C++.
 list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
+# Простой синтаксис (без PRIVATE) для совместимости со скриптом CubeMX
+target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
     DaisySP
 )
