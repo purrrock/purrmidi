@@ -1,7 +1,6 @@
 #include "pluck_synth.h"
 #include "daisysp.h"
-// Явно подключаем нужные модули из папки Source библиотеки DaisySP
-#include "../../Middlewares/Third_Party/DaisySP/DaisySP-LGPL/Source/PhysicalModeling/pluck.h"
+#include "PhysicalModeling/pluck.h"
 #include "Utility/dsp.h"
 using namespace daisysp;
 

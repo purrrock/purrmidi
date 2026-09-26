@@ -45,6 +45,7 @@ endif()
 # Compile DaisySP C++ sources directly into a static library.
 file(GLOB_RECURSE DAISYSP_SOURCES CONFIGURE_DEPENDS
     "${DAISYSP_DIR}/Source/*.cpp"
+    "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.cpp"
 )
 
 if(NOT DAISYSP_SOURCES)
@@ -65,10 +66,13 @@ target_link_libraries(DaisySP PRIVATE stm32cubemx)
 file(GLOB_RECURSE DAISYSP_HEADERS CONFIGURE_DEPENDS
     "${DAISYSP_DIR}/Source/*.h"
     "${DAISYSP_DIR}/Source/*.hpp"
+    "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.h"
+    "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.hpp"
 )
 
 set(DAISYSP_INCLUDE_DIRS
     "${DAISYSP_DIR}/Source"
+    "${DAISYSP_DIR}/DaisySP-LGPL/Source"
 )
 
 foreach(HEADER ${DAISYSP_HEADERS})
@@ -81,6 +85,8 @@ list(REMOVE_DUPLICATES DAISYSP_INCLUDE_DIRS)
 target_include_directories(DaisySP PUBLIC
     ${DAISYSP_INCLUDE_DIRS}
 )
+
+target_compile_definitions(DaisySP PUBLIC USE_DAISYSP_LGPL)
 
 target_compile_features(DaisySP PUBLIC cxx_std_17)
 
