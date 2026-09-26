@@ -3,11 +3,12 @@
 #include "PhysicalModeling/pluck.h"
 #include "Utility/dsp.h"
 #include <atomic>
+#include <cmath>
 using namespace daisysp;
 
 #define PLUCK_SAMPLE_RATE       48000.0f
 #define PLUCK_BUFFER_SIZE       2048
-#define PLUCK_RELEASE_DECAY     0.72f   // Ускоренное затухание при отпускании клавиши
+#define PLUCK_RELEASE_TIME_SEC  0.25f   // Длительность release огибающей в секундах
 #define PLUCK_MASTER_GAIN       0.85f   // Запас по громкости против клиппинга
 
 #define NOTE_EVENT_FIFO_SIZE    16      // Размер FIFO буфера событий NoteOn (должен быть степенью двойки)
@@ -22,6 +23,11 @@ struct NoteOnEvent {
 // Объект физического моделирования струны и буфер линии задержки (8 КБ)
 static Pluck string_voice;
 static float pluck_buffer[PLUCK_BUFFER_SIZE];
+
+// Переменные огибающей release
+static float release_coeff = 0.0f;
+static float envelope = 0.0f;
+static volatile bool release_active = false;
 
 // Переменные синхронизации между main() и прерыванием аудио-DMA
 static volatile float pending_freq    = 440.0f;
@@ -80,6 +86,10 @@ void PluckSynth_Init(void) {
     // Инициализация алгоритма Карплуса — Стронга в рекурсивном режиме сглаживания
     string_voice.Init(PLUCK_SAMPLE_RATE, pluck_buffer, PLUCK_BUFFER_SIZE, PLUCK_MODE_RECURSIVE);
 
+    release_coeff   = expf(-1.0f / (PLUCK_SAMPLE_RATE * PLUCK_RELEASE_TIME_SEC));
+    envelope        = 0.0f;
+    release_active  = false;
+
     pending_freq    = 440.0f;
     pending_amp     = 0.5f;
     user_decay      = 0.96f;
@@ -108,6 +118,7 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     }
 
     current_note = (int16_t)midi_note;
+    release_active = false;
 
     // Перевод номера MIDI-ноты в частоту в герцах (функция mtof из DaisySP)
     float freq = mtof((float)midi_note);
@@ -147,9 +158,7 @@ void PluckSynth_NoteOff(uint8_t midi_note) {
     if (current_note == (int16_t)midi_note) {
         current_note = -1;
         if (!sustain_pedal) {
-            // Плавное приглушение струны вместо резкого сброса в 0 (без щелчка)
-            active_decay = (user_decay < PLUCK_RELEASE_DECAY) ? user_decay : PLUCK_RELEASE_DECAY;
-            params_sequence++;
+            release_active = true;
         }
     }
 }
@@ -183,8 +192,7 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
         case 64: // Sustain Pedal (CC 64)
             sustain_pedal = (value >= 64);
             if (!sustain_pedal && current_note < 0) {
-                active_decay = PLUCK_RELEASE_DECAY;
-                params_sequence++;
+                release_active = true;
             }
             break;
 
@@ -203,6 +211,8 @@ int16_t PluckSynth_NextSample(void) {
         string_voice.SetDecay(event.decay);
         string_voice.SetDamp(event.damp);
         trig = 1.0f;
+        envelope = 1.0f;
+        release_active = false;
     } else {
         // Применяем накопленные изменения параметров в аудиопотоке по счетчику поколений
         uint32_t current_seq = params_sequence;
@@ -217,7 +227,18 @@ int16_t PluckSynth_NextSample(void) {
     }
 
     // Вычисляем отсчёт физического моделирования струны (-1.0f .. +1.0f)
-    float sample_f = string_voice.Process(trig) * PLUCK_MASTER_GAIN * 32767.0f;
+    float sample_f = string_voice.Process(trig);
+
+    if (release_active) {
+        envelope *= release_coeff;
+        if (envelope < 0.0001f) {
+            envelope = 0.0f;
+            release_active = false;
+        }
+    }
+
+    sample_f *= envelope;
+    sample_f *= (PLUCK_MASTER_GAIN * 32767.0f);
 
     // Жёсткое ограничение (Clamping) для защиты от переполнения int16_t
     if (sample_f > 32767.0f) {
