@@ -30,24 +30,55 @@ static float release_coeff = 0.0f;
 static float envelope = 0.0f;
 static int16_t active_audio_note = -1;
 
-// Переменные синхронизации между main() и прерыванием аудио-DMA
-static volatile float pending_freq    = 440.0f;
-static volatile float pending_amp     = 0.5f;
-static volatile float user_decay      = 0.96f;
-static volatile float active_decay    = 0.96f;
-static volatile float user_damp       = 0.85f;
-static volatile float pending_damp    = 0.85f;
+struct SynthParams {
+    float freq;
+    float amp;
+    float decay;
+    float damp;
+};
+
+// Переменные состояния в контексте управления (MIDI / control)
+static float user_decay = 0.96f;
+static float user_damp  = 0.85f;
+static float current_control_freq  = 440.0f;
+static float current_control_amp   = 0.5f;
+static float current_control_decay = 0.96f;
+static float current_control_damp  = 0.85f;
+
+// Двойной буфер снимков параметров и атомарная публикация (lock-free snapshot/commit)
+static SynthParams params_buffers[2];
+static std::atomic<uint32_t> params_published{0};
+static uint32_t applied_published = 0;
 
 static NoteOnEvent note_event_fifo[NOTE_EVENT_FIFO_SIZE];
 static std::atomic<uint32_t> fifo_head{0};
 static std::atomic<uint32_t> fifo_tail{0};
 static volatile uint32_t dropped_events_count = 0;
 
-static std::atomic<uint32_t> params_sequence{0};
-static uint32_t applied_sequence      = 0;
 static std::atomic<bool> sustain_pedal{false};
 static std::atomic<int16_t> current_note{-1};
 static std::atomic<bool> note_pressed[128];
+
+// Вспомогательная функция публикации снимка параметров из контекста управления
+static void CommitParams(float freq, float amp, float decay, float damp) {
+    current_control_freq  = freq;
+    current_control_amp   = amp;
+    current_control_decay = decay;
+    current_control_damp  = damp;
+
+    uint32_t current_pub = params_published.load(std::memory_order_relaxed);
+    uint32_t current_idx = current_pub & 1;
+    uint32_t current_ver = current_pub >> 1;
+
+    uint32_t write_idx = 1 - current_idx;
+    params_buffers[write_idx].freq  = freq;
+    params_buffers[write_idx].amp   = amp;
+    params_buffers[write_idx].decay = decay;
+    params_buffers[write_idx].damp  = damp;
+
+    uint32_t new_pub = ((current_ver + 1) << 1) | write_idx;
+    params_published.store(new_pub, std::memory_order_release);
+}
 
 // Вспомогательные функции lock-free SPSC FIFO для событий NoteOn
 static bool note_event_fifo_push(const NoteOnEvent& event) {
@@ -92,12 +123,18 @@ void PluckSynth_Init(void) {
     envelope          = 0.0f;
     active_audio_note = -1;
 
-    pending_freq    = 440.0f;
-    pending_amp     = 0.5f;
-    user_decay      = 0.96f;
-    active_decay    = 0.96f;
-    user_damp       = 0.85f;
-    pending_damp    = 0.85f;
+    user_decay = 0.96f;
+    user_damp  = 0.85f;
+    current_control_freq  = 440.0f;
+    current_control_amp   = 0.5f;
+    current_control_decay = 0.96f;
+    current_control_damp  = 0.85f;
+
+    params_buffers[0] = { 440.0f, 0.5f, 0.96f, 0.85f };
+    params_buffers[1] = { 440.0f, 0.5f, 0.96f, 0.85f };
+    params_published.store(0, std::memory_order_relaxed);
+    applied_published = 0;
+
     sustain_pedal.store(false, std::memory_order_relaxed);
     current_note.store(-1, std::memory_order_relaxed);
     for (int i = 0; i < 128; i++) {
@@ -106,13 +143,11 @@ void PluckSynth_Init(void) {
     fifo_head.store(0, std::memory_order_relaxed);
     fifo_tail.store(0, std::memory_order_relaxed);
     dropped_events_count = 0;
-    params_sequence.store(0, std::memory_order_relaxed);
-    applied_sequence = 0;
 
-    string_voice.SetFreq(pending_freq);
-    string_voice.SetAmp(pending_amp);
-    string_voice.SetDecay(active_decay);
-    string_voice.SetDamp(pending_damp);
+    string_voice.SetFreq(440.0f);
+    string_voice.SetAmp(0.5f);
+    string_voice.SetDecay(0.96f);
+    string_voice.SetDamp(0.85f);
 }
 
 void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
@@ -144,12 +179,8 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
 
     float decay = user_decay;
 
-    // Восстанавливаем рабочее время затухания струны и обновляем накопленные параметры
-    pending_freq    = freq;
-    pending_amp     = amp;
-    pending_damp    = damp;
-    active_decay    = decay;
-    params_sequence.fetch_add(1, std::memory_order_relaxed);
+    // Публикуем обновленный snapshot параметров через lock-free механизм
+    CommitParams(freq, amp, decay, damp);
 
     NoteOnEvent event;
     event.note  = midi_note;
@@ -170,15 +201,14 @@ void PluckSynth_NoteOff(uint8_t midi_note) {
 }
 
 void PluckSynth_SetDecay(float decay) {
-    user_decay   = clamp_f(decay, 0.0f, 1.0f);
-    active_decay = user_decay;
-    params_sequence.fetch_add(1, std::memory_order_release);
+    user_decay = clamp_f(decay, 0.0f, 1.0f);
+    CommitParams(current_control_freq, current_control_amp, user_decay, current_control_damp);
 }
 
 void PluckSynth_SetDamp(float damp) {
-    user_damp    = clamp_f(damp, 0.0f, 1.0f);
-    pending_damp = clamp_f(user_damp, 0.0f, 0.99f);
-    params_sequence.fetch_add(1, std::memory_order_release);
+    user_damp = clamp_f(damp, 0.0f, 1.0f);
+    float clamped_damp = clamp_f(user_damp, 0.0f, 0.99f);
+    CommitParams(current_control_freq, current_control_amp, current_control_decay, clamped_damp);
 }
 
 void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
@@ -217,14 +247,16 @@ int16_t PluckSynth_NextSample(void) {
         envelope = 1.0f;
         active_audio_note = (int16_t)event.note;
     } else {
-        // Применяем накопленные изменения параметров в аудиопотоке по счетчику поколений
-        uint32_t current_seq = params_sequence.load(std::memory_order_acquire);
-        if (current_seq != applied_sequence) {
-            string_voice.SetFreq(pending_freq);
-            string_voice.SetAmp(pending_amp);
-            string_voice.SetDecay(active_decay);
-            string_voice.SetDamp(pending_damp);
-            applied_sequence = current_seq;
+        // Читаем опубликованный snapshot параметров по счетчику версий с acquire semantics
+        uint32_t published = params_published.load(std::memory_order_acquire);
+        if (published != applied_published) {
+            uint32_t read_idx = published & 1;
+            const SynthParams& snapshot = params_buffers[read_idx];
+            string_voice.SetFreq(snapshot.freq);
+            string_voice.SetAmp(snapshot.amp);
+            string_voice.SetDecay(snapshot.decay);
+            string_voice.SetDamp(snapshot.damp);
+            applied_published = published;
         }
         trig = 0.0f;
     }
