@@ -177,7 +177,7 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     freq = clamp_f(freq, min_freq, max_freq);
 
     // Чувствительность к силе нажатия (Velocity -> Амплитуда 0.05 .. 1.0)
-    float norm_vel = (float)velocity * (1.0f / 127.0f);
+    float norm_vel = clamp_f((float)velocity * (1.0f / 127.0f), 0.0f, 1.0f);
     float amp = 0.05f + 0.95f * norm_vel;
 
     // Чем сильнее удар по клавише, тем ярче звучит струна при щипке
@@ -227,10 +227,13 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
             PluckSynth_SetDamp(0.30f + norm * 0.69f);
             break;
 
-        case 72: // Release Time (CC 72) -> Длительность звучания струны (Decay)
-        case 74: // Brightness / Cutoff (CC 74)
-            PluckSynth_SetDecay(0.50f + norm * 0.495f);
-            break;
+case 72: // Release Time (CC 72) -> Длительность звучания струны (Decay)
+    PluckSynth_SetDecay(0.50f + norm * 0.495f);
+    break;
+
+case 74: // Brightness / Cutoff (CC 74) -> Damp
+    PluckSynth_SetDamp(0.30f + norm * 0.69f);
+    break;
 
         case 64: // Sustain Pedal (CC 64)
             sustain_pedal.store(value >= 64, std::memory_order_relaxed);
