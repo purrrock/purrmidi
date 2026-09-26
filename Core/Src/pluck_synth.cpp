@@ -47,6 +47,7 @@ static std::atomic<uint32_t> params_sequence{0};
 static uint32_t applied_sequence      = 0;
 static std::atomic<bool> sustain_pedal{false};
 static std::atomic<int16_t> current_note{-1};
+static std::atomic<bool> note_pressed[128];
 
 // Вспомогательные функции lock-free SPSC FIFO для событий NoteOn
 static bool note_event_fifo_push(const NoteOnEvent& event) {
@@ -99,6 +100,9 @@ void PluckSynth_Init(void) {
     pending_damp    = 0.85f;
     sustain_pedal.store(false, std::memory_order_relaxed);
     current_note.store(-1, std::memory_order_relaxed);
+    for (int i = 0; i < 128; i++) {
+        note_pressed[i].store(false, std::memory_order_relaxed);
+    }
     fifo_head.store(0, std::memory_order_relaxed);
     fifo_tail.store(0, std::memory_order_relaxed);
     dropped_events_count = 0;
@@ -118,6 +122,9 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
         return;
     }
 
+    if (midi_note < 128) {
+        note_pressed[midi_note].store(true, std::memory_order_relaxed);
+    }
     current_note.store((int16_t)midi_note, std::memory_order_relaxed);
 
     // Перевод номера MIDI-ноты в частоту в герцах (функция mtof из DaisySP)
@@ -155,7 +162,9 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
 }
 
 void PluckSynth_NoteOff(uint8_t midi_note) {
-    // Глушим струну только если отпущена именно та нота, которая сейчас логически активна
+    if (midi_note < 128) {
+        note_pressed[midi_note].store(false, std::memory_order_relaxed);
+    }
     int16_t expected = (int16_t)midi_note;
     current_note.compare_exchange_strong(expected, -1, std::memory_order_relaxed);
 }
@@ -163,13 +172,13 @@ void PluckSynth_NoteOff(uint8_t midi_note) {
 void PluckSynth_SetDecay(float decay) {
     user_decay   = clamp_f(decay, 0.0f, 1.0f);
     active_decay = user_decay;
-    params_sequence.fetch_add(1, std::memory_order_relaxed);
+    params_sequence.fetch_add(1, std::memory_order_release);
 }
 
 void PluckSynth_SetDamp(float damp) {
     user_damp    = clamp_f(damp, 0.0f, 1.0f);
     pending_damp = clamp_f(user_damp, 0.0f, 0.99f);
-    params_sequence.fetch_add(1, std::memory_order_relaxed);
+    params_sequence.fetch_add(1, std::memory_order_release);
 }
 
 void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
@@ -209,7 +218,7 @@ int16_t PluckSynth_NextSample(void) {
         active_audio_note = (int16_t)event.note;
     } else {
         // Применяем накопленные изменения параметров в аудиопотоке по счетчику поколений
-        uint32_t current_seq = params_sequence.load(std::memory_order_relaxed);
+        uint32_t current_seq = params_sequence.load(std::memory_order_acquire);
         if (current_seq != applied_sequence) {
             string_voice.SetFreq(pending_freq);
             string_voice.SetAmp(pending_amp);
@@ -223,11 +232,11 @@ int16_t PluckSynth_NextSample(void) {
     // Вычисляем отсчёт физического моделирования струны (-1.0f .. +1.0f)
     float sample_f = string_voice.Process(trig);
 
-    if (active_audio_note >= 0) {
-        int16_t cur_note = current_note.load(std::memory_order_relaxed);
-        bool sus_pedal   = sustain_pedal.load(std::memory_order_relaxed);
+    if (active_audio_note >= 0 && active_audio_note < 128) {
+        bool is_pressed = note_pressed[active_audio_note].load(std::memory_order_relaxed);
+        bool sus_pedal  = sustain_pedal.load(std::memory_order_relaxed);
 
-        if (cur_note != active_audio_note && !sus_pedal) {
+        if (!is_pressed && !sus_pedal) {
             envelope *= release_coeff;
             if (envelope < 0.0001f) {
                 envelope = 0.0f;
