@@ -10,7 +10,7 @@ using namespace daisysp;
 #define PLUCK_BUFFER_SIZE       2048
 #define PLUCK_RELEASE_TIME_SEC  0.25f   // Длительность release огибающей в секундах
 #define PLUCK_MASTER_GAIN       0.85f   // Запас по громкости против клиппинга
-
+#define PLUCK_MAX_DAMP          0.99f
 #define NOTE_EVENT_FIFO_SIZE    16      // Размер FIFO буфера событий NoteOn (должен быть степенью двойки)
 
 struct NoteOnEvent {
@@ -61,10 +61,9 @@ static std::atomic<uint32_t> params_tail{0};
 static NoteOnEvent note_event_fifo[NOTE_EVENT_FIFO_SIZE];
 static std::atomic<uint32_t> fifo_head{0};
 static std::atomic<uint32_t> fifo_tail{0};
-static volatile uint32_t dropped_events_count = 0;
+static std::atomic<uint32_t> dropped_events_count{0};
 
 static std::atomic<bool> sustain_pedal{false};
-static std::atomic<int16_t> current_note{-1};
 static std::atomic<bool> note_pressed[128];
 
 // Вспомогательная функция публикации снимка параметров из контекста управления
@@ -91,10 +90,10 @@ static bool note_event_fifo_push(const NoteOnEvent& event) {
     uint32_t head = fifo_head.load(std::memory_order_relaxed);
     uint32_t tail = fifo_tail.load(std::memory_order_acquire);
 
-    if (head - tail >= NOTE_EVENT_FIFO_SIZE) {
-        dropped_events_count++;
-        return false;
-    }
+if (head - tail >= NOTE_EVENT_FIFO_SIZE) {
+    dropped_events_count.fetch_add(1, std::memory_order_relaxed);
+    return false;
+}
 
     note_event_fifo[head & (NOTE_EVENT_FIFO_SIZE - 1)] = event;
     fifo_head.store(head + 1, std::memory_order_release);
@@ -143,13 +142,12 @@ void PluckSynth_Init(void) {
     params_tail.store(0, std::memory_order_relaxed);
 
     sustain_pedal.store(false, std::memory_order_relaxed);
-    current_note.store(-1, std::memory_order_relaxed);
     for (int i = 0; i < 128; i++) {
         note_pressed[i].store(false, std::memory_order_relaxed);
     }
     fifo_head.store(0, std::memory_order_relaxed);
     fifo_tail.store(0, std::memory_order_relaxed);
-    dropped_events_count = 0;
+    dropped_events_count.store(0, std::memory_order_relaxed);
 
     string_voice.SetFreq(440.0f);
     string_voice.SetAmp(0.5f);
@@ -167,7 +165,6 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     if (midi_note < 128) {
         note_pressed[midi_note].store(true, std::memory_order_relaxed);
     }
-    current_note.store((int16_t)midi_note, std::memory_order_relaxed);
 
     // Перевод номера MIDI-ноты в частоту в герцах (функция mtof из DaisySP)
     float freq = mtof((float)midi_note);
@@ -182,7 +179,7 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
 
     // Чем сильнее удар по клавише, тем ярче звучит струна при щипке
     float dynamic_damp = user_damp + (norm_vel * 0.10f);
-    float damp = clamp_f(dynamic_damp, 0.0f, 0.99f);
+    float damp = clamp_f(dynamic_damp, 0.0f, PLUCK_MAX_DAMP);
 
     float decay = user_decay;
 
@@ -203,8 +200,6 @@ void PluckSynth_NoteOff(uint8_t midi_note) {
     if (midi_note < 128) {
         note_pressed[midi_note].store(false, std::memory_order_relaxed);
     }
-    int16_t expected = (int16_t)midi_note;
-    current_note.compare_exchange_strong(expected, -1, std::memory_order_relaxed);
 }
 
 void PluckSynth_SetDecay(float decay) {
@@ -214,7 +209,7 @@ void PluckSynth_SetDecay(float decay) {
 
 void PluckSynth_SetDamp(float damp) {
     user_damp = clamp_f(damp, 0.0f, 1.0f);
-    float clamped_damp = clamp_f(user_damp, 0.0f, 0.99f);
+    float clamped_damp = clamp_f(user_damp, 0.0f, PLUCK_MAX_DAMP);
     CommitParams(current_control_freq, current_control_amp, current_control_decay, clamped_damp);
 }
 
@@ -227,7 +222,7 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
             PluckSynth_SetDamp(0.30f + norm * 0.69f);
             break;
 
-case 72: // Release Time (CC 72) -> Длительность звучания струны (Decay)
+case 72: // 
     PluckSynth_SetDecay(0.50f + norm * 0.495f);
     break;
 
