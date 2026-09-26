@@ -45,10 +45,16 @@ static float current_control_amp   = 0.5f;
 static float current_control_decay = 0.96f;
 static float current_control_damp  = 0.85f;
 
-// Двойной буфер снимков параметров и атомарная публикация (lock-free snapshot/commit)
-static SynthParams params_buffers[2];
-static std::atomic<uint32_t> params_published{0};
-static uint32_t applied_published = 0;
+// Тройной буфер снимков параметров и механизмы неблокирующего обмена индексами (Lock-Free Triple Buffering)
+static SynthParams params_buffers[3];
+static uint8_t control_write_idx = 0;
+static uint8_t audio_read_idx   = 1;
+
+// shared_state: бит 7 (0x80) указывает на наличие нового snapshot; биты 0..1 (0x03) хранят индекс свободного/актуального буфера
+static std::atomic<uint8_t> shared_state{2};
+
+static constexpr uint8_t NEW_SNAPSHOT_FLAG = 0x80;
+static constexpr uint8_t BUFFER_INDEX_MASK = 0x03;
 
 static NoteOnEvent note_event_fifo[NOTE_EVENT_FIFO_SIZE];
 static std::atomic<uint32_t> fifo_head{0};
@@ -66,18 +72,17 @@ static void CommitParams(float freq, float amp, float decay, float damp) {
     current_control_decay = decay;
     current_control_damp  = damp;
 
-    uint32_t current_pub = params_published.load(std::memory_order_relaxed);
-    uint32_t current_idx = current_pub & 1;
-    uint32_t current_ver = current_pub >> 1;
+    params_buffers[control_write_idx].freq  = freq;
+    params_buffers[control_write_idx].amp   = amp;
+    params_buffers[control_write_idx].decay = decay;
+    params_buffers[control_write_idx].damp  = damp;
 
-    uint32_t write_idx = 1 - current_idx;
-    params_buffers[write_idx].freq  = freq;
-    params_buffers[write_idx].amp   = amp;
-    params_buffers[write_idx].decay = decay;
-    params_buffers[write_idx].damp  = damp;
+    // Атомарно публикуем индекс своего заполненного буфера вместе с флагом нового снимка (0x80)
+    uint8_t new_state = NEW_SNAPSHOT_FLAG | control_write_idx;
+    uint8_t prev_state = shared_state.exchange(new_state, std::memory_order_acq_rel);
 
-    uint32_t new_pub = ((current_ver + 1) << 1) | write_idx;
-    params_published.store(new_pub, std::memory_order_release);
+    // Извлекаем прошлый индекс буфера (0..2), который переходит в монопольное владение context управления
+    control_write_idx = prev_state & BUFFER_INDEX_MASK;
 }
 
 // Вспомогательные функции lock-free SPSC FIFO для событий NoteOn
@@ -132,8 +137,11 @@ void PluckSynth_Init(void) {
 
     params_buffers[0] = { 440.0f, 0.5f, 0.96f, 0.85f };
     params_buffers[1] = { 440.0f, 0.5f, 0.96f, 0.85f };
-    params_published.store(0, std::memory_order_relaxed);
-    applied_published = 0;
+    params_buffers[2] = { 440.0f, 0.5f, 0.96f, 0.85f };
+
+    control_write_idx = 0;
+    audio_read_idx    = 1;
+    shared_state.store(2, std::memory_order_relaxed);
 
     sustain_pedal.store(false, std::memory_order_relaxed);
     current_note.store(-1, std::memory_order_relaxed);
@@ -247,16 +255,20 @@ int16_t PluckSynth_NextSample(void) {
         envelope = 1.0f;
         active_audio_note = (int16_t)event.note;
     } else {
-        // Читаем опубликованный snapshot параметров по счетчику версий с acquire semantics
-        uint32_t published = params_published.load(std::memory_order_acquire);
-        if (published != applied_published) {
-            uint32_t read_idx = published & 1;
-            const SynthParams& snapshot = params_buffers[read_idx];
-            string_voice.SetFreq(snapshot.freq);
-            string_voice.SetAmp(snapshot.amp);
-            string_voice.SetDecay(snapshot.decay);
-            string_voice.SetDamp(snapshot.damp);
-            applied_published = published;
+        // Забираем свежий snapshot параметров единой атомарной операцией обмена состояния
+        uint8_t state = shared_state.load(std::memory_order_acquire);
+        if (state & NEW_SNAPSHOT_FLAG) {
+            // Атомарно передаём свой старый audio_read_idx (без флага 0x80) и получаем новый опубликованный snapshot
+            uint8_t prev_state = shared_state.exchange(audio_read_idx, std::memory_order_acq_rel);
+            if (prev_state & NEW_SNAPSHOT_FLAG) {
+                audio_read_idx = prev_state & BUFFER_INDEX_MASK;
+
+                const SynthParams& snapshot = params_buffers[audio_read_idx];
+                string_voice.SetFreq(snapshot.freq);
+                string_voice.SetAmp(snapshot.amp);
+                string_voice.SetDecay(snapshot.decay);
+                string_voice.SetDamp(snapshot.damp);
+            }
         }
         trig = 0.0f;
     }
