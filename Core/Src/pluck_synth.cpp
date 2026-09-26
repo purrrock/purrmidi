@@ -183,9 +183,6 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
 
     float decay = user_decay;
 
-    // Публикуем обновленный snapshot параметров через lock-free механизм
-    CommitParams(freq, amp, decay, damp);
-
     NoteOnEvent event;
     event.note  = midi_note;
     event.freq  = freq;
@@ -239,6 +236,8 @@ case 74: // Brightness / Cutoff (CC 74) -> Damp
     }
 }
 
+#define PLUCK_OUTPUT_SCALE (PLUCK_MASTER_GAIN * 32767.0f)
+
 int16_t PluckSynth_NextSample(void) {
     float trig = 0.0f;
     NoteOnEvent event;
@@ -270,30 +269,34 @@ int16_t PluckSynth_NextSample(void) {
         trig = 0.0f;
     }
 
-    // Вычисляем отсчёт физического моделирования струны (-1.0f .. +1.0f)
-    float sample_f = string_voice.Process(trig);
+    float sample_f = 0.0f;
 
-    if (active_audio_note >= 0 && active_audio_note < 128) {
-        bool is_pressed = note_pressed[active_audio_note].load(std::memory_order_relaxed);
-        bool sus_pedal  = sustain_pedal.load(std::memory_order_relaxed);
+    // Вычисляем отсчёт физического моделирования струны только если она звучит
+    if (envelope > 0.0f) {
+        sample_f = string_voice.Process(trig);
 
-        if (!is_pressed && !sus_pedal) {
-            envelope *= release_coeff;
-            if (envelope < 0.0001f) {
-                envelope = 0.0f;
-                active_audio_note = -1;
+        if (active_audio_note >= 0 && active_audio_note < 128) {
+            bool is_pressed = note_pressed[active_audio_note].load(std::memory_order_relaxed);
+            bool sus_pedal  = sustain_pedal.load(std::memory_order_relaxed);
+
+            if (!is_pressed && !sus_pedal) {
+                envelope *= release_coeff;
+                if (envelope < 0.0001f) {
+                    envelope = 0.0f;
+                    active_audio_note = -1;
+                }
             }
         }
-    }
 
-    sample_f *= envelope;
-    sample_f *= (PLUCK_MASTER_GAIN * 32767.0f);
+        sample_f *= envelope;
+        sample_f *= PLUCK_OUTPUT_SCALE; // Используем предрасчитанную константу
 
-    // Жёсткое ограничение (Clamping) для защиты от переполнения int16_t
-    if (sample_f > 32767.0f) {
-        sample_f = 32767.0f;
-    } else if (sample_f < -32768.0f) {
-        sample_f = -32768.0f;
+        // Жёсткое ограничение (Clamping) для защиты от переполнения int16_t
+        if (sample_f > 32767.0f) {
+            sample_f = 32767.0f;
+        } else if (sample_f < -32768.0f) {
+            sample_f = -32768.0f;
+        }
     }
 
     return (int16_t)sample_f;
