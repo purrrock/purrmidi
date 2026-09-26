@@ -30,24 +30,61 @@ static float release_coeff = 0.0f;
 static float envelope = 0.0f;
 static int16_t active_audio_note = -1;
 
-// Переменные синхронизации между main() и прерыванием аудио-DMA
-static volatile float pending_freq    = 440.0f;
-static volatile float pending_amp     = 0.5f;
-static volatile float user_decay      = 0.96f;
-static volatile float active_decay    = 0.96f;
-static volatile float user_damp       = 0.85f;
-static volatile float pending_damp    = 0.85f;
+struct SynthParams {
+    float freq;
+    float amp;
+    float decay;
+    float damp;
+};
+
+// Переменные состояния в контексте управления (MIDI / control)
+static float user_decay = 0.96f;
+static float user_damp  = 0.85f;
+static float current_control_freq  = 440.0f;
+static float current_control_amp   = 0.5f;
+static float current_control_decay = 0.96f;
+static float current_control_damp  = 0.85f;
+
+#define PARAMS_FIFO_SIZE    16      // Размер FIFO буфера параметров (должен быть степенью двойки)
+#define PARAMS_FIFO_MASK    (PARAMS_FIFO_SIZE - 1)
+
+// Lock-Free Bounded SPSC FIFO для передачи полных снимков SynthParams из контекста управления в аудиоконтекст.
+// Владение слотами (Slot Ownership Model):
+// - Слоты в диапазоне [params_tail, params_head - 1] принадлежат Consumer (Audio context) и зафиксированы от перезаписи.
+// - Слоты вне этого диапазона свободны и принадлежат Producer (Control context).
+// - Producer проверяет условие (head - tail < PARAMS_FIFO_SIZE). Если FIFO заполнено, Producer отбрасывает пуш,
+//   гарантируя, что слоты Consumer никогда не будут перезаписаны во время чтения или ожидания.
+static SynthParams params_fifo[PARAMS_FIFO_SIZE];
+static std::atomic<uint32_t> params_head{0};
+static std::atomic<uint32_t> params_tail{0};
 
 static NoteOnEvent note_event_fifo[NOTE_EVENT_FIFO_SIZE];
 static std::atomic<uint32_t> fifo_head{0};
 static std::atomic<uint32_t> fifo_tail{0};
 static volatile uint32_t dropped_events_count = 0;
 
-static std::atomic<uint32_t> params_sequence{0};
-static uint32_t applied_sequence      = 0;
 static std::atomic<bool> sustain_pedal{false};
 static std::atomic<int16_t> current_note{-1};
 static std::atomic<bool> note_pressed[128];
+
+// Вспомогательная функция публикации снимка параметров из контекста управления
+static void CommitParams(float freq, float amp, float decay, float damp) {
+    current_control_freq  = freq;
+    current_control_amp   = amp;
+    current_control_decay = decay;
+    current_control_damp  = damp;
+
+    uint32_t head = params_head.load(std::memory_order_relaxed);
+    uint32_t tail = params_tail.load(std::memory_order_acquire);
+
+    // Producer пишет только в гарантированно свободный слот head, если FIFO не заполнено
+    if (head - tail >= PARAMS_FIFO_SIZE) {
+        return;
+    }
+
+    params_fifo[head & PARAMS_FIFO_MASK] = { freq, amp, decay, damp };
+    params_head.store(head + 1, std::memory_order_release);
+}
 
 // Вспомогательные функции lock-free SPSC FIFO для событий NoteOn
 static bool note_event_fifo_push(const NoteOnEvent& event) {
@@ -92,12 +129,19 @@ void PluckSynth_Init(void) {
     envelope          = 0.0f;
     active_audio_note = -1;
 
-    pending_freq    = 440.0f;
-    pending_amp     = 0.5f;
-    user_decay      = 0.96f;
-    active_decay    = 0.96f;
-    user_damp       = 0.85f;
-    pending_damp    = 0.85f;
+    user_decay = 0.96f;
+    user_damp  = 0.85f;
+    current_control_freq  = 440.0f;
+    current_control_amp   = 0.5f;
+    current_control_decay = 0.96f;
+    current_control_damp  = 0.85f;
+
+    for (uint32_t i = 0; i < PARAMS_FIFO_SIZE; i++) {
+        params_fifo[i] = { 440.0f, 0.5f, 0.96f, 0.85f };
+    }
+    params_head.store(0, std::memory_order_relaxed);
+    params_tail.store(0, std::memory_order_relaxed);
+
     sustain_pedal.store(false, std::memory_order_relaxed);
     current_note.store(-1, std::memory_order_relaxed);
     for (int i = 0; i < 128; i++) {
@@ -106,13 +150,11 @@ void PluckSynth_Init(void) {
     fifo_head.store(0, std::memory_order_relaxed);
     fifo_tail.store(0, std::memory_order_relaxed);
     dropped_events_count = 0;
-    params_sequence.store(0, std::memory_order_relaxed);
-    applied_sequence = 0;
 
-    string_voice.SetFreq(pending_freq);
-    string_voice.SetAmp(pending_amp);
-    string_voice.SetDecay(active_decay);
-    string_voice.SetDamp(pending_damp);
+    string_voice.SetFreq(440.0f);
+    string_voice.SetAmp(0.5f);
+    string_voice.SetDecay(0.96f);
+    string_voice.SetDamp(0.85f);
 }
 
 void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
@@ -144,12 +186,8 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
 
     float decay = user_decay;
 
-    // Восстанавливаем рабочее время затухания струны и обновляем накопленные параметры
-    pending_freq    = freq;
-    pending_amp     = amp;
-    pending_damp    = damp;
-    active_decay    = decay;
-    params_sequence.fetch_add(1, std::memory_order_relaxed);
+    // Публикуем обновленный snapshot параметров через lock-free механизм
+    CommitParams(freq, amp, decay, damp);
 
     NoteOnEvent event;
     event.note  = midi_note;
@@ -170,15 +208,14 @@ void PluckSynth_NoteOff(uint8_t midi_note) {
 }
 
 void PluckSynth_SetDecay(float decay) {
-    user_decay   = clamp_f(decay, 0.0f, 1.0f);
-    active_decay = user_decay;
-    params_sequence.fetch_add(1, std::memory_order_release);
+    user_decay = clamp_f(decay, 0.0f, 1.0f);
+    CommitParams(current_control_freq, current_control_amp, user_decay, current_control_damp);
 }
 
 void PluckSynth_SetDamp(float damp) {
-    user_damp    = clamp_f(damp, 0.0f, 1.0f);
-    pending_damp = clamp_f(user_damp, 0.0f, 0.99f);
-    params_sequence.fetch_add(1, std::memory_order_release);
+    user_damp = clamp_f(damp, 0.0f, 1.0f);
+    float clamped_damp = clamp_f(user_damp, 0.0f, 0.99f);
+    CommitParams(current_control_freq, current_control_amp, current_control_decay, clamped_damp);
 }
 
 void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
@@ -217,14 +254,20 @@ int16_t PluckSynth_NextSample(void) {
         envelope = 1.0f;
         active_audio_note = (int16_t)event.note;
     } else {
-        // Применяем накопленные изменения параметров в аудиопотоке по счетчику поколений
-        uint32_t current_seq = params_sequence.load(std::memory_order_acquire);
-        if (current_seq != applied_sequence) {
-            string_voice.SetFreq(pending_freq);
-            string_voice.SetAmp(pending_amp);
-            string_voice.SetDecay(active_decay);
-            string_voice.SetDamp(pending_damp);
-            applied_sequence = current_seq;
+        // Проверяем наличие новых снимков параметров в SPSC FIFO
+        uint32_t head = params_head.load(std::memory_order_acquire);
+        uint32_t tail = params_tail.load(std::memory_order_relaxed);
+
+        if (head != tail) {
+            // Consumer забирает самый свежий snapshot из (head - 1) & PARAMS_FIFO_MASK
+            const SynthParams& snapshot = params_fifo[(head - 1) & PARAMS_FIFO_MASK];
+            string_voice.SetFreq(snapshot.freq);
+            string_voice.SetAmp(snapshot.amp);
+            string_voice.SetDecay(snapshot.decay);
+            string_voice.SetDamp(snapshot.damp);
+
+            // Продвигаем tail сразу к head, за раз освобождая все накопленные слоты
+            params_tail.store(head, std::memory_order_release);
         }
         trig = 0.0f;
     }
