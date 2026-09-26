@@ -2,12 +2,22 @@
 #include "daisysp.h"
 #include "PhysicalModeling/pluck.h"
 #include "Utility/dsp.h"
+#include <atomic>
 using namespace daisysp;
 
 #define PLUCK_SAMPLE_RATE       48000.0f
 #define PLUCK_BUFFER_SIZE       2048
 #define PLUCK_RELEASE_DECAY     0.72f   // Ускоренное затухание при отпускании клавиши
 #define PLUCK_MASTER_GAIN       0.85f   // Запас по громкости против клиппинга
+
+#define NOTE_EVENT_FIFO_SIZE    16      // Размер FIFO буфера событий NoteOn (должен быть степенью двойки)
+
+struct NoteOnEvent {
+    float freq;
+    float amp;
+    float damp;
+    float decay;
+};
 
 // Объект физического моделирования струны и буфер линии задержки (8 КБ)
 static Pluck string_voice;
@@ -21,11 +31,43 @@ static volatile float active_decay    = 0.96f;
 static volatile float user_damp       = 0.85f;
 static volatile float pending_damp    = 0.85f;
 
-static volatile bool trigger_pending  = false;
+static NoteOnEvent note_event_fifo[NOTE_EVENT_FIFO_SIZE];
+static std::atomic<uint32_t> fifo_head{0};
+static std::atomic<uint32_t> fifo_tail{0};
+static volatile uint32_t dropped_events_count = 0;
+
 static volatile uint32_t params_sequence = 0;
 static uint32_t applied_sequence      = 0;
 static volatile bool sustain_pedal    = false;
 static volatile int16_t current_note  = -1;
+
+// Вспомогательные функции lock-free SPSC FIFO для событий NoteOn
+static bool note_event_fifo_push(const NoteOnEvent& event) {
+    uint32_t head = fifo_head.load(std::memory_order_relaxed);
+    uint32_t tail = fifo_tail.load(std::memory_order_acquire);
+
+    if (head - tail >= NOTE_EVENT_FIFO_SIZE) {
+        dropped_events_count++;
+        return false;
+    }
+
+    note_event_fifo[head & (NOTE_EVENT_FIFO_SIZE - 1)] = event;
+    fifo_head.store(head + 1, std::memory_order_release);
+    return true;
+}
+
+static bool note_event_fifo_pop(NoteOnEvent& event) {
+    uint32_t tail = fifo_tail.load(std::memory_order_relaxed);
+    uint32_t head = fifo_head.load(std::memory_order_acquire);
+
+    if (head == tail) {
+        return false;
+    }
+
+    event = note_event_fifo[tail & (NOTE_EVENT_FIFO_SIZE - 1)];
+    fifo_tail.store(tail + 1, std::memory_order_release);
+    return true;
+}
 
 // Вспомогательная функция ограничения диапазона float
 static inline float clamp_f(float val, float min_val, float max_val) {
@@ -46,7 +88,9 @@ void PluckSynth_Init(void) {
     pending_damp    = 0.85f;
     sustain_pedal   = false;
     current_note    = -1;
-    trigger_pending = false;
+    fifo_head.store(0, std::memory_order_relaxed);
+    fifo_tail.store(0, std::memory_order_relaxed);
+    dropped_events_count = 0;
     params_sequence  = 0;
     applied_sequence = 0;
 
@@ -70,20 +114,32 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     // Защита от выхода за пределы буфера линии задержки и частоты Найквиста
     float min_freq = (PLUCK_SAMPLE_RATE / (float)(PLUCK_BUFFER_SIZE - 4));
     float max_freq = (PLUCK_SAMPLE_RATE * 0.45f);
-    pending_freq = clamp_f(freq, min_freq, max_freq);
+    freq = clamp_f(freq, min_freq, max_freq);
 
     // Чувствительность к силе нажатия (Velocity -> Амплитуда 0.05 .. 1.0)
     float norm_vel = (float)velocity * (1.0f / 127.0f);
-    pending_amp = 0.05f + 0.95f * norm_vel;
+    float amp = 0.05f + 0.95f * norm_vel;
 
     // Чем сильнее удар по клавише, тем ярче звучит струна при щипке
     float dynamic_damp = user_damp + (norm_vel * 0.10f);
-    pending_damp = clamp_f(dynamic_damp, 0.0f, 0.99f);
+    float damp = clamp_f(dynamic_damp, 0.0f, 0.99f);
 
-    // Восстанавливаем рабочее время затухания струны и взводим флаг щипка
-    active_decay    = user_decay;
+    float decay = user_decay;
+
+    // Восстанавливаем рабочее время затухания струны и обновляем накопленные параметры
+    pending_freq    = freq;
+    pending_amp     = amp;
+    pending_damp    = damp;
+    active_decay    = decay;
     params_sequence++;
-    trigger_pending = true;
+
+    NoteOnEvent event;
+    event.freq  = freq;
+    event.amp   = amp;
+    event.damp  = damp;
+    event.decay = decay;
+
+    note_event_fifo_push(event);
 }
 
 void PluckSynth_NoteOff(uint8_t midi_note) {
@@ -139,20 +195,25 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
 
 int16_t PluckSynth_NextSample(void) {
     float trig = 0.0f;
+    NoteOnEvent event;
 
-    // Применяем накопленные изменения параметров в аудиопотоке по счетчику поколений
-    uint32_t current_seq = params_sequence;
-    if (current_seq != applied_sequence) {
-        string_voice.SetFreq(pending_freq);
-        string_voice.SetAmp(pending_amp);
-        string_voice.SetDecay(active_decay);
-        string_voice.SetDamp(pending_damp);
-        applied_sequence = current_seq;
-    }
-
-    if (trigger_pending) {
+    if (note_event_fifo_pop(event)) {
+        string_voice.SetFreq(event.freq);
+        string_voice.SetAmp(event.amp);
+        string_voice.SetDecay(event.decay);
+        string_voice.SetDamp(event.damp);
         trig = 1.0f;
-        trigger_pending = false;
+    } else {
+        // Применяем накопленные изменения параметров в аудиопотоке по счетчику поколений
+        uint32_t current_seq = params_sequence;
+        if (current_seq != applied_sequence) {
+            string_voice.SetFreq(pending_freq);
+            string_voice.SetAmp(pending_amp);
+            string_voice.SetDecay(active_decay);
+            string_voice.SetDamp(pending_damp);
+            applied_sequence = current_seq;
+        }
+        trig = 0.0f;
     }
 
     // Вычисляем отсчёт физического моделирования струны (-1.0f .. +1.0f)
