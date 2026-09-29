@@ -96,6 +96,7 @@ target_compile_features(DaisySP PUBLIC cxx_std_17)
 
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/synth.c
+    Core/Src/usbh_midi.c
     Core/Src/pluck_synth.cpp
 )
 
