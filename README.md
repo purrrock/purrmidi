@@ -79,3 +79,16 @@ PCM5102A
 
 ## Репозиторий
 Исходный код проекта: github.com/purrrock/purrmidi
+
+## Сборка
+Проект использует библиотеку DaisySP в качестве Git-подмодуля. Чтобы скачать репозиторий вместе со всеми зависимостями, используйте флаг `--recursive`:
+```bash
+git clone --recursive https://github.com/purrrock/purrmidi
+cd purrmidi
+```
+Если вы уже склонировали репозиторий без флага --recursive
+При сборке CMake выдаст ошибку DaisySP source directory not found. Для загрузки недостающих подмодулей выполните в корне проекта:
+```bash
+Bash
+git submodule update --init --recursive
+```
