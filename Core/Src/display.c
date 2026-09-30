@@ -69,29 +69,6 @@ static int32_t Display_WriteReg(
     return (result == HAL_OK) ? ST7735_OK : ST7735_ERROR;
 }
 
-static int32_t Display_ReadReg(
-    uint8_t reg,
-    uint8_t *data)
-{
-    int32_t result;
-
-    HAL_GPIO_WritePin(LCD_CS_PORT, LCD_CS_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(LCD_DC_PORT, LCD_DC_PIN, GPIO_PIN_RESET);
-
-    result = HAL_SPI_Transmit(&hspi4, &reg, 1, 100);
-
-    HAL_GPIO_WritePin(LCD_DC_PORT, LCD_DC_PIN, GPIO_PIN_SET);
-
-    if (result == HAL_OK)
-    {
-        result = HAL_SPI_Receive(&hspi4, data, 1, 500);
-    }
-
-    HAL_GPIO_WritePin(LCD_CS_PORT, LCD_CS_PIN, GPIO_PIN_SET);
-
-    return (result == HAL_OK) ? ST7735_OK : ST7735_ERROR;
-}
-
 static int32_t Display_SendData(
     uint8_t *data,
     uint32_t length)
@@ -102,22 +79,6 @@ static int32_t Display_SendData(
     HAL_GPIO_WritePin(LCD_DC_PORT, LCD_DC_PIN, GPIO_PIN_SET);
 
     result = HAL_SPI_Transmit(&hspi4, data, length, 500);
-
-    HAL_GPIO_WritePin(LCD_CS_PORT, LCD_CS_PIN, GPIO_PIN_SET);
-
-    return (result == HAL_OK) ? ST7735_OK : ST7735_ERROR;
-}
-
-static int32_t Display_ReceiveData(
-    uint8_t *data,
-    uint32_t length)
-{
-    int32_t result;
-
-    HAL_GPIO_WritePin(LCD_CS_PORT, LCD_CS_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(LCD_DC_PORT, LCD_DC_PIN, GPIO_PIN_SET);
-
-    result = HAL_SPI_Receive(&hspi4, data, length, 500);
 
     HAL_GPIO_WritePin(LCD_CS_PORT, LCD_CS_PIN, GPIO_PIN_SET);
 
@@ -158,27 +119,40 @@ static void Display_DrawChar(
 
     uint8_t index = (uint8_t)(c - ' ');
     uint8_t width = (size == 12U) ? 6U : 8U;
+    uint8_t bytes_per_char = (size == 12U) ? 12U : 16U;
+    const uint8_t *font_ptr = (size == 12U) ? asc2_1206[index] : asc2_1608[index];
 
-uint16_t pixels[16][8];
+    uint16_t pixels[16 * 8];
+    // Очищаем буфер символа фоновым (черным) цветом 0x0000
+    memset(pixels, 0, sizeof(pixels));
 
-    for (uint8_t row = 0; row < size; row++)
+    uint8_t cur_x = 0;
+    uint8_t cur_y = 0;
+
+    // Считываем байты шрифта по столбцам (сверху вниз, слева направо)
+    for (uint8_t b = 0; b < bytes_per_char; b++)
     {
-        uint8_t bits;
+        uint8_t byte_val = font_ptr[b];
 
-        if (size == 12U)
+        for (uint8_t bit = 0; bit < 8; bit++)
         {
-            bits = asc2_1206[index][row];
-        }
-        else
-        {
-            bits = asc2_1608[index][row];
-        }
+            bool is_set = (byte_val & 0x80U) != 0U;
+            byte_val <<= 1;
 
-        for (uint8_t col = 0; col < width; col++)
-        {
-            bool pixel = (bits & (0x80U >> col)) != 0U;
+            if (is_set)
+            {
+                // Записываем белый пиксель в строку cur_y и столбец cur_x
+                pixels[cur_y * width + cur_x] = 0xFFFFU;
+            }
 
-            pixels[row][col] = pixel ? 0xFFFFU : 0x0000U;
+            cur_y++;
+            // Если достигли низа символа, переходим к следующему столбцу
+            if (cur_y >= size)
+            {
+                cur_y = 0;
+                cur_x++;
+                break;
+            }
         }
     }
 
