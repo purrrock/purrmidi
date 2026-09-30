@@ -60,6 +60,9 @@ static volatile uint32_t midi_events = 0;
 static volatile uint32_t midi_queue_overruns = 0;
 static volatile uint32_t midi_receive_errors = 0;
 
+static uint8_t active_notes[128];
+static uint16_t active_note_count = 0;
+
 #define MIDI_EVENT_QUEUE_SIZE 256
 typedef struct
 {
@@ -235,8 +238,7 @@ int main(void)
   // Запуск круговой передачи DMA на ЦАП PCM5102A (пример для SAI1_A)
   // HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t*)audio_buffer, AUDIO_BUFFER_SIZE);
   printf("Waiting for USB device to be attached...\r\n");
-  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, GPIO_PIN_SET);
-  
+  HAL_GPIO_WritePin(DEBUG_LED_GPIO_Port, DEBUG_LED_Pin, GPIO_PIN_RESET);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -253,17 +255,53 @@ MIDI_Event_t event;
 
 while (MIDI_QueueGet(&event))
 {
- //   printf("[MIDI] %02X %02X %02X\r\n", event.status, event.data1,  event.data2);
+    // printf("[MIDI] %02X %02X %02X\r\n",
+    //        event.status, event.data1, event.data2);
+
     uint8_t command = event.status & 0xF0;
+    uint8_t note = event.data1;
+
     if (command == 0x90 && event.data2 != 0)
     {
         note_on_count++;
-		Display_SetLastNote(event.data1);
+
+        if (note < 128 && active_notes[note] == 0)
+        {
+            active_notes[note] = 1;
+            active_note_count++;
+        }
+
+        HAL_GPIO_WritePin(
+            DEBUG_LED_GPIO_Port,
+            DEBUG_LED_Pin,
+            GPIO_PIN_SET
+        );
+
+        Display_SetLastNote(note);
     }
     else if (command == 0x80 ||
              (command == 0x90 && event.data2 == 0))
     {
         note_off_count++;
+
+        if (note < 128 && active_notes[note] != 0)
+        {
+            active_notes[note] = 0;
+
+            if (active_note_count > 0)
+            {
+                active_note_count--;
+            }
+        }
+
+        if (active_note_count == 0)
+        {
+            HAL_GPIO_WritePin(
+                DEBUG_LED_GPIO_Port,
+                DEBUG_LED_Pin,
+                GPIO_PIN_RESET
+            );
+        }
     }
 }
 
