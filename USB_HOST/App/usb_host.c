@@ -146,6 +146,7 @@ switch(id)
   {
   case HOST_USER_SELECT_CONFIGURATION:
     // Срабатывает для ЛЮБОГО распознанного USB-устройства после энумерации
+    printf("[USB] Enumeration done. VID: 0x%04X | PID: 0x%04X\r\n", phost->device.DevDesc.idVendor, phost->device.DevDesc.idProduct);
     break;
 
   case HOST_USER_DISCONNECTION:
