@@ -83,11 +83,13 @@ PCM5102A
 ## Сборка
 Проект использует библиотеку DaisySP в качестве Git-подмодуля. Чтобы скачать репозиторий вместе со всеми зависимостями, используйте флаг `--recursive`:
 ```bash
-git clone --recursive https://github.com/purrrock/purrmidi
-cd purrmidi
+git submodule add https://github.com/electro-smith/DaisySP.git Middlewares/Third_Party/DaisySP
 ```
-Если вы уже склонировали репозиторий без флага --recursive
-При сборке CMake выдаст ошибку DaisySP source directory not found. Для загрузки недостающих подмодулей выполните в корне проекта:
+
+и
+git submodule add https://github.com/WeActStudio/MiniSTM32H7xx.git Middlewares/Third_Party/MiniSTM32H7xx
+
+Для загрузки недостающих подмодулей выполните в корне проекта:
 ```bash
 Bash
 git submodule update --init --recursive
