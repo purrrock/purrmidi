@@ -4,6 +4,7 @@
 #include "Utility/dsp.h"
 #include <atomic>
 #include <cmath>
+
 using namespace daisysp;
 
 #define PLUCK_SAMPLE_RATE       48000.0f
@@ -12,29 +13,29 @@ using namespace daisysp;
 #define PLUCK_MASTER_GAIN       0.85f   // Запас по громкости против клиппинга
 #define PLUCK_MAX_DAMP          0.99f
 #define NOTE_EVENT_FIFO_SIZE    16      // Размер FIFO буфера событий NoteOn (должен быть степенью двойки)
+#define PLUCK_OUTPUT_SCALE      (PLUCK_MASTER_GAIN * 32767.0f) // Предрасчитанная константа[cite: 9]
 
 struct NoteOnEvent {
     uint8_t note;
     float freq;
     float amp;
-    float damp;
     float decay;
+    float damp_offset; // Сохраняем только прибавку от velocity, а не финальное значение
 };
 
-// Объект физического моделирования струны и буфер линии задержки (8 КБ)
+// Объект физического моделирования струны и буфер линии задержки (8 КБ)[cite: 8]
 static Pluck string_voice;
 static float pluck_buffer[PLUCK_BUFFER_SIZE];
 
-// Переменные огибающей release (контекст аудиопотока)
+// Переменные огибающей и состояния в контексте аудиопотока
 static float release_coeff = 0.0f;
 static float envelope = 0.0f;
 static int16_t active_audio_note = -1;
+static float active_damp_offset = 0.0f; // Удерживает влияние удара по клавише на время звучания ноты
 
-// Переменные состояния в контексте управления (MIDI / control)
+// Переменные состояния непрерывных контроллеров (MIDI CC)
 static std::atomic<float> user_decay{0.96f};
 static std::atomic<float> user_damp{0.85f};
-
-
 
 static NoteOnEvent note_event_fifo[NOTE_EVENT_FIFO_SIZE];
 static std::atomic<uint32_t> fifo_head{0};
@@ -44,15 +45,15 @@ static std::atomic<uint32_t> dropped_events_count{0};
 static std::atomic<bool> sustain_pedal{false};
 static std::atomic<bool> note_pressed[128];
 
-// Вспомогательные функции lock-free SPSC FIFO для событий NoteOn
+// Lock-free SPSC (Single-Producer Single-Consumer) FIFO для событий NoteOn
 static bool note_event_fifo_push(const NoteOnEvent& event) {
     uint32_t head = fifo_head.load(std::memory_order_relaxed);
     uint32_t tail = fifo_tail.load(std::memory_order_acquire);
 
-if (head - tail >= NOTE_EVENT_FIFO_SIZE) {
-    dropped_events_count.fetch_add(1, std::memory_order_relaxed);
-    return false;
-}
+    if (head - tail >= NOTE_EVENT_FIFO_SIZE) {
+        dropped_events_count.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
 
     note_event_fifo[head & (NOTE_EVENT_FIFO_SIZE - 1)] = event;
     fifo_head.store(head + 1, std::memory_order_release);
@@ -72,7 +73,7 @@ static bool note_event_fifo_pop(NoteOnEvent& event) {
     return true;
 }
 
-// Вспомогательная функция ограничения диапазона float
+// Вспомогательная функция ограничения диапазона
 static inline float clamp_f(float val, float min_val, float max_val) {
     if (val < min_val) return min_val;
     if (val > max_val) return max_val;
@@ -80,20 +81,22 @@ static inline float clamp_f(float val, float min_val, float max_val) {
 }
 
 void PluckSynth_Init(void) {
-    // Инициализация алгоритма Карплуса — Стронга в рекурсивном режиме сглаживания
+    // Инициализация алгоритма Карплуса-Стронга в рекурсивном режиме сглаживания
     string_voice.Init(PLUCK_SAMPLE_RATE, pluck_buffer, PLUCK_BUFFER_SIZE, PLUCK_MODE_RECURSIVE);
 
-    release_coeff     = expf(-1.0f / (PLUCK_SAMPLE_RATE * PLUCK_RELEASE_TIME_SEC));
-    envelope          = 0.0f;
-    active_audio_note = -1;
+    release_coeff      = expf(-1.0f / (PLUCK_SAMPLE_RATE * PLUCK_RELEASE_TIME_SEC));
+    envelope           = 0.0f;
+    active_audio_note  = -1;
+    active_damp_offset = 0.0f;
 
-user_decay.store(0.96f, std::memory_order_relaxed);
-user_damp.store(0.85f, std::memory_order_relaxed);
+    user_decay.store(0.96f, std::memory_order_relaxed);
+    user_damp.store(0.85f, std::memory_order_relaxed);
 
     sustain_pedal.store(false, std::memory_order_relaxed);
     for (int i = 0; i < 128; i++) {
         note_pressed[i].store(false, std::memory_order_relaxed);
     }
+    
     fifo_head.store(0, std::memory_order_relaxed);
     fifo_tail.store(0, std::memory_order_relaxed);
     dropped_events_count.store(0, std::memory_order_relaxed);
@@ -105,7 +108,6 @@ user_damp.store(0.85f, std::memory_order_relaxed);
 }
 
 void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
-    // По стандарту MIDI сообщение Note On с velocity == 0 эквивалентно Note Off
     if (velocity == 0) {
         PluckSynth_NoteOff(midi_note);
         return;
@@ -115,31 +117,26 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
         note_pressed[midi_note].store(true, std::memory_order_relaxed);
     }
 
-    // Перевод номера MIDI-ноты в частоту в герцах (функция mtof из DaisySP)
     float freq = mtof((float)midi_note);
-    // Защита от выхода за пределы буфера линии задержки и частоты Найквиста
     float min_freq = (PLUCK_SAMPLE_RATE / (float)(PLUCK_BUFFER_SIZE - 4));
     float max_freq = (PLUCK_SAMPLE_RATE * 0.45f);
     freq = clamp_f(freq, min_freq, max_freq);
 
-    // Чувствительность к силе нажатия (Velocity -> Амплитуда 0.05 .. 1.0)
     float norm_vel = clamp_f((float)velocity * (1.0f / 127.0f), 0.0f, 1.0f);
     float amp = 0.05f + 0.95f * norm_vel;
 
-float current_damp = user_damp.load(std::memory_order_relaxed);
-float current_decay = user_decay.load(std::memory_order_relaxed);
-
-float dynamic_damp = current_damp + (norm_vel * 0.10f);
-float damp = clamp_f(dynamic_damp, 0.0f, PLUCK_MAX_DAMP);
-
-float decay = current_decay;
+    // Рассчитываем только смещение от динамики удара, чтобы не затирать ручку Damp
+    float damp_offset = norm_vel * 0.10f;
+    
+    // Берем актуальный decay для отправки в событие
+    float decay = user_decay.load(std::memory_order_relaxed);
 
     NoteOnEvent event;
-    event.note  = midi_note;
-    event.freq  = freq;
-    event.amp   = amp;
-    event.damp  = damp;
-    event.decay = decay;
+    event.note        = midi_note;
+    event.freq        = freq;
+    event.amp         = amp;
+    event.decay       = decay;
+    event.damp_offset = damp_offset;
 
     note_event_fifo_push(event);
 }
@@ -151,37 +148,28 @@ void PluckSynth_NoteOff(uint8_t midi_note) {
 }
 
 void PluckSynth_SetDecay(float decay) {
-    user_decay.store(
-        clamp_f(decay, 0.0f, 1.0f),
-        std::memory_order_relaxed
-    );
+    user_decay.store(clamp_f(decay, 0.0f, 1.0f), std::memory_order_relaxed);
 }
 
 void PluckSynth_SetDamp(float damp) {
-    user_damp.store(
-        clamp_f(damp, 0.0f, PLUCK_MAX_DAMP),
-        std::memory_order_relaxed
-    );
+    user_damp.store(clamp_f(damp, 0.0f, PLUCK_MAX_DAMP), std::memory_order_relaxed);
 }
 
 void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
     float norm = (float)value * (1.0f / 127.0f);
 
     switch (control) {
-        case 1:  // Modulation Wheel (CC 1) -> Яркость / приглушение струны (Damp)
-        case 71: // Timbre / Resonance (CC 71)
+        case 1:  
+        case 71: 
+        case 74: 
             PluckSynth_SetDamp(0.30f + norm * 0.69f);
             break;
 
-case 72: // 
-    PluckSynth_SetDecay(0.50f + norm * 0.495f);
-    break;
+        case 72: 
+            PluckSynth_SetDecay(0.50f + norm * 0.495f);
+            break;
 
-case 74: // Brightness / Cutoff (CC 74) -> Damp
-    PluckSynth_SetDamp(0.30f + norm * 0.69f);
-    break;
-
-        case 64: // Sustain Pedal (CC 64)
+        case 64: 
             sustain_pedal.store(value >= 64, std::memory_order_relaxed);
             break;
 
@@ -190,36 +178,38 @@ case 74: // Brightness / Cutoff (CC 74) -> Damp
     }
 }
 
-#define PLUCK_OUTPUT_SCALE (PLUCK_MASTER_GAIN * 32767.0f)
-
 int16_t PluckSynth_NextSample(void) {
     float trig = 0.0f;
     NoteOnEvent event;
 
-if (note_event_fifo_pop(event)) {
-    string_voice.SetFreq(event.freq);
-    string_voice.SetAmp(event.amp);
-    string_voice.SetDecay(event.decay);
-    string_voice.SetDamp(event.damp);
+    // 1. Проверяем наличие новых событий нот
+    if (note_event_fifo_pop(event)) {
+        string_voice.SetFreq(event.freq);
+        string_voice.SetAmp(event.amp);
+        string_voice.SetDecay(event.decay);
+        
+        // Фиксируем смещение damp от текущего удара по клавише
+        active_damp_offset = event.damp_offset;
+        float current_damp = user_damp.load(std::memory_order_relaxed);
+        string_voice.SetDamp(clamp_f(current_damp + active_damp_offset, 0.0f, PLUCK_MAX_DAMP));
 
-    trig = 1.0f;
-    envelope = 1.0f;
-    active_audio_note = (int16_t)event.note;
-} else {
-    string_voice.SetDecay(
-        user_decay.load(std::memory_order_relaxed)
-    );
+        trig = 1.0f;
+        envelope = 1.0f;
+        active_audio_note = (int16_t)event.note;
+    } else {
+        // 2. Если новой ноты нет, непрерывно применяем положение ручек
+        string_voice.SetDecay(user_decay.load(std::memory_order_relaxed));
+        
+        // Добавляем к глобальному Damp сохраненное смещение активной ноты
+        float current_damp = user_damp.load(std::memory_order_relaxed);
+        string_voice.SetDamp(clamp_f(current_damp + active_damp_offset, 0.0f, PLUCK_MAX_DAMP));
 
-    string_voice.SetDamp(
-        user_damp.load(std::memory_order_relaxed)
-    );
-
-    trig = 0.0f;
-}
+        trig = 0.0f;
+    }
 
     float sample_f = 0.0f;
 
-    // Вычисляем отсчёт физического моделирования струны только если она звучит
+    // 3. Вычисление физического моделирования с экономией CPU в моменты тишины[cite: 9]
     if (envelope > 0.0f) {
         sample_f = string_voice.Process(trig);
 
@@ -227,6 +217,7 @@ if (note_event_fifo_pop(event)) {
             bool is_pressed = note_pressed[active_audio_note].load(std::memory_order_relaxed);
             bool sus_pedal  = sustain_pedal.load(std::memory_order_relaxed);
 
+            // Если клавиша отпущена и педаль не нажата, запускаем затухание огибающей
             if (!is_pressed && !sus_pedal) {
                 envelope *= release_coeff;
                 if (envelope < 0.0001f) {
@@ -237,9 +228,9 @@ if (note_event_fifo_pop(event)) {
         }
 
         sample_f *= envelope;
-        sample_f *= PLUCK_OUTPUT_SCALE; // Используем предрасчитанную константу
+        sample_f *= PLUCK_OUTPUT_SCALE; // Применение предрасчитанной константы гейна[cite: 9]
 
-        // Жёсткое ограничение (Clamping) для защиты от переполнения int16_t
+        // Жёсткое ограничение для защиты от переполнения int16_t (Hard Clipping)
         if (sample_f > 32767.0f) {
             sample_f = 32767.0f;
         } else if (sample_f < -32768.0f) {
