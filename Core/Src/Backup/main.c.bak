@@ -20,6 +20,7 @@
 #include "main.h"
 #include "dma.h"
 #include "sai.h"
+#include "spi.h"
 #include "usart.h"
 #include "usb_host.h"
 #include "gpio.h"
@@ -226,6 +227,7 @@ int main(void)
   MX_USART3_UART_Init();
   MX_SAI1_Init();
   MX_USB_HOST_Init();
+  MX_SPI4_Init();
   /* USER CODE BEGIN 2 */
   Display_Init();
   Synth_Init();      // Инициализация простого синтезатора
