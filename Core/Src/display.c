@@ -159,7 +159,7 @@ static void Display_DrawChar(
     uint8_t index = (uint8_t)(c - ' ');
     uint8_t width = (size == 12U) ? 6U : 8U;
 
-    uint16_t pixels[8][16];
+uint16_t pixels[16][8];
 
     for (uint8_t row = 0; row < size; row++)
     {
