@@ -66,8 +66,8 @@ void MX_SAI1_Init(void)
   hsai_BlockA1.FrameInit.FSOffset = SAI_FS_BEFOREFIRSTBIT;
   hsai_BlockA1.SlotInit.FirstBitOffset = 0;
   hsai_BlockA1.SlotInit.SlotSize = SAI_SLOTSIZE_32B;
-  hsai_BlockA1.SlotInit.SlotNumber = 1;
-  hsai_BlockA1.SlotInit.SlotActive = 0x00000000;
+  hsai_BlockA1.SlotInit.SlotNumber = 2;
+  hsai_BlockA1.SlotInit.SlotActive = 0x00000003;
   if (HAL_SAI_Init(&hsai_BlockA1) != HAL_OK)
   {
     Error_Handler();
@@ -126,7 +126,7 @@ void HAL_SAI_MspInit(SAI_HandleTypeDef* saiHandle)
 
     /* Peripheral DMA init*/
 
-    hdma_sai1_a.Instance = DMA1_Stream0;
+    hdma_sai1_a.Instance = DMA2_Stream0;
     hdma_sai1_a.Init.Request = DMA_REQUEST_SAI1_A;
     hdma_sai1_a.Init.Direction = DMA_MEMORY_TO_PERIPH;
     hdma_sai1_a.Init.PeriphInc = DMA_PINC_DISABLE;
