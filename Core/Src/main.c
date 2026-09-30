@@ -235,6 +235,8 @@ int main(void)
   // Запуск круговой передачи DMA на ЦАП PCM5102A (пример для SAI1_A)
   // HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t*)audio_buffer, AUDIO_BUFFER_SIZE);
   printf("Waiting for USB device to be attached...\r\n");
+  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, GPIO_PIN_SET);
+  
   /* USER CODE END 2 */
 
   /* Infinite loop */
