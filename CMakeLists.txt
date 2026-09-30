@@ -98,10 +98,16 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/synth.c
     Core/Src/usbh_midi.c
     Core/Src/pluck_synth.cpp
+    Core/Src/display.c
+
+    Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/st7735.c
+    Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/st7735_reg.c
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Inc
+
+    Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735
 )
 
 # Remove an incorrect legacy library dependency when linking C++.

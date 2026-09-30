@@ -30,6 +30,7 @@
 #include "usbh_midi.h"
 #include "synth.h"       // 
 #include "pluck_synth.h" // Karplus-Strong
+#include "display.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -226,6 +227,7 @@ int main(void)
   MX_SAI1_Init();
   MX_USB_HOST_Init();
   /* USER CODE BEGIN 2 */
+  Display_Init();
   Synth_Init();      // Инициализация простого синтезатора
   PluckSynth_Init(); // Инициализация синтезатора струны
   // Запуск круговой передачи DMA на ЦАП PCM5102A (пример для SAI1_A)
@@ -252,6 +254,7 @@ while (MIDI_QueueGet(&event))
     if (command == 0x90 && event.data2 != 0)
     {
         note_on_count++;
+		Display_SetLastNote(event.data1);
     }
     else if (command == 0x80 ||
              (command == 0x90 && event.data2 == 0))
@@ -262,6 +265,8 @@ while (MIDI_QueueGet(&event))
 
 if (Appli_state != previous_state)
 {
+	Display_SetMidiConnected(Appli_state == APPLICATION_READY); // Отображаем статус midi-клавиатуры
+		
     if (Appli_state == APPLICATION_READY)
     {
         if (USBH_MIDI_Receive(&hUsbHostFS,
