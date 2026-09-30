@@ -130,9 +130,9 @@ static ST7735_IO_t st7735_io =
     .DeInit   = NULL,
     .Address  = 0,
     .WriteReg = Display_WriteReg,
-    .ReadReg  = Display_ReadReg,
+    .ReadReg  = NULL, // Чтение недоступно
     .SendData = Display_SendData,
-    .RecvData = Display_ReceiveData,
+    .RecvData = NULL, // Чтение недоступно
     .GetTick  = Display_GetTick
 };
 
@@ -319,7 +319,8 @@ void Display_Init(void)
     }
 
     ST7735_DisplayOn(&st7735);
-
+    // Включаем подсветку явно
+    HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, GPIO_PIN_RESET);
     Display_Redraw();
 }
 
