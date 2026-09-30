@@ -328,10 +328,7 @@ void Display_Init(void)
 
     HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
-    Display_SPI4_MspInit();
-    Display_SPI4_Init();
-
-    memset(&st7735_ctx, 0, sizeof(st7735_ctx));
+       memset(&st7735_ctx, 0, sizeof(st7735_ctx));
 
     /*
      * This is the exact configuration used by the WeAct
