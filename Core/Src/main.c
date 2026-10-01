@@ -235,7 +235,7 @@ int main(void)
   Display_Init();
   Synth_Init();      // Инициализация простого синтезатора
   PluckSynth_Init(); // Инициализация синтезатора струны
-  // Запуск круговой передачи DMA на ЦАП PCM5102A (пример для SAI1_A)
+  // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
   // HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t*)audio_buffer, AUDIO_BUFFER_SIZE);
   printf("Waiting for USB device to be attached...\r\n");
   HAL_GPIO_WritePin(DEBUG_LED_GPIO_Port, DEBUG_LED_Pin, GPIO_PIN_RESET);

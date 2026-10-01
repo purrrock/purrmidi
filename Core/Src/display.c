@@ -255,7 +255,7 @@ static void Display_Redraw(void)
             2,
             32,
             16,
-            "---");
+            "   ");
     }
 }
 
