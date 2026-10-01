@@ -21,7 +21,16 @@
 #define LCD_BL_PORT      GPIOE
 #define LCD_BL_PIN       GPIO_PIN_10
 
-#define LCD_SPI          SPI4
+/* Подсветка на этой плате включается низким уровнем */
+#define LCD_BL_ON        GPIO_PIN_RESET
+#define LCD_BL_OFF       GPIO_PIN_SET
+
+#define COLOR_BLACK      0x0000U
+#define COLOR_WHITE      0xFFFFU
+
+/* Максимальный размер глифа (шрифт 16 -> 8x16) */
+#define GLYPH_MAX_W      8U
+#define GLYPH_MAX_H      16U
 
 extern SPI_HandleTypeDef hspi4;
 
@@ -31,9 +40,15 @@ static ST7735_Ctx_t st7735_ctx;
 static bool midi_connected = false;
 static uint8_t last_note = 0;
 static bool have_last_note = false;
+static bool display_ready = false;   /* true только после успешной инициализации */
+static const char * const note_names[12] =
+{
+    "C", "C#", "D", "D#", "E", "F",
+    "F#", "G", "G#", "A", "A#", "B"
+};
 
 /* ------------------------------------------------------------------------- */
-/* ST7735 bus interface                                                     */
+/* ST7735 bus interface                                                      */
 /* ------------------------------------------------------------------------- */
 
 static int32_t Display_BusInit(void)
@@ -101,162 +116,101 @@ static ST7735_IO_t st7735_io =
 /* Text rendering                                                            */
 /* ------------------------------------------------------------------------- */
 
+/*
+ * Формат шрифта asc2_1206 / asc2_1608: глиф хранится по столбцам слева
+ * направо, каждый столбец занимает (size + 7) / 8 байт, внутри байта
+ * старший бит - верхняя строка.
+ */
 static void Display_DrawChar(
     uint16_t x,
     uint16_t y,
     char c,
     uint8_t size)
 {
-    if (c < ' ' || c > '~')
+    if (c < ' ' || c > '~' || (size != 12U && size != 16U))
     {
         return;
     }
 
-    if (size != 12U && size != 16U)
+    const uint8_t width     = size / 2U;            /* 6 или 8 */
+    const uint8_t col_bytes = (size + 7U) / 8U;     /* 2 для обоих шрифтов */
+    const uint8_t *glyph    = (size == 12U) ? asc2_1206[c - ' ']
+                                            : asc2_1608[c - ' '];
+
+    uint16_t pixels[GLYPH_MAX_W * GLYPH_MAX_H];
+    memset(pixels, 0, (size_t)width * size * sizeof(pixels[0]));
+
+    for (uint8_t col = 0; col < width; col++)
     {
-        return;
-    }
-
-    uint8_t index = (uint8_t)(c - ' ');
-    uint8_t width = (size == 12U) ? 6U : 8U;
-    uint8_t bytes_per_char = (size == 12U) ? 12U : 16U;
-    const uint8_t *font_ptr = (size == 12U) ? asc2_1206[index] : asc2_1608[index];
-
-    uint16_t pixels[16 * 8];
-    // Очищаем буфер символа фоновым (черным) цветом 0x0000
-    memset(pixels, 0, sizeof(pixels));
-
-    uint8_t cur_x = 0;
-    uint8_t cur_y = 0;
-
-    // Считываем байты шрифта по столбцам (сверху вниз, слева направо)
-    for (uint8_t b = 0; b < bytes_per_char; b++)
-    {
-        uint8_t byte_val = font_ptr[b];
-
-        for (uint8_t bit = 0; bit < 8; bit++)
+        for (uint8_t row = 0; row < size; row++)
         {
-            bool is_set = (byte_val & 0x80U) != 0U;
-            byte_val <<= 1;
+            uint8_t bits = glyph[col * col_bytes + (row >> 3)];
 
-            if (is_set)
+            if (bits & (0x80U >> (row & 7U)))
             {
-                // Записываем белый пиксель в строку cur_y и столбец cur_x
-                pixels[cur_y * width + cur_x] = 0xFFFFU;
-            }
-
-            cur_y++;
-            // Если достигли низа символа, переходим к следующему столбцу
-            if (cur_y >= size)
-            {
-                cur_y = 0;
-                cur_x++;
-                break;
+                pixels[row * width + col] = COLOR_WHITE;
             }
         }
     }
 
-    ST7735_FillRGBRect(
-        &st7735,
-        x,
-        y,
-        (uint8_t *)pixels,
-        width,
-        size);
+    ST7735_FillRGBRect(&st7735, x, y, (uint8_t *)pixels, width, size);
 }
 
+/*
+ * Каждый символ рисуется вместе с чёрным фоном, поэтому текст сам стирает
+ * то, что было под ним. Если новая строка короче прежней, её нужно
+ * дополнить пробелами - иначе останется "хвост" от старой.
+ */
 static void Display_DrawString(
     uint16_t x,
     uint16_t y,
     uint8_t size,
     const char *text)
 {
-    uint16_t cursor = x;
-    uint16_t char_width = size / 2U;
+    if (!display_ready) { return; }
+	
+    const uint16_t char_width = size / 2U;
 
-    while (*text != '\0')
+    for (; *text != '\0' && x + char_width <= DISPLAY_WIDTH; text++)
     {
-        if (cursor + char_width > DISPLAY_WIDTH)
-        {
-            break;
-        }
-
-        Display_DrawChar(
-            cursor,
-            y,
-            *text,
-            size);
-
-        cursor += char_width;
-        text++;
+        Display_DrawChar(x, y, *text, size);
+        x += char_width;
     }
 }
 
-static void Display_Redraw(void)
+/* ------------------------------------------------------------------------- */
+/* Screen contents (перерисовываются по частям, без очистки всего экрана)    */
+/* ------------------------------------------------------------------------- */
+
+static void Display_DrawStatus(void)
 {
-    char text[32];
-
-    ST7735_FillRect(
-        &st7735,
-        0,
-        0,
-        DISPLAY_WIDTH,
-        DISPLAY_HEIGHT,
-        0x0000);
-
-    /*
-     * Line 1: small title
-     */
+    /* Обе строки по 18 символов, чтобы одна полностью затирала другую */
     Display_DrawString(
-        2,
-        1,
-        12,
-        "PurrMidi");
+        2, 15, 12,
+        midi_connected ? "MIDI: connected   " : "MIDI: disconnected");
+}
 
-    /*
-     * Line 2: MIDI connection state
-     */
-    Display_DrawString(
-        2,
-        15,
-        12,
-        midi_connected ? "MIDI: connected" : "MIDI: disconnected");
+static void Display_DrawNote(void)
+{
+    char text[16];
 
-    /*
-     * Lines 3-4: last note
-     */
-    if (have_last_note)
+    if (!have_last_note)
     {
-        uint8_t note = last_note % 12U;
-        uint8_t octave = (last_note / 12U) - 1U;
-
-        static const char *note_names[12] =
-        {
-            "C", "C#", "D", "D#", "E", "F",
-            "F#", "G", "G#", "A", "A#", "B"
-        };
-
-        snprintf(
-            text,
-            sizeof(text),
-            "%s%d",
-            note_names[note],
-            octave);
-
-        Display_DrawString(
-            2,
-            32,
-            16,
-            text);
+        return;
     }
-    else
-    {
-        Display_DrawString(
-            2,
-            32,
-            16,
-            "   ");
-    }
+
+    /* Нота 0..11 -> октава -1, поэтому знаковый int, а не uint8_t */
+    const int octave = (int)(last_note / 12U) - 1;
+
+    /* Пробелы в конце затирают прежнюю, более длинную запись ("A#-1") */
+    snprintf(
+        text,
+        sizeof(text),
+        "%s%d    ",
+        note_names[last_note % 12U],
+        octave);
+
+    Display_DrawString(2, 32, 16, text);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -265,37 +219,37 @@ static void Display_Redraw(void)
 
 void Display_Init(void)
 {
-       memset(&st7735_ctx, 0, sizeof(st7735_ctx));
+    /* Пока в памяти дисплея мусор, подсветка должна быть выключена */
+    HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, LCD_BL_OFF);
 
-    /*
-     * This is the exact configuration used by the WeAct
-     * 0.96" TFT example.
-     */
-    st7735_ctx.Orientation =
-        ST7735_ORIENTATION_LANDSCAPE_ROT180;
+    memset(&st7735_ctx, 0, sizeof(st7735_ctx));
 
-    st7735_ctx.Panel = HannStar_Panel;
-    st7735_ctx.Type = ST7735_0_9_inch_screen;
+    /* Конфигурация из примера WeAct 0.96" TFT */
+    st7735_ctx.Orientation = ST7735_ORIENTATION_LANDSCAPE_ROT180;
+    st7735_ctx.Panel       = HannStar_Panel;
+    st7735_ctx.Type        = ST7735_0_9_inch_screen;
 
-    if (ST7735_RegisterBusIO(
-            &st7735,
-            &st7735_io) != ST7735_OK)
+    if (ST7735_RegisterBusIO(&st7735, &st7735_io) != ST7735_OK)
     {
-        Error_Handler();
+		printf("Display: ST7735_RegisterBusIO failed, continuing without display\r\n");
+		return;
     }
 
-    if (ST7735_Init(
-            &st7735,
-            ST7735_FORMAT_RBG565,
-            &st7735_ctx) != ST7735_OK)
+    if (ST7735_Init(&st7735, ST7735_FORMAT_RBG565, &st7735_ctx) != ST7735_OK)
     {
-        Error_Handler();
+        printf("Display: ST7735_Init failed, continuing without display\r\n");
+        return;
     }
+	display_ready = true;
+	
+    /* Единственная полная очистка экрана + статичный заголовок */
+    ST7735_FillRect(&st7735, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, COLOR_BLACK);
+    Display_DrawString(2, 1, 12, "PurrMidi");
+    Display_DrawStatus();
+    Display_DrawNote();
 
     ST7735_DisplayOn(&st7735);
-    // Включаем подсветку явно
-    HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, GPIO_PIN_RESET);
-    Display_Redraw();
+    HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, LCD_BL_ON); // включаем подсветку
 }
 
 void Display_SetMidiConnected(bool connected)
@@ -306,13 +260,17 @@ void Display_SetMidiConnected(bool connected)
     }
 
     midi_connected = connected;
-    Display_Redraw();
+    Display_DrawStatus();
 }
 
 void Display_SetLastNote(uint8_t note)
 {
+    if (have_last_note && last_note == note)
+    {
+        return;
+    }
+
     last_note = note;
     have_last_note = true;
-
-    Display_Redraw();
+    Display_DrawNote();
 }
