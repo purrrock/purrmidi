@@ -4,7 +4,6 @@
 #include "usbh_midi.h"
 #include "midi_event.h"
 #include "midi_queue.h"
-#include "display.h"
 
 extern ApplicationTypeDef Appli_state;
 extern USBH_HandleTypeDef hUsbHostFS;
@@ -16,6 +15,7 @@ static volatile uint32_t midi_events = 0;
 static volatile uint32_t midi_receive_errors = 0;
 
 static ApplicationTypeDef previous_state = APPLICATION_IDLE;
+static bool state_changed = false;
 
 void MIDI_USB_Init(void)
 {
@@ -23,6 +23,7 @@ void MIDI_USB_Init(void)
     midi_events = 0;
     midi_receive_errors = 0;
     previous_state = APPLICATION_IDLE;
+    state_changed = false;
 }
 
 void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
@@ -90,7 +91,7 @@ void MIDI_USB_Process(void)
 {
     if (Appli_state != previous_state)
     {
-        Display_SetMidiConnected(Appli_state == APPLICATION_READY);
+        state_changed = true;
 
         if (Appli_state == APPLICATION_READY)
         {
@@ -103,6 +104,20 @@ void MIDI_USB_Process(void)
         }
         previous_state = Appli_state;
     }
+    else
+    {
+        state_changed = false;
+    }
+}
+
+bool MIDI_USB_IsConnected(void)
+{
+    return (Appli_state == APPLICATION_READY);
+}
+
+bool MIDI_USB_HasStateChanged(void)
+{
+    return state_changed;
 }
 
 uint32_t MIDI_USB_GetPacketsCount(void)

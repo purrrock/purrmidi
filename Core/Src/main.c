@@ -143,6 +143,11 @@ int main(void)
     /* USER CODE BEGIN 3 */
     MIDI_USB_Process();
 
+    if (MIDI_USB_HasStateChanged())
+    {
+        Display_SetMidiConnected(MIDI_USB_IsConnected());
+    }
+
     MIDI_Event_t event;
 
     while (MIDI_Queue_Pop(&event))
