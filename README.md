@@ -89,6 +89,5 @@ git submodule add https://github.com/WeActStudio/MiniSTM32H7xx.git Middlewares/T
 
 Для загрузки недостающих подмодулей выполните в корне проекта:
 ```bash
-Bash
 git submodule update --init --recursive
 ```
