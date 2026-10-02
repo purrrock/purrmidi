@@ -29,8 +29,6 @@ static USBH_StatusTypeDef USBH_MIDI_ClassRequest (USBH_HandleTypeDef *phost);
 
 static void MIDI_ProcessReception(USBH_HandleTypeDef *phost);
 
-static void MIDI_PrintHCDDiagnostics(void);
-
 /*-------------------------------------------------------------------------*/
 
 USBH_ClassTypeDef  MIDI_Class =
@@ -505,43 +503,6 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
 /*------------------------------------------------------------------------------------------------------------------------------*/
 
 /**
- * @brief  Print HCD channel diagnostic line
- */
-static void MIDI_PrintHCDDiagnostics(void)
-{
-	extern USBH_HandleTypeDef hUsbHostFS;
-	USBH_HandleTypeDef *phost = &hUsbHostFS;
-
-	if (phost == NULL || phost->pActiveClass == NULL || phost->pActiveClass->pData == NULL || phost->pData == NULL)
-	{
-		return;
-	}
-
-	MIDI_HandleTypeDef *MIDI_Handle = (MIDI_HandleTypeDef *)phost->pActiveClass->pData;
-	HCD_HandleTypeDef *hhcd = (HCD_HandleTypeDef *)phost->pData;
-
-	uint8_t channel = MIDI_Handle->diag_hcd_channel;
-	if (channel < 16)
-	{
-		uint8_t hc_state = (uint8_t)hhcd->hc[channel].state;
-		uint8_t urb_state = (uint8_t)hhcd->hc[channel].urb_state;
-		uint32_t xfer_count = hhcd->hc[channel].xfer_count;
-		uint8_t err = (uint8_t)hhcd->hc[channel].ErrCnt;
-		uint8_t toggle_in = (uint8_t)hhcd->hc[channel].toggle_in;
-		uint8_t interval = MIDI_Handle->InEpInterval;
-
-		printf("[USBHCD] ch=%u hc_state=%u urb_state=%u xfer_count=%lu err=%u toggle_in=%u interval=%u\r\n",
-		       channel,
-		       hc_state,
-		       urb_state,
-		       (unsigned long)xfer_count,
-		       err,
-		       toggle_in,
-		       interval);
-	}
-}
-
-/**
  * @brief  Retrieve USB MIDI diagnostic parameters
  * @param  phost: Host handle
  * @param  pdiag: Pointer to diagnostic struct
@@ -555,8 +516,6 @@ USBH_StatusTypeDef USBH_MIDI_GetDiag(USBH_HandleTypeDef *phost, MIDI_Diag_t *pdi
 	}
 
 	MIDI_HandleTypeDef *MIDI_Handle = (MIDI_HandleTypeDef *)phost->pActiveClass->pData;
-
-	MIDI_PrintHCDDiagnostics();
 
 	pdiag->urb_done_cnt = MIDI_Handle->urb_done_cnt;
 	pdiag->urb_notready_cnt = MIDI_Handle->urb_notready_cnt;
