@@ -28,10 +28,12 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
-#include "usbh_midi.h"
 #include "synth.h"       // 
 #include "pluck_synth.h" // Karplus-Strong
 #include "display.h"
+#include "midi_event.h"
+#include "midi_queue.h"
+#include "midi_usb.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -55,25 +57,9 @@
 
 static volatile uint32_t note_on_count = 0;
 static volatile uint32_t note_off_count = 0;
-static volatile uint32_t midi_usb_packets = 0;
-static volatile uint32_t midi_events = 0;
-static volatile uint32_t midi_queue_overruns = 0;
-static volatile uint32_t midi_receive_errors = 0;
 
 static uint8_t active_notes[128];
 static uint16_t active_note_count = 0;
-
-#define MIDI_EVENT_QUEUE_SIZE 256
-typedef struct
-{
-    uint8_t status;
-    uint8_t data1;
-    uint8_t data2;
-} MIDI_Event_t;
-
-static volatile MIDI_Event_t midi_event_queue[MIDI_EVENT_QUEUE_SIZE];
-static volatile uint8_t midi_queue_head = 0;
-static volatile uint8_t midi_queue_tail = 0;
 
 /* USER CODE END PV */
 
@@ -83,8 +69,6 @@ static void MPU_Config(void);
 void MX_USB_HOST_Process(void);
 
 /* USER CODE BEGIN PFP */
-static void MIDI_QueueEvent(uint8_t status, uint8_t data1, uint8_t data2);
-static uint8_t MIDI_QueueGet(MIDI_Event_t *event);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -95,101 +79,6 @@ int _write(int file, char *ptr, int len) {
         return len;
     }
     return 0;
-}
-
-extern ApplicationTypeDef Appli_state;
-extern USBH_HandleTypeDef hUsbHostFS;
-
-// объявление буфера с выравниванием по 32-битной границе:
-__ALIGN_BEGIN uint8_t midi_rx_buffer[64] __ALIGN_END;
-
-void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
-{
-    midi_usb_packets++;
-    uint16_t length = USBH_MIDI_GetLastReceivedDataSize(phost);
-
-    for (uint16_t i = 0; i + 3 < length; i += 4)
-    {
-        uint8_t cin = midi_rx_buffer[i] & 0x0F;
-
-        if (cin == 0x00)
-        {
-            continue;
-        }
-
-        uint8_t status = midi_rx_buffer[i + 1];
-        uint8_t data1  = 0;
-        uint8_t data2  = 0;
-
-        switch (cin)
-        {
-            case 0x1:
-            case 0x5:
-            case 0xF:
-                // 1 byte message (status only)
-                break;
-
-            case 0x2:
-            case 0x6:
-            case 0xC:
-            case 0xD:
-                // 2 byte message (status + data1)
-                data1 = midi_rx_buffer[i + 2];
-                break;
-
-            case 0x3:
-            case 0x4:
-            case 0x7:
-            case 0x8:
-            case 0x9:
-            case 0xA:
-            case 0xB:
-            case 0xE:
-                // 3 byte message (status + data1 + data2)
-                data1 = midi_rx_buffer[i + 2];
-                data2 = midi_rx_buffer[i + 3];
-                break;
-
-            default:
-                continue;
-        }
-
-        midi_events++;
-        MIDI_QueueEvent(status, data1, data2);
-    }
-}
-
-// функция помещения события в очередь
-static void MIDI_QueueEvent(uint8_t status, uint8_t data1, uint8_t data2)
-{
-    uint8_t next = (uint8_t)((midi_queue_head + 1) % MIDI_EVENT_QUEUE_SIZE);
-
-    if (next == midi_queue_tail)
-    {
-        midi_queue_overruns++;
-        return;
-    }
-
-    midi_event_queue[midi_queue_head].status = status;
-    midi_event_queue[midi_queue_head].data1 = data1;
-    midi_event_queue[midi_queue_head].data2 = data2;
-
-    midi_queue_head = next;
-}
-// и функция извлечения:
-static uint8_t MIDI_QueueGet(MIDI_Event_t *event)
-{
-    if (midi_queue_tail == midi_queue_head)
-    {
-        return 0;
-    }
-
-    *event = midi_event_queue[midi_queue_tail];
-
-    midi_queue_tail =
-        (uint8_t)((midi_queue_tail + 1) % MIDI_EVENT_QUEUE_SIZE);
-
-    return 1;
 }
 
 /* USER CODE END 0 */
@@ -232,6 +121,8 @@ int main(void)
   MX_USB_HOST_Init();
   MX_SPI4_Init();
   /* USER CODE BEGIN 2 */
+  MIDI_Queue_Init();
+  MIDI_USB_Init();
   Display_Init();
   Synth_Init();      // Инициализация простого синтезатора
   PluckSynth_Init(); // Инициализация синтезатора струны
@@ -244,109 +135,85 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  ApplicationTypeDef previous_state = APPLICATION_IDLE;
   while (1)
   {
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
-MIDI_Event_t event;
+    MIDI_USB_Process();
 
-while (MIDI_QueueGet(&event))
-{
-    // printf("[MIDI] %02X %02X %02X\r\n",
-    //        event.status, event.data1, event.data2);
-
-    uint8_t command = event.status & 0xF0;
-    uint8_t note = event.data1;
-
-    if (command == 0x90 && event.data2 != 0)
+    if (MIDI_USB_HasStateChanged())
     {
-        note_on_count++;
-
-        if (note < 128 && active_notes[note] == 0)
-        {
-            active_notes[note] = 1;
-            active_note_count++;
-        }
-
-        HAL_GPIO_WritePin(
-            DEBUG_LED_GPIO_Port,
-            DEBUG_LED_Pin,
-            GPIO_PIN_SET
-        );
-
-        Display_SetLastNote(note);
+        Display_SetMidiConnected(MIDI_USB_IsConnected());
     }
-    else if (command == 0x80 ||
-             (command == 0x90 && event.data2 == 0))
+
+    MIDI_Event_t event;
+
+    while (MIDI_Queue_Pop(&event))
     {
-        note_off_count++;
+        // printf("[MIDI] %02X %02X %02X\r\n",
+        //        event.status, event.data1, event.data2);
 
-        if (note < 128 && active_notes[note] != 0)
+        uint8_t command = event.status & MIDI_STATUS_MASK;
+        uint8_t note = event.data1;
+
+        if (command == MIDI_STATUS_NOTE_ON && event.data2 != 0)
         {
-            active_notes[note] = 0;
+            note_on_count++;
 
-            if (active_note_count > 0)
+            if (note < 128 && active_notes[note] == 0)
             {
-                active_note_count--;
+                active_notes[note] = 1;
+                active_note_count++;
             }
-        }
 
-        if (active_note_count == 0)
-        {
             HAL_GPIO_WritePin(
                 DEBUG_LED_GPIO_Port,
                 DEBUG_LED_Pin,
-                GPIO_PIN_RESET
+                GPIO_PIN_SET
             );
-        }
-    }
-}
 
-if (Appli_state != previous_state)
-{
-	Display_SetMidiConnected(Appli_state == APPLICATION_READY); // Отображаем статус midi-клавиатуры
-		
-    if (Appli_state == APPLICATION_READY)
-    {
-        if (USBH_MIDI_Receive(&hUsbHostFS,
-                              midi_rx_buffer,
-                              sizeof(midi_rx_buffer)) != USBH_OK)
+            Display_SetLastNote(note);
+        }
+        else if (command == MIDI_STATUS_NOTE_OFF ||
+                 (command == MIDI_STATUS_NOTE_ON && event.data2 == 0))
         {
-            midi_receive_errors++;
+            note_off_count++;
+
+            if (note < 128 && active_notes[note] != 0)
+            {
+                active_notes[note] = 0;
+
+                if (active_note_count > 0)
+                {
+                    active_note_count--;
+                }
+            }
+
+            if (active_note_count == 0)
+            {
+                HAL_GPIO_WritePin(
+                    DEBUG_LED_GPIO_Port,
+                    DEBUG_LED_Pin,
+                    GPIO_PIN_RESET
+                );
+            }
         }
     }
-    previous_state = Appli_state;
-}
+
     static uint32_t last_report = 0;
     if (HAL_GetTick() - last_report >= 10000)
     {   last_report = HAL_GetTick();
         printf("[STATS] USB pkts: %lu | MIDI evts: %lu | ON: %lu | OFF: %lu | Overruns: %lu | RX errors: %lu\r\n",
-               midi_usb_packets,
-               midi_events,
+               MIDI_USB_GetPacketsCount(),
+               MIDI_USB_GetEventsCount(),
                note_on_count,
                note_off_count,
-               midi_queue_overruns,
-               midi_receive_errors);
+               MIDI_Queue_GetOverrunCount(),
+               MIDI_USB_GetReceiveErrorsCount());
     }
   }
-
-  /*
-uint8_t cin      = midi_rx_buffer[0] & 0x0F;
-uint8_t note     = midi_rx_buffer[2];
-uint8_t velocity = midi_rx_buffer[3];
-
-if (cin == 0x09 && velocity > 0) {
-    PluckSynth_NoteOn(note, velocity);
-} 
-else if (cin == 0x08 || (cin == 0x09 && velocity == 0)) {
-    PluckSynth_NoteOff(note);
-} 
-else if (cin == 0x0B) {
-    PluckSynth_ControlChange(note, velocity);
-} */
 
   /* USER CODE END 3 */
 }

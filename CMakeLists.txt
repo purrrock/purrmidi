@@ -99,6 +99,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/usbh_midi.c
     Core/Src/pluck_synth.cpp
     Core/Src/display.c
+    Engine/midi/midi_queue.c
+    Platform/midi_usb/midi_usb.c
 
     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/st7735.c
     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/st7735_reg.c
@@ -106,6 +108,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Inc
+    Engine/midi
+    Platform/midi_usb
 
     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735
 )
