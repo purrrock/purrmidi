@@ -160,19 +160,22 @@ typedef struct
 	volatile uint32_t urb_error_cnt;
 	volatile uint32_t urb_stall_cnt;
 	volatile uint32_t stall_to_idle_cnt;
-volatile uint32_t usb_midi_packet_cnt;
-volatile uint32_t rx_bytes_cnt;
+	volatile uint32_t usb_midi_packet_cnt;
+	volatile uint32_t rx_bytes_cnt;
 	uint8_t state;
 	uint8_t data_rx_state;
 
 	uint8_t in_ep;
 	uint8_t in_ep_type;
 	uint16_t in_ep_size;
+	uint8_t in_ep_interval;
 
+	uint8_t hcd_channel;
 	uint8_t hc_state;
 	uint8_t hc_urb_state;
 	uint32_t hc_xfer_count;
-	uint32_t hc_err_cnt;
+	uint8_t hc_err_cnt;
+	uint8_t hc_toggle_in;
 } MIDI_Diag_t;
 
 /* Structure for MIDI process */
@@ -183,6 +186,7 @@ typedef struct _MIDI_Process
 	uint8_t			InEp;
 	uint16_t		InEpSize;
 	uint8_t			InEpType;
+	uint8_t			InEpInterval;
 
 	uint8_t			*pRxData;
 	uint16_t		RxDataLength;
@@ -197,6 +201,13 @@ typedef struct _MIDI_Process
 	volatile uint32_t stall_to_idle_cnt;
 	volatile uint32_t usb_midi_packet_cnt;
 	volatile uint32_t rx_bytes_cnt;
+
+	uint8_t diag_hcd_channel;
+	uint8_t diag_last_hc_state;
+	uint8_t diag_last_urb_state;
+	uint32_t diag_last_xfer_count;
+	uint8_t diag_last_err_cnt;
+	uint8_t diag_last_toggle_in;
 }
 MIDI_HandleTypeDef;
 

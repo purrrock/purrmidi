@@ -101,6 +101,7 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
                     MIDI_Handle->InEp = ep_addr;
                     MIDI_Handle->InEpSize = ep_size;
                     MIDI_Handle->InEpType = current_ep_type;
+                    MIDI_Handle->InEpInterval = phost->device.CfgDesc.Itf_Desc[interface].Ep_Desc[i].bInterval;
                     in_ep_type = current_ep_type;
                     break;
                 }
@@ -140,6 +141,14 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
 		}
 
 		MIDI_Handle->state = MIDI_IDLE_STATE;
+		MIDI_Handle->diag_hcd_channel = MIDI_Handle->InPipe;
+
+		printf("[USBEP] MIDI IN ep=0x%02X size=%u type=%u interval=%u\r\n",
+		       MIDI_Handle->InEp,
+		       MIDI_Handle->InEpSize,
+		       MIDI_Handle->InEpType,
+		       MIDI_Handle->InEpInterval);
+
 		status = USBH_OK;
 	}
 	return status;
@@ -399,6 +408,20 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
     case MIDI_RECEIVE_DATA_WAIT:
         URB_Status = USBH_LL_GetURBState(phost, MIDI_Handle->InPipe);
 
+        if (phost->pData != NULL)
+        {
+            HCD_HandleTypeDef *hhcd = (HCD_HandleTypeDef *)phost->pData;
+            uint8_t channel = MIDI_Handle->diag_hcd_channel;
+            if (channel < 16)
+            {
+                MIDI_Handle->diag_last_hc_state = (uint8_t)hhcd->hc[channel].state;
+                MIDI_Handle->diag_last_urb_state = (uint8_t)hhcd->hc[channel].urb_state;
+                MIDI_Handle->diag_last_xfer_count = hhcd->hc[channel].xfer_count;
+                MIDI_Handle->diag_last_err_cnt = (uint8_t)hhcd->hc[channel].ErrCnt;
+                MIDI_Handle->diag_last_toggle_in = (uint8_t)hhcd->hc[channel].toggle_in;
+            }
+        }
+
         if (URB_Status == USBH_URB_DONE)
         {
             MIDI_Handle->urb_done_cnt++;
@@ -500,8 +523,8 @@ USBH_StatusTypeDef USBH_MIDI_GetDiag(USBH_HandleTypeDef *phost, MIDI_Diag_t *pdi
 	pdiag->urb_stall_cnt = MIDI_Handle->urb_stall_cnt;
 	pdiag->stall_to_idle_cnt = MIDI_Handle->stall_to_idle_cnt;
 
-pdiag->usb_midi_packet_cnt = MIDI_Handle->usb_midi_packet_cnt;
-pdiag->rx_bytes_cnt = MIDI_Handle->rx_bytes_cnt;
+	pdiag->usb_midi_packet_cnt = MIDI_Handle->usb_midi_packet_cnt;
+	pdiag->rx_bytes_cnt = MIDI_Handle->rx_bytes_cnt;
 
 	pdiag->state = (uint8_t)MIDI_Handle->state;
 	pdiag->data_rx_state = (uint8_t)MIDI_Handle->data_rx_state;
@@ -509,24 +532,14 @@ pdiag->rx_bytes_cnt = MIDI_Handle->rx_bytes_cnt;
 	pdiag->in_ep = MIDI_Handle->InEp;
 	pdiag->in_ep_type = MIDI_Handle->InEpType;
 	pdiag->in_ep_size = MIDI_Handle->InEpSize;
+	pdiag->in_ep_interval = MIDI_Handle->InEpInterval;
 
-	pdiag->hc_state = 0;
-	pdiag->hc_urb_state = 0;
-	pdiag->hc_xfer_count = 0;
-	pdiag->hc_err_cnt = 0;
-
-	if (phost->pData != NULL)
-	{
-		HCD_HandleTypeDef *hhcd = (HCD_HandleTypeDef *)phost->pData;
-		uint8_t ch_num = MIDI_Handle->InPipe;
-		if (ch_num < 16)
-		{
-			pdiag->hc_state = (uint8_t)hhcd->hc[ch_num].state;
-			pdiag->hc_urb_state = (uint8_t)hhcd->hc[ch_num].urb_state;
-			pdiag->hc_xfer_count = hhcd->hc[ch_num].xfer_count;
-			pdiag->hc_err_cnt = hhcd->hc[ch_num].ErrCnt;
-		}
-	}
+	pdiag->hcd_channel = MIDI_Handle->diag_hcd_channel;
+	pdiag->hc_state = MIDI_Handle->diag_last_hc_state;
+	pdiag->hc_urb_state = MIDI_Handle->diag_last_urb_state;
+	pdiag->hc_xfer_count = MIDI_Handle->diag_last_xfer_count;
+	pdiag->hc_err_cnt = MIDI_Handle->diag_last_err_cnt;
+	pdiag->hc_toggle_in = MIDI_Handle->diag_last_toggle_in;
 
 	return USBH_OK;
 }
