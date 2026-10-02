@@ -10,6 +10,7 @@ extern USBH_HandleTypeDef hUsbHostFS;
 
 __ALIGN_BEGIN static uint8_t midi_rx_buffer[64] __ALIGN_END;
 
+static volatile uint32_t usb_transfer_count = 0;
 static volatile uint32_t midi_usb_packets = 0;
 static volatile uint32_t midi_events = 0;
 static volatile uint32_t midi_receive_errors = 0;
@@ -21,6 +22,7 @@ static bool state_changed = false;
 
 void MIDI_USB_Init(void)
 {
+    usb_transfer_count = 0;
     midi_usb_packets = 0;
     midi_events = 0;
     midi_receive_errors = 0;
@@ -32,9 +34,9 @@ void MIDI_USB_Init(void)
 
 void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
 {
-    last_packet_tick = HAL_GetTick();
-    midi_usb_packets++;
+    usb_transfer_count++;
     uint16_t length = USBH_MIDI_GetLastReceivedDataSize(phost);
+    bool has_midi_event = false;
 
     for (uint16_t i = 0; i + 3 < length; i += 4)
     {
@@ -44,6 +46,9 @@ void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
         {
             continue;
         }
+
+        has_midi_event = true;
+        midi_usb_packets++;
 
         uint8_t status = midi_rx_buffer[i + 1];
         uint8_t data1  = 0;
@@ -89,6 +94,11 @@ void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
             .data2 = data2
         };
         MIDI_Queue_Push(&event);
+    }
+
+    if (has_midi_event)
+    {
+        last_packet_tick = HAL_GetTick();
     }
 }
 
@@ -142,6 +152,11 @@ uint32_t MIDI_USB_GetPacketsCount(void)
 uint32_t MIDI_USB_GetEventsCount(void)
 {
     return midi_events;
+}
+
+uint32_t MIDI_USB_GetTransfersCount(void)
+{
+    return usb_transfer_count;
 }
 
 uint32_t MIDI_USB_GetReceiveErrorsCount(void)
