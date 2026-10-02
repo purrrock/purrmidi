@@ -152,6 +152,28 @@ typedef enum
 }
 MIDI_StateTypeDef;
 
+/* Structure for MIDI diagnostic information */
+typedef struct
+{
+	volatile uint32_t urb_done_cnt;
+	volatile uint32_t urb_notready_cnt;
+	volatile uint32_t urb_error_cnt;
+	volatile uint32_t urb_stall_cnt;
+	volatile uint32_t stall_to_idle_cnt;
+
+	uint8_t state;
+	uint8_t data_rx_state;
+
+	uint8_t in_ep;
+	uint8_t in_ep_type;
+	uint16_t in_ep_size;
+
+	uint8_t hc_state;
+	uint8_t hc_urb_state;
+	uint32_t hc_xfer_count;
+	uint32_t hc_err_cnt;
+} MIDI_Diag_t;
+
 /* Structure for MIDI process */
 typedef struct _MIDI_Process
 {
@@ -166,6 +188,12 @@ typedef struct _MIDI_Process
 	MIDI_DataStateTypeDef		data_rx_state;
 	uint8_t						Rx_Poll;
 	uint16_t					LastRxLength;
+
+	volatile uint32_t urb_done_cnt;
+	volatile uint32_t urb_notready_cnt;
+	volatile uint32_t urb_error_cnt;
+	volatile uint32_t urb_stall_cnt;
+	volatile uint32_t stall_to_idle_cnt;
 }
 MIDI_HandleTypeDef;
 
@@ -179,6 +207,8 @@ USBH_StatusTypeDef  USBH_MIDI_Receive(USBH_HandleTypeDef *phost,
 uint16_t            USBH_MIDI_GetLastReceivedDataSize(USBH_HandleTypeDef *phost);
 
 USBH_StatusTypeDef  USBH_MIDI_Stop(USBH_HandleTypeDef *phost);
+
+USBH_StatusTypeDef  USBH_MIDI_GetDiag(USBH_HandleTypeDef *phost, MIDI_Diag_t *pdiag);
 
 void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost);
 

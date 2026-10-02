@@ -8,6 +8,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "usbh_midi.h"
+#include "stm32h7xx_hal_hcd.h"
 #include <stdio.h>
 
 /*------------------------------------------------------------------------------------------------------------------------------*/
@@ -400,12 +401,14 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
 
         if (URB_Status == USBH_URB_DONE)
         {
+            MIDI_Handle->urb_done_cnt++;
             MIDI_Handle->LastRxLength = USBH_LL_GetLastXferSize(phost, MIDI_Handle->InPipe);
             USBH_MIDI_ReceiveCallback(phost);
             MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
         }
 		else if (URB_Status == USBH_URB_NOTREADY)
         {
+            MIDI_Handle->urb_notready_cnt++;
             uint16_t rx_length = MIDI_Handle->RxDataLength;
 
             if (rx_length > MIDI_Handle->InEpSize)
@@ -431,10 +434,12 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
         }
         else if (URB_Status == USBH_URB_ERROR)
         {
+            MIDI_Handle->urb_error_cnt++;
             MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
         }
         else if (URB_Status == USBH_URB_STALL)
         {
+            MIDI_Handle->urb_stall_cnt++;
             MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA_STALL;
         }
         break;
@@ -453,6 +458,7 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
         }
         else
         {
+            MIDI_Handle->stall_to_idle_cnt++;
             MIDI_Handle->data_rx_state = MIDI_IDLE;
         }
         break;
@@ -464,6 +470,55 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------*/
+
+/**
+ * @brief  Retrieve USB MIDI diagnostic parameters
+ * @param  phost: Host handle
+ * @param  pdiag: Pointer to diagnostic struct
+ * @retval USBH Status
+ */
+USBH_StatusTypeDef USBH_MIDI_GetDiag(USBH_HandleTypeDef *phost, MIDI_Diag_t *pdiag)
+{
+	if (phost == NULL || pdiag == NULL || phost->pActiveClass == NULL || phost->pActiveClass->pData == NULL)
+	{
+		return USBH_FAIL;
+	}
+
+	MIDI_HandleTypeDef *MIDI_Handle = (MIDI_HandleTypeDef *)phost->pActiveClass->pData;
+
+	pdiag->urb_done_cnt = MIDI_Handle->urb_done_cnt;
+	pdiag->urb_notready_cnt = MIDI_Handle->urb_notready_cnt;
+	pdiag->urb_error_cnt = MIDI_Handle->urb_error_cnt;
+	pdiag->urb_stall_cnt = MIDI_Handle->urb_stall_cnt;
+	pdiag->stall_to_idle_cnt = MIDI_Handle->stall_to_idle_cnt;
+
+	pdiag->state = (uint8_t)MIDI_Handle->state;
+	pdiag->data_rx_state = (uint8_t)MIDI_Handle->data_rx_state;
+
+	pdiag->in_ep = MIDI_Handle->InEp;
+	pdiag->in_ep_type = MIDI_Handle->InEpType;
+	pdiag->in_ep_size = MIDI_Handle->InEpSize;
+
+	pdiag->hc_state = 0;
+	pdiag->hc_urb_state = 0;
+	pdiag->hc_xfer_count = 0;
+	pdiag->hc_err_cnt = 0;
+
+	if (phost->pData != NULL)
+	{
+		HCD_HandleTypeDef *hhcd = (HCD_HandleTypeDef *)phost->pData;
+		uint8_t ch_num = MIDI_Handle->InPipe;
+		if (ch_num < 16)
+		{
+			pdiag->hc_state = (uint8_t)hhcd->hc[ch_num].state;
+			pdiag->hc_urb_state = (uint8_t)hhcd->hc[ch_num].urb_state;
+			pdiag->hc_xfer_count = hhcd->hc[ch_num].xfer_count;
+			pdiag->hc_err_cnt = hhcd->hc[ch_num].ErrCnt;
+		}
+	}
+
+	return USBH_OK;
+}
 
 /**
  * @brief  The function informs user that data have been transmitted.

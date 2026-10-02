@@ -13,6 +13,8 @@ __ALIGN_BEGIN static uint8_t midi_rx_buffer[64] __ALIGN_END;
 static volatile uint32_t midi_usb_packets = 0;
 static volatile uint32_t midi_events = 0;
 static volatile uint32_t midi_receive_errors = 0;
+static volatile uint32_t midi_rearm_count = 0;
+static volatile uint32_t last_packet_tick = 0;
 
 static ApplicationTypeDef previous_state = APPLICATION_IDLE;
 static bool state_changed = false;
@@ -22,12 +24,15 @@ void MIDI_USB_Init(void)
     midi_usb_packets = 0;
     midi_events = 0;
     midi_receive_errors = 0;
+    midi_rearm_count = 0;
+    last_packet_tick = 0;
     previous_state = APPLICATION_IDLE;
     state_changed = false;
 }
 
 void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
 {
+    last_packet_tick = HAL_GetTick();
     midi_usb_packets++;
     uint16_t length = USBH_MIDI_GetLastReceivedDataSize(phost);
 
@@ -92,21 +97,30 @@ void MIDI_USB_Process(void)
     if (Appli_state != previous_state)
     {
         state_changed = true;
-
         if (Appli_state == APPLICATION_READY)
         {
-            if (USBH_MIDI_Receive(&hUsbHostFS,
-                                  midi_rx_buffer,
-                                  sizeof(midi_rx_buffer)) != USBH_OK)
-            {
-                midi_receive_errors++;
-            }
+            last_packet_tick = HAL_GetTick();
         }
         previous_state = Appli_state;
     }
     else
     {
         state_changed = false;
+    }
+
+    if (Appli_state == APPLICATION_READY)
+    {
+        USBH_StatusTypeDef res = USBH_MIDI_Receive(&hUsbHostFS,
+                                                   midi_rx_buffer,
+                                                   sizeof(midi_rx_buffer));
+        if (res == USBH_OK)
+        {
+            midi_rearm_count++;
+        }
+        else if (res != USBH_BUSY)
+        {
+            midi_receive_errors++;
+        }
     }
 }
 
@@ -133,4 +147,14 @@ uint32_t MIDI_USB_GetEventsCount(void)
 uint32_t MIDI_USB_GetReceiveErrorsCount(void)
 {
     return midi_receive_errors;
+}
+
+uint32_t MIDI_USB_GetRearmCount(void)
+{
+    return midi_rearm_count;
+}
+
+uint32_t MIDI_USB_GetLastPacketTick(void)
+{
+    return last_packet_tick;
 }
