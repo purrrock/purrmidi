@@ -146,17 +146,12 @@ bool MIDI_USB_HasStateChanged(void)
 
 uint32_t MIDI_USB_GetPacketsCount(void)
 {
-    return midi_usb_packets;
+    return usb_transfer_count;
 }
 
 uint32_t MIDI_USB_GetEventsCount(void)
 {
     return midi_events;
-}
-
-uint32_t MIDI_USB_GetTransfersCount(void)
-{
-    return usb_transfer_count;
 }
 
 uint32_t MIDI_USB_GetReceiveErrorsCount(void)

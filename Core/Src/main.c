@@ -28,6 +28,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <string.h>
 #include "synth.h"       // 
 #include "pluck_synth.h" // Karplus-Strong
 #include "display.h"
@@ -96,9 +97,8 @@ static void Print_USB_Diag(uint32_t max_loop_dt)
     uint32_t now = HAL_GetTick();
     uint32_t silence_ms = now - last_tick;
 
-    printf("[USBDIAG] dt_max: %lu ms | xfers: %lu | rearm: %lu | silence: %lu ms | URB DONE: %lu NOTREADY: %lu ERR: %lu STALL: %lu STALL_IDLE: %lu | state: %u rx_state: %u | Ep: 0x%02X type: %u size: %u | HC state: %u urb: %u xfer: %lu err: %lu\r\n",
+    printf("[USBDIAG] dt_max: %lu ms | rearm: %lu | silence: %lu ms | URB DONE: %lu NOTREADY: %lu ERR: %lu STALL: %lu STALL_IDLE: %lu | state: %u rx_state: %u | Ep: 0x%02X type: %u size: %u | HC state: %u urb: %u xfer: %lu err: %lu\r\n",
            max_loop_dt,
-           MIDI_USB_GetTransfersCount(),
            MIDI_USB_GetRearmCount(),
            silence_ms,
            diag.urb_done_cnt,
