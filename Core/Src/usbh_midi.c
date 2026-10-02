@@ -500,8 +500,8 @@ USBH_StatusTypeDef USBH_MIDI_GetDiag(USBH_HandleTypeDef *phost, MIDI_Diag_t *pdi
 	pdiag->urb_stall_cnt = MIDI_Handle->urb_stall_cnt;
 	pdiag->stall_to_idle_cnt = MIDI_Handle->stall_to_idle_cnt;
 
-diag->usb_midi_packet_cnt = MIDI_Handle->usb_midi_packet_cnt;
-diag->rx_bytes_cnt = MIDI_Handle->rx_bytes_cnt;
+pdiag->usb_midi_packet_cnt = MIDI_Handle->usb_midi_packet_cnt;
+pdiag->rx_bytes_cnt = MIDI_Handle->rx_bytes_cnt;
 
 	pdiag->state = (uint8_t)MIDI_Handle->state;
 	pdiag->data_rx_state = (uint8_t)MIDI_Handle->data_rx_state;
