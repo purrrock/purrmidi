@@ -121,9 +121,9 @@ int main(void)
   MX_USB_HOST_Init();
   MX_SPI4_Init();
   /* USER CODE BEGIN 2 */
+  Display_Init();
   MIDI_Queue_Init();
   MIDI_USB_Init();
-  Display_Init();
   Synth_Init();      // Инициализация простого синтезатора
   PluckSynth_Init(); // Инициализация синтезатора струны
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
