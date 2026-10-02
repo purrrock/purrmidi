@@ -28,12 +28,14 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <string.h>
 #include "synth.h"       // 
 #include "pluck_synth.h" // Karplus-Strong
 #include "display.h"
 #include "midi_event.h"
 #include "midi_queue.h"
 #include "midi_usb.h"
+#include "usbh_midi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -54,6 +56,8 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+
+extern USBH_HandleTypeDef hUsbHostFS;
 
 static volatile uint32_t note_on_count = 0;
 static volatile uint32_t note_off_count = 0;
@@ -79,6 +83,38 @@ int _write(int file, char *ptr, int len) {
         return len;
     }
     return 0;
+}
+
+static void Print_USB_Diag(uint32_t max_loop_dt)
+{
+    MIDI_Diag_t diag = {0};
+    if (USBH_MIDI_GetDiag(&hUsbHostFS, &diag) != USBH_OK)
+    {
+        memset(&diag, 0, sizeof(diag));
+    }
+
+    uint32_t last_tick = MIDI_USB_GetLastPacketTick();
+    uint32_t now = HAL_GetTick();
+    uint32_t silence_ms = now - last_tick;
+
+    printf("[USBDIAG] dt_max: %lu ms | rearm: %lu | silence: %lu ms | URB DONE: %lu NOTREADY: %lu ERR: %lu STALL: %lu STALL_IDLE: %lu | state: %u rx_state: %u | Ep: 0x%02X type: %u size: %u | HC state: %u urb: %u xfer: %lu err: %lu\r\n",
+           max_loop_dt,
+           MIDI_USB_GetRearmCount(),
+           silence_ms,
+           diag.urb_done_cnt,
+           diag.urb_notready_cnt,
+           diag.urb_error_cnt,
+           diag.urb_stall_cnt,
+           diag.stall_to_idle_cnt,
+           diag.state,
+           diag.data_rx_state,
+           diag.in_ep,
+           diag.in_ep_type,
+           diag.in_ep_size,
+           diag.hc_state,
+           diag.hc_urb_state,
+           diag.hc_xfer_count,
+           diag.hc_err_cnt);
 }
 
 /* USER CODE END 0 */
@@ -135,8 +171,22 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
+  uint32_t prev_loop_tick = HAL_GetTick();
+  uint32_t max_loop_dt = 0;
+  static uint32_t last_report = 0;
+  static bool silent_episode_reported = false;
+
   while (1)
   {
+    uint32_t current_tick = HAL_GetTick();
+    uint32_t loop_dt = current_tick - prev_loop_tick;
+    prev_loop_tick = current_tick;
+
+    if (loop_dt > max_loop_dt)
+    {
+        max_loop_dt = loop_dt;
+    }
+
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
 
@@ -202,9 +252,22 @@ int main(void)
         }
     }
 
-    static uint32_t last_report = 0;
-    if (HAL_GetTick() - last_report >= 10000)
-    {   last_report = HAL_GetTick();
+    uint32_t now = HAL_GetTick();
+    uint32_t silence_ms = now - MIDI_USB_GetLastPacketTick();
+
+    if (!MIDI_USB_IsConnected() || silence_ms <= 3000)
+    {
+        silent_episode_reported = false;
+    }
+    else if (MIDI_USB_IsConnected() && silence_ms > 3000 && !silent_episode_reported)
+    {
+        Print_USB_Diag(max_loop_dt);
+        silent_episode_reported = true;
+    }
+
+    if (now - last_report >= 10000)
+    {
+        last_report = now;
         printf("[STATS] USB pkts: %lu | MIDI evts: %lu | ON: %lu | OFF: %lu | Overruns: %lu | RX errors: %lu\r\n",
                MIDI_USB_GetPacketsCount(),
                MIDI_USB_GetEventsCount(),
@@ -212,6 +275,8 @@ int main(void)
                note_off_count,
                MIDI_Queue_GetOverrunCount(),
                MIDI_USB_GetReceiveErrorsCount());
+        Print_USB_Diag(max_loop_dt);
+        max_loop_dt = 0;
     }
   }
 
