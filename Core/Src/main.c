@@ -97,7 +97,7 @@ static void Print_USB_Diag(uint32_t max_loop_dt)
     uint32_t now = HAL_GetTick();
     uint32_t silence_ms = now - last_tick;
 
-    printf("[USBDIAG] dt_max: %lu ms | rearm: %lu | silence: %lu ms | URB DONE: %lu NOTREADY: %lu ERR: %lu STALL: %lu STALL_IDLE: %lu | RX bytes: %lu MIDI packets: %lu | state: %u rx_state: %u | Ep: 0x%02X type: %u size: %u | HC state: %u urb: %u xfer: %lu err: %lu\r\n",
+    printf("[USBDIAG] dt_max: %lu ms | rearm: %lu | silence: %lu ms | URB DONE: %lu NOTREADY: %lu ERR: %lu STALL: %lu STALL_IDLE: %lu | RX bytes: %lu MIDI packets: %lu | state: %u rx_state: %u | Ep: 0x%02X type: %u size: %u | interval: %u | HCD ch: %u | HC state: %u urb: %u xfer: %lu err: %u toggle_in: %u\r\n",
            max_loop_dt,
            MIDI_USB_GetRearmCount(),
            silence_ms,
@@ -106,17 +106,20 @@ static void Print_USB_Diag(uint32_t max_loop_dt)
            diag.urb_error_cnt,
            diag.urb_stall_cnt,
            diag.stall_to_idle_cnt,
-		   diag.rx_bytes_cnt,
-		   diag.usb_midi_packet_cnt,
-		   diag.state,
+           diag.rx_bytes_cnt,
+           diag.usb_midi_packet_cnt,
+           diag.state,
            diag.data_rx_state,
            diag.in_ep,
            diag.in_ep_type,
            diag.in_ep_size,
+           diag.in_ep_interval,
+           diag.hcd_channel,
            diag.hc_state,
            diag.hc_urb_state,
-           diag.hc_xfer_count,
-           diag.hc_err_cnt);
+           (unsigned long)diag.hc_xfer_count,
+           diag.hc_err_cnt,
+           diag.hc_toggle_in);
 }
 
 /* USER CODE END 0 */
