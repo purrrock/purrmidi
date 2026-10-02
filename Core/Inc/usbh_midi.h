@@ -195,6 +195,8 @@ typedef struct _MIDI_Process
 	volatile uint32_t urb_error_cnt;
 	volatile uint32_t urb_stall_cnt;
 	volatile uint32_t stall_to_idle_cnt;
+	volatile uint32_t usb_midi_packet_cnt;
+	volatile uint32_t rx_bytes_cnt;
 }
 MIDI_HandleTypeDef;
 
