@@ -203,11 +203,6 @@ typedef struct _MIDI_Process
 	volatile uint32_t rx_bytes_cnt;
 
 	uint8_t diag_hcd_channel;
-	uint8_t diag_last_hc_state;
-	uint8_t diag_last_urb_state;
-	uint32_t diag_last_xfer_count;
-	uint8_t diag_last_err_cnt;
-	uint8_t diag_last_toggle_in;
 }
 MIDI_HandleTypeDef;
 

@@ -79,7 +79,9 @@ void MX_USB_HOST_Process(void);
 /* USER CODE BEGIN 0 */
 // Перенаправление printf в UART
 int _write(int file, char *ptr, int len) {
-    if (HAL_UART_Transmit(&huart3, (uint8_t*)ptr, len, 10) == HAL_OK) {
+    (void)file;
+    uint32_t timeout = (uint32_t)((len * 10U) / 115U) + 20U;
+    if (HAL_UART_Transmit(&huart3, (uint8_t*)ptr, len, timeout) == HAL_OK) {
         return len;
     }
     return 0;
@@ -97,7 +99,7 @@ static void Print_USB_Diag(uint32_t max_loop_dt)
     uint32_t now = HAL_GetTick();
     uint32_t silence_ms = now - last_tick;
 
-    printf("[USBDIAG] dt_max: %lu ms | rearm: %lu | silence: %lu ms | URB DONE: %lu NOTREADY: %lu ERR: %lu STALL: %lu STALL_IDLE: %lu | RX bytes: %lu MIDI packets: %lu | state: %u rx_state: %u | Ep: 0x%02X type: %u size: %u | interval: %u | HCD ch: %u | HC state: %u urb: %u xfer: %lu err: %u toggle_in: %u\r\n",
+    printf("[USBDIAG1] dt_max: %lu ms | rearm: %lu | silence: %lu ms | transfers: %lu NOTREADY: %lu ERR: %lu STALL: %lu STALL_IDLE: %lu\r\n",
            max_loop_dt,
            MIDI_USB_GetRearmCount(),
            silence_ms,
@@ -105,7 +107,9 @@ static void Print_USB_Diag(uint32_t max_loop_dt)
            diag.urb_notready_cnt,
            diag.urb_error_cnt,
            diag.urb_stall_cnt,
-           diag.stall_to_idle_cnt,
+           diag.stall_to_idle_cnt);
+
+    printf("[USBDIAG2] RX bytes: %lu events4: %lu | state: %u rx_state: %u | Ep: 0x%02X type: %u size: %u interval: %u\r\n",
            diag.rx_bytes_cnt,
            diag.usb_midi_packet_cnt,
            diag.state,
@@ -113,7 +117,9 @@ static void Print_USB_Diag(uint32_t max_loop_dt)
            diag.in_ep,
            diag.in_ep_type,
            diag.in_ep_size,
-           diag.in_ep_interval,
+           diag.in_ep_interval);
+
+    printf("[USBDIAG3] HCD ch: %u | HC state: %u urb: %u xfer: %lu err: %u toggle_in: %u\r\n",
            diag.hcd_channel,
            diag.hc_state,
            diag.hc_urb_state,
@@ -268,6 +274,7 @@ int main(void)
     {
         Print_USB_Diag(max_loop_dt);
         silent_episode_reported = true;
+        prev_loop_tick = HAL_GetTick();
     }
 
     if (now - last_report >= 10000)
@@ -282,6 +289,7 @@ int main(void)
                MIDI_USB_GetReceiveErrorsCount());
         Print_USB_Diag(max_loop_dt);
         max_loop_dt = 0;
+        prev_loop_tick = HAL_GetTick();
     }
   }
 
