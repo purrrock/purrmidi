@@ -334,7 +334,12 @@ USBH_StatusTypeDef  USBH_MIDI_Transmit(USBH_HandleTypeDef *phost, uint8_t *pbuff
  */
 USBH_StatusTypeDef  USBH_MIDI_Receive(USBH_HandleTypeDef *phost, uint8_t *pbuff, uint16_t length)
 {
-	if (pbuff == NULL || length == 0)
+	if (phost == NULL || pbuff == NULL || length == 0)
+	{
+		return USBH_FAIL;
+	}
+
+	if (phost->pActiveClass == NULL || phost->pActiveClass->pData == NULL)
 	{
 		return USBH_FAIL;
 	}
@@ -407,20 +412,6 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
 
     case MIDI_RECEIVE_DATA_WAIT:
         URB_Status = USBH_LL_GetURBState(phost, MIDI_Handle->InPipe);
-
-        if (phost->pData != NULL)
-        {
-            HCD_HandleTypeDef *hhcd = (HCD_HandleTypeDef *)phost->pData;
-            uint8_t channel = MIDI_Handle->diag_hcd_channel;
-            if (channel < 16)
-            {
-                MIDI_Handle->diag_last_hc_state = (uint8_t)hhcd->hc[channel].state;
-                MIDI_Handle->diag_last_urb_state = (uint8_t)hhcd->hc[channel].urb_state;
-                MIDI_Handle->diag_last_xfer_count = hhcd->hc[channel].xfer_count;
-                MIDI_Handle->diag_last_err_cnt = (uint8_t)hhcd->hc[channel].ErrCnt;
-                MIDI_Handle->diag_last_toggle_in = (uint8_t)hhcd->hc[channel].toggle_in;
-            }
-        }
 
         if (URB_Status == USBH_URB_DONE)
         {
@@ -535,11 +526,26 @@ USBH_StatusTypeDef USBH_MIDI_GetDiag(USBH_HandleTypeDef *phost, MIDI_Diag_t *pdi
 	pdiag->in_ep_interval = MIDI_Handle->InEpInterval;
 
 	pdiag->hcd_channel = MIDI_Handle->diag_hcd_channel;
-	pdiag->hc_state = MIDI_Handle->diag_last_hc_state;
-	pdiag->hc_urb_state = MIDI_Handle->diag_last_urb_state;
-	pdiag->hc_xfer_count = MIDI_Handle->diag_last_xfer_count;
-	pdiag->hc_err_cnt = MIDI_Handle->diag_last_err_cnt;
-	pdiag->hc_toggle_in = MIDI_Handle->diag_last_toggle_in;
+
+	pdiag->hc_state = 0;
+	pdiag->hc_urb_state = 0;
+	pdiag->hc_xfer_count = 0;
+	pdiag->hc_err_cnt = 0;
+	pdiag->hc_toggle_in = 0;
+
+	if (phost->pData != NULL)
+	{
+		HCD_HandleTypeDef *hhcd = (HCD_HandleTypeDef *)phost->pData;
+		uint8_t ch = MIDI_Handle->diag_hcd_channel;
+		if (ch < 16)
+		{
+			pdiag->hc_state = (uint8_t)hhcd->hc[ch].state;
+			pdiag->hc_urb_state = (uint8_t)hhcd->hc[ch].urb_state;
+			pdiag->hc_xfer_count = hhcd->hc[ch].xfer_count;
+			pdiag->hc_err_cnt = (uint8_t)hhcd->hc[ch].ErrCnt;
+			pdiag->hc_toggle_in = (uint8_t)hhcd->hc[ch].toggle_in;
+		}
+	}
 
 	return USBH_OK;
 }
