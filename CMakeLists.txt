@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.22)
 
+option(PURRMIDI_HOST_BUILD "Windows/host app and tests instead of STM32 firmware" OFF)
+if(PURRMIDI_HOST_BUILD)
+    project(purrmidi_host C CXX)
+    enable_testing()
+    add_subdirectory(platform/windows)
+    return()
+endif()
+
 set(CMAKE_PROJECT_NAME purrmidi)
 
 if(NOT CMAKE_BUILD_TYPE)

@@ -91,3 +91,8 @@ git submodule add https://github.com/WeActStudio/MiniSTM32H7xx.git Middlewares/T
 ```bash
 git submodule update --init --recursive
 ```
+
+## Windows-версия (MIDI-монитор + Синтезатор)
+Для отладки и проверки работы алгоритмов синтезатора без постоянной прошивки микроконтроллера доступно автономное Windows-приложение `purrmidi_win.exe`. Оно использует тот же код синтезатора (`pluck_synth.cpp`, DaisySP Pluck), что и прошивка STM32.
+
+Подробные инструкции по сборке и запуску приведены в документе [docs/WINDOWS_BUILD.md](docs/WINDOWS_BUILD.md).
