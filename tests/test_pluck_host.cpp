@@ -1,0 +1,115 @@
+#include <iostream>
+#include <vector>
+#include <cmath>
+#include <cassert>
+#include "pluck_synth.h"
+
+static double estimate_fundamental(const int16_t* samples, size_t num_frames, size_t start_offset, size_t window_size, double sample_rate) {
+    if (start_offset + window_size + 250 > num_frames) {
+        return 0.0;
+    }
+    double max_r = -1e18;
+    size_t best_lag = 0;
+
+    for (size_t lag = 80; lag <= 140; ++lag) {
+        double r = 0.0;
+        for (size_t i = 0; i < window_size; ++i) {
+            double s1 = samples[(start_offset + i) * 2];
+            double s2 = samples[(start_offset + i + lag) * 2];
+            r += s1 * s2;
+        }
+        if (r > max_r) {
+            max_r = r;
+            best_lag = lag;
+        }
+    }
+
+    if (best_lag == 0) return 0.0;
+    return sample_rate / (double)best_lag;
+}
+
+void test_pluck_render_and_freq() {
+    PluckSynth_Init();
+
+    // NoteOn(69, 100) -> 440 Hz
+    PluckSynth_NoteOn(69, 100);
+
+    // 0.5s = 24000 frames
+    uint32_t frames_05s = 24000;
+    std::vector<int16_t> buf(frames_05s * 2, 0);
+    PluckSynth_FillStereoBuffer(buf.data(), frames_05s);
+
+    bool non_silent = false;
+    for (size_t i = 0; i < frames_05s; ++i) {
+        int16_t l = buf[i * 2];
+        int16_t r = buf[i * 2 + 1];
+        assert(l == r);
+        if (std::abs(l) > 100) {
+            non_silent = true;
+        }
+        assert(l <= 32767 && l >= -32768);
+    }
+    assert(non_silent);
+
+    double freq = estimate_fundamental(buf.data(), frames_05s, 4800, 2048, 48000.0);
+    std::cout << "Estimated fundamental frequency: " << freq << " Hz (expected ~440 Hz)\n";
+    assert(std::abs(freq - 440.0) / 440.0 <= 0.05);
+
+    // NoteOff then render 3s and assert tail is all zeros
+    PluckSynth_NoteOff(69);
+    uint32_t frames_3s = 48000 * 3;
+    std::vector<int16_t> tail_buf(frames_3s * 2, 0);
+    PluckSynth_FillStereoBuffer(tail_buf.data(), frames_3s);
+
+    size_t end_start = static_cast<size_t>(48000 * 2.8);
+    for (size_t i = end_start; i < frames_3s; ++i) {
+        assert(tail_buf[i * 2] == 0);
+        assert(tail_buf[i * 2 + 1] == 0);
+    }
+}
+
+void test_noteon_vel_0_and_sustain() {
+    // NoteOn velocity 0 behaves as NoteOff
+    PluckSynth_Init();
+    PluckSynth_NoteOn(60, 100);
+
+    std::vector<int16_t> buf(4800 * 2, 0);
+    PluckSynth_FillStereoBuffer(buf.data(), 4800);
+
+    PluckSynth_NoteOn(60, 0);
+
+    std::vector<int16_t> tail(48000 * 3 * 2, 0);
+    PluckSynth_FillStereoBuffer(tail.data(), 48000 * 3);
+
+    size_t end_start = static_cast<size_t>(48000 * 2.8);
+    for (size_t i = end_start; i < 48000 * 3; ++i) {
+        assert(tail[i * 2] == 0);
+    }
+
+    // CC64 held keeps sound after NoteOff
+    PluckSynth_Init();
+    PluckSynth_ControlChange(64, 127);
+    PluckSynth_NoteOn(60, 100);
+
+    PluckSynth_FillStereoBuffer(buf.data(), 4800);
+    PluckSynth_NoteOff(60);
+
+    std::vector<int16_t> sus_buf(48000 * 2, 0);
+    PluckSynth_FillStereoBuffer(sus_buf.data(), 48000);
+
+    bool sound_present = false;
+    for (size_t i = static_cast<size_t>(48000 * 0.8); i < 48000; ++i) {
+        if (std::abs(sus_buf[i * 2]) > 10) {
+            sound_present = true;
+            break;
+        }
+    }
+    assert(sound_present);
+}
+
+int main() {
+    test_pluck_render_and_freq();
+    test_noteon_vel_0_and_sustain();
+    std::cout << "test_pluck_host passed successfully." << std::endl;
+    return 0;
+}

@@ -6,7 +6,7 @@
             "hidden": true,
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/${presetName}",
-		    "toolchainFile": "${sourceDir}/cmake/gcc-arm-none-eabi.cmake",
+            "toolchainFile": "${sourceDir}/cmake/gcc-arm-none-eabi.cmake",
             "cacheVariables": {
             }
         },
@@ -23,6 +23,64 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
             }
+        },
+        {
+            "name": "host-base",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "PURRMIDI_HOST_BUILD": "ON"
+            }
+        },
+        {
+            "name": "win-msvc-debug",
+            "inherits": "host-base",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            },
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "win-msvc-release",
+            "inherits": "host-base",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            },
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "win-mingw-release",
+            "inherits": "host-base",
+            "toolchainFile": "${sourceDir}/cmake/mingw-w64-x86_64.cmake",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "host-tests",
+            "inherits": "host-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "PURRMIDI_BUILD_APP": "OFF",
+                "PURRMIDI_BUILD_TESTS": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -33,6 +91,31 @@
         {
             "name": "Release",
             "configurePreset": "Release"
+        },
+        {
+            "name": "win-msvc-debug",
+            "configurePreset": "win-msvc-debug"
+        },
+        {
+            "name": "win-msvc-release",
+            "configurePreset": "win-msvc-release"
+        },
+        {
+            "name": "win-mingw-release",
+            "configurePreset": "win-mingw-release"
+        },
+        {
+            "name": "host-tests",
+            "configurePreset": "host-tests"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "host-tests",
+            "configurePreset": "host-tests",
+            "output": {
+                "outputOnFailure": true
+            }
         }
     ]
 }

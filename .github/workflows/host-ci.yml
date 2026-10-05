@@ -1,0 +1,47 @@
+name: Host Build & Tests CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  host-tests-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libasound2-dev libjack-jackd2-dev
+
+      - name: Configure CMake host tests
+        run: cmake --preset host-tests
+
+      - name: Build host tests
+        run: cmake --build --preset host-tests
+
+      - name: Run host tests
+        run: ctest --test-dir build/host-tests --output-on-failure
+
+  host-build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Ninja
+        uses: llvm/actions/install-ninja@main
+
+      - name: Configure MSVC Release build
+        run: cmake --preset win-msvc-release
+
+      - name: Build purrmidi_win.exe
+        run: cmake --build --preset win-msvc-release
