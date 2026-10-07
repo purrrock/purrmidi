@@ -189,7 +189,7 @@ static void HCD_LogIRQ(HCD_HandleTypeDef *hhcd, uint8_t chnum)
     uint32_t rpt = s_irq_log_state[chnum].repeat_count;
     s_irq_log_state[chnum].repeat_count = 0;
 
-    /*     printf("[HCDIRQ] ch=%u HCINT=0x%03lX MSK=0x%03lX HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX state=%s urb=%s ep=%u dir=%s type=%s%s\n",
+    printf("[HCDIRQ] ch=%u HCINT=0x%03lX MSK=0x%03lX HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX state=%s urb=%s ep=%u dir=%s type=%s%s\n",
            (unsigned int)chnum,
            (unsigned long)hcint,
            (unsigned long)hcintmsk,
@@ -201,7 +201,7 @@ static void HCD_LogIRQ(HCD_HandleTypeDef *hhcd, uint8_t chnum)
            (unsigned int)hhcd->hc[chnum].ep_num,
            ((hcchar & USB_OTG_HCCHAR_EPDIR) == USB_OTG_HCCHAR_EPDIR) ? "IN" : "OUT",
            HCD_EPTypeStr((uint32_t)hhcd->hc[chnum].ep_type),
-           (rpt > 0) ? " (rpt)" : ""); */
+           (rpt > 0) ? " (rpt)" : "");
   }
 }
 
@@ -228,13 +228,13 @@ static void HCD_LogGINT(HCD_HandleTypeDef *hhcd)
     s_gint_log_state.last_haintmsk = haintmsk;
     s_gint_log_state.last_log_tick = now;
 
-    /*     printf("[HCDGINT] GINTSTS=0x%08lX GINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX HPRT0=0x%08lX HFNUM=0x%08lX\n",
+    printf("[HCDGINT] GINTSTS=0x%08lX GINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX HPRT0=0x%08lX HFNUM=0x%08lX\n",
            (unsigned long)gintsts,
            (unsigned long)gintmsk,
            (unsigned long)haint,
            (unsigned long)haintmsk,
            (unsigned long)USBx_HPRT0,
-           (unsigned long)USBx_HOST->HFNUM); */
+           (unsigned long)USBx_HOST->HFNUM);
   }
 }
 
@@ -246,7 +246,7 @@ static void HCD_LogHAINT(uint32_t bitmap)
     uint32_t old_bitmap = s_haint_log_state.last_bitmap;
     s_haint_log_state.initialized = 1;
     s_haint_log_state.last_bitmap = bitmap;
-    /*     printf("[HCDHAINT] old=0x%08lX new=0x%08lX\n", (unsigned long)old_bitmap, (unsigned long)bitmap); */
+    printf("[HCDHAINT] old=0x%08lX new=0x%08lX\n", (unsigned long)old_bitmap, (unsigned long)bitmap);
   }
 }
 
@@ -291,7 +291,7 @@ static void HCD_LogDispatch(HCD_HandleTypeDef *hhcd, uint8_t chnum)
       s_force_ch0_dispatch_log = 0U;
     }
 
-    /*     printf("[HCDDISPATCH] GINTSTS=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX ch=%u HCINT=0x%03lX HCINTMSK=0x%03lX HCCHAR=0x%08lX HCTSIZ=0x%08lX\n",
+    printf("[HCDDISPATCH] GINTSTS=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX ch=%u HCINT=0x%03lX HCINTMSK=0x%03lX HCCHAR=0x%08lX HCTSIZ=0x%08lX\n",
            (unsigned long)gintsts,
            (unsigned long)haint,
            (unsigned long)haintmsk,
@@ -299,7 +299,7 @@ static void HCD_LogDispatch(HCD_HandleTypeDef *hhcd, uint8_t chnum)
            (unsigned long)(hcint & 0x7FFU),
            (unsigned long)(hcintmsk & 0x7FFU),
            (unsigned long)hcchar,
-           (unsigned long)hctsiz); */
+           (unsigned long)hctsiz);
   }
 }
 
@@ -314,7 +314,7 @@ static void HCD_LogHC(HCD_HandleTypeDef *hhcd, uint8_t chnum, uint8_t is_in, uin
     uint32_t rpt = s_hc_log_state[chnum].repeat_count;
     s_hc_log_state[chnum].repeat_count = 0;
 
-    /*     printf("[HCDHC] ch=%u dir=%s HCINT=0x%03lX MSK=0x%03lX flags: %s%s%s%s%s%s%s%s%s%s%s%s\n",
+    printf("[HCDHC] ch=%u dir=%s HCINT=0x%03lX MSK=0x%03lX flags: %s%s%s%s%s%s%s%s%s%s%s%s\n",
            (unsigned int)chnum,
            is_in ? "IN" : "OUT",
            (unsigned long)raw_hcint,
@@ -330,7 +330,7 @@ static void HCD_LogHC(HCD_HandleTypeDef *hhcd, uint8_t chnum, uint8_t is_in, uin
            (raw_hcint & USB_OTG_HCINT_BBERR)  ? "BBERR "  : "",
            (raw_hcint & USB_OTG_HCINT_FRMOR)  ? "FRMOR "  : "",
            (raw_hcint & USB_OTG_HCINT_DTERR)  ? "DTERR "  : "",
-           (rpt > 0) ? "(rpt)" : ""); */
+           (rpt > 0) ? "(rpt)" : "");
   }
 }
 
@@ -349,7 +349,7 @@ static void HCD_LogCHH(HCD_HandleTypeDef *hhcd, uint8_t chnum, uint8_t is_in, ui
     uint32_t rpt = s_chh_log_state[chnum].repeat_count;
     s_chh_log_state[chnum].repeat_count = 0;
 
-    /*     printf("[HCDCHH] ch=%u dir=%s ep=%u type=%s prev_state=%s state=%s urb=%s ErrCnt=%lu NakCnt=%lu NyetCnt=%lu HCINT=0x%03lX MSK=0x%03lX HCCHAR=0x%08lX HCTSIZ=0x%08lX xfer_len=%lu xfer_cnt=%lu mps=%u ssplit=%u csplit=%u%s\n",
+    printf("[HCDCHH] ch=%u dir=%s ep=%u type=%s prev_state=%s state=%s urb=%s ErrCnt=%lu NakCnt=%lu NyetCnt=%lu HCINT=0x%03lX MSK=0x%03lX HCCHAR=0x%08lX HCTSIZ=0x%08lX xfer_len=%lu xfer_cnt=%lu mps=%u ssplit=%u csplit=%u%s\n",
            (unsigned int)chnum,
            is_in ? "IN" : "OUT",
            (unsigned int)hhcd->hc[chnum].ep_num,
@@ -369,7 +369,7 @@ static void HCD_LogCHH(HCD_HandleTypeDef *hhcd, uint8_t chnum, uint8_t is_in, ui
            (unsigned int)hhcd->hc[chnum].max_packet,
            (unsigned int)hhcd->hc[chnum].do_ssplit,
            (unsigned int)hhcd->hc[chnum].do_csplit,
-           (rpt > 0) ? " (rpt)" : ""); */
+           (rpt > 0) ? " (rpt)" : "");
   }
 }
 
@@ -837,7 +837,7 @@ HAL_StatusTypeDef HAL_HCD_HC_SubmitRequest(HCD_HandleTypeDef *hhcd,
     const USB_OTG_GlobalTypeDef *USBx = hhcd->Instance;
     uint32_t USBx_BASE = (uint32_t)USBx;
 
-    /*     printf("[HCDSUBMIT] ch=%u dir=%s ep=%u type=%s token=%u len=%u pid=%u mps=%u HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX MSK=0x%08lX\n",
+    printf("[HCDSUBMIT] ch=%u dir=%s ep=%u type=%s token=%u len=%u pid=%u mps=%u HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX MSK=0x%08lX\n",
            (unsigned int)ch_num,
            direction ? "IN" : "OUT",
            (unsigned int)hhcd->hc[ch_num].ep_num,
@@ -850,7 +850,7 @@ HAL_StatusTypeDef HAL_HCD_HC_SubmitRequest(HCD_HandleTypeDef *hhcd,
            (unsigned long)USBx_HC(ch_num)->HCTSIZ,
            (unsigned long)USBx_HC(ch_num)->HCSPLT,
            (unsigned long)USBx_HC(ch_num)->HCINT,
-           (unsigned long)USBx_HC(ch_num)->HCINTMSK); */
+           (unsigned long)USBx_HC(ch_num)->HCINTMSK);
 
     HAL_StatusTypeDef status = USB_HC_StartXfer(hhcd->Instance, &hhcd->hc[ch_num], (uint8_t)hhcd->Init.dma_enable);
 
@@ -860,14 +860,14 @@ HAL_StatusTypeDef HAL_HCD_HC_SubmitRequest(HCD_HandleTypeDef *hhcd,
     uint32_t start_hcint = USBx_HC(ch_num)->HCINT;
     uint32_t start_hcintmsk = USBx_HC(ch_num)->HCINTMSK;
 
-    /*     printf("[HCDSTART] ch=%u status=%d HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX MSK=0x%08lX\n",
+    printf("[HCDSTART] ch=%u status=%d HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX MSK=0x%08lX\n",
            (unsigned int)ch_num,
            (int)status,
            (unsigned long)start_hcchar,
            (unsigned long)start_hctsiz,
            (unsigned long)start_hcsplt,
            (unsigned long)start_hcint,
-           (unsigned long)start_hcintmsk); */
+           (unsigned long)start_hcintmsk);
 
     return status;
   }
