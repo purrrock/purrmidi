@@ -143,6 +143,7 @@ static uint32_t s_launch_log_count[16] = {0};
 
 static uint8_t HCD_ShouldLogXfer(USB_OTG_GlobalTypeDef *USBx, uint32_t ch_num, uint8_t *out_is_change)
 {
+  uint32_t USBx_BASE = (uint32_t)USBx;
   uint32_t cur_haintmsk = USBx_HOST->HAINTMSK;
   *out_is_change = 0U;
 
