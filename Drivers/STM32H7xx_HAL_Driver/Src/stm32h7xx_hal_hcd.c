@@ -67,9 +67,24 @@ typedef struct {
   uint32_t repeat_count;
 } HCD_ChannelLogState;
 
+typedef struct {
+  uint32_t last_gintsts;
+  uint32_t last_gintmsk;
+  uint32_t last_haint;
+  uint32_t last_haintmsk;
+  uint32_t last_log_tick;
+} HCD_GintLogState;
+
+typedef struct {
+  uint32_t last_bitmap;
+  uint8_t initialized;
+} HCD_HaintLogState;
+
 static HCD_ChannelLogState s_irq_log_state[16];
 static HCD_ChannelLogState s_hc_log_state[16];
 static HCD_ChannelLogState s_chh_log_state[16];
+static HCD_GintLogState s_gint_log_state;
+static HCD_HaintLogState s_haint_log_state;
 
 static const char *HCD_HCStateStr(uint32_t state)
 {
@@ -174,6 +189,48 @@ static void HCD_LogIRQ(HCD_HandleTypeDef *hhcd, uint8_t chnum)
            ((hcchar & USB_OTG_HCCHAR_EPDIR) == USB_OTG_HCCHAR_EPDIR) ? "IN" : "OUT",
            HCD_EPTypeStr((uint32_t)hhcd->hc[chnum].ep_type),
            (rpt > 0) ? " (rpt)" : "");
+  }
+}
+
+/* Diagnostic GINT Logger */
+static void HCD_LogGINT(HCD_HandleTypeDef *hhcd)
+{
+  const USB_OTG_GlobalTypeDef *USBx = hhcd->Instance;
+  uint32_t USBx_BASE = (uint32_t)USBx;
+  uint32_t gintsts = USBx->GINTSTS;
+  uint32_t gintmsk = USBx->GINTMSK;
+  uint32_t haint = USBx_HOST->HAINT;
+  uint32_t haintmsk = USBx_HOST->HAINTMSK;
+  uint32_t now = HAL_GetTick();
+
+  if (s_gint_log_state.last_gintsts != gintsts ||
+      s_gint_log_state.last_gintmsk != gintmsk ||
+      s_gint_log_state.last_haint != haint ||
+      s_gint_log_state.last_haintmsk != haintmsk ||
+      (now - s_gint_log_state.last_log_tick >= 100U))
+  {
+    s_gint_log_state.last_gintsts = gintsts;
+    s_gint_log_state.last_gintmsk = gintmsk;
+    s_gint_log_state.last_haint = haint;
+    s_gint_log_state.last_haintmsk = haintmsk;
+    s_gint_log_state.last_log_tick = now;
+
+    printf("[HCDGINT] GINTSTS=0x%08lX GINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX\n",
+           (unsigned long)gintsts,
+           (unsigned long)gintmsk,
+           (unsigned long)haint,
+           (unsigned long)haintmsk);
+  }
+}
+
+/* Diagnostic HAINT Bitmap Logger */
+static void HCD_LogHAINT(uint32_t bitmap)
+{
+  if (!s_haint_log_state.initialized || s_haint_log_state.last_bitmap != bitmap)
+  {
+    s_haint_log_state.initialized = 1;
+    s_haint_log_state.last_bitmap = bitmap;
+    printf("[HCDHAINT] bitmap=0x%08lX\n", (unsigned long)bitmap);
   }
 }
 
@@ -702,7 +759,44 @@ HAL_StatusTypeDef HAL_HCD_HC_SubmitRequest(HCD_HandleTypeDef *hhcd,
   hhcd->hc[ch_num].ch_num = ch_num;
   hhcd->hc[ch_num].state = HC_IDLE;
 
-  return USB_HC_StartXfer(hhcd->Instance, &hhcd->hc[ch_num], (uint8_t)hhcd->Init.dma_enable);
+  {
+    const USB_OTG_GlobalTypeDef *USBx = hhcd->Instance;
+    uint32_t USBx_BASE = (uint32_t)USBx;
+
+    printf("[HCDSUBMIT] ch=%u dir=%s ep=%u type=%s token=%u len=%u pid=%u mps=%u HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX MSK=0x%08lX\n",
+           (unsigned int)ch_num,
+           direction ? "IN" : "OUT",
+           (unsigned int)hhcd->hc[ch_num].ep_num,
+           HCD_EPTypeStr((uint32_t)ep_type),
+           (unsigned int)token,
+           (unsigned int)length,
+           (unsigned int)hhcd->hc[ch_num].data_pid,
+           (unsigned int)hhcd->hc[ch_num].max_packet,
+           (unsigned long)USBx_HC(ch_num)->HCCHAR,
+           (unsigned long)USBx_HC(ch_num)->HCTSIZ,
+           (unsigned long)USBx_HC(ch_num)->HCSPLT,
+           (unsigned long)USBx_HC(ch_num)->HCINT,
+           (unsigned long)USBx_HC(ch_num)->HCINTMSK);
+
+    HAL_StatusTypeDef status = USB_HC_StartXfer(hhcd->Instance, &hhcd->hc[ch_num], (uint8_t)hhcd->Init.dma_enable);
+
+    uint32_t start_hcchar = USBx_HC(ch_num)->HCCHAR;
+    uint32_t start_hctsiz = USBx_HC(ch_num)->HCTSIZ;
+    uint32_t start_hcsplt = USBx_HC(ch_num)->HCSPLT;
+    uint32_t start_hcint = USBx_HC(ch_num)->HCINT;
+    uint32_t start_hcintmsk = USBx_HC(ch_num)->HCINTMSK;
+
+    printf("[HCDSTART] ch=%u status=%d HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX MSK=0x%08lX\n",
+           (unsigned int)ch_num,
+           (int)status,
+           (unsigned long)start_hcchar,
+           (unsigned long)start_hctsiz,
+           (unsigned long)start_hcsplt,
+           (unsigned long)start_hcint,
+           (unsigned long)start_hcintmsk);
+
+    return status;
+  }
 }
 
 /**
@@ -716,6 +810,8 @@ void HAL_HCD_IRQHandler(HCD_HandleTypeDef *hhcd)
   uint32_t USBx_BASE = (uint32_t)USBx;
   uint32_t i;
   uint32_t interrupt;
+
+  HCD_LogGINT(hhcd);
 
   /* Ensure that we are in device mode */
   if (USB_GetMode(hhcd->Instance) == USB_OTG_MODE_HOST)
@@ -798,6 +894,7 @@ void HAL_HCD_IRQHandler(HCD_HandleTypeDef *hhcd)
     if (__HAL_HCD_GET_FLAG(hhcd, USB_OTG_GINTSTS_HCINT))
     {
       interrupt = USB_HC_ReadInterrupt(hhcd->Instance);
+      HCD_LogHAINT(interrupt);
       for (i = 0U; i < hhcd->Init.Host_channels; i++)
       {
         if ((interrupt & (1UL << (i & 0xFU))) != 0U)
