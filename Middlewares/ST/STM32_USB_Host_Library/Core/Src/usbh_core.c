@@ -619,6 +619,74 @@ USBH_StatusTypeDef USBH_ReEnumerate(USBH_HandleTypeDef *phost)
 
 
 /**
+  * @brief  Recover from a port that was disabled by hardware while the device
+  *         is still attached.
+  *
+  *         Some devices (e.g. Jieli based SMK25Mini) drop and re-assert their
+  *         D+ pull-up shortly after the host port reset. The OTG core reacts
+  *         with DISCINT + PCDET and clears HPRT0.PENA, i.e. the port is dead
+  *         and no SOF/SETUP is sent anymore. The stock event logic does not
+  *         notice it (the Connect callback overwrites is_disconnected, or the
+  *         Disconnect callback is skipped because PCSTS is already 1 again), so
+  *         the first control request waits forever without any error.
+  *
+  *         Detection: port is not enabled although the stack believes the device
+  *         is connected and past the reset phase. Recovery: stop/start the HCD
+  *         (halts stuck channels, flushes FIFOs), reset the state machine and
+  *         go back to HOST_IDLE; is_connected is kept, so the normal
+  *         "connected -> port reset -> enumeration" sequence runs again.
+  * @param  phost: Host Handle
+  * @retval 1 if a recovery was started, 0 otherwise
+  */
+static uint8_t USBH_PortLostRecover(USBH_HandleTypeDef *phost)
+{
+  static uint32_t s_port_lost_cnt = 0U;
+  const HCD_HandleTypeDef *hhcd = (const HCD_HandleTypeDef *)phost->pData;
+  uint32_t hprt0;
+
+  if ((hhcd == NULL) ||
+      (phost->device.is_connected == 0U) ||
+      (phost->device.is_disconnected != 0U) ||
+      (phost->device.is_ReEnumerated != 0U) ||
+      (phost->gState < HOST_ENUMERATION) ||
+      (phost->gState > HOST_CLASS))
+  {
+    return 0U;
+  }
+
+  hprt0 = *(__IO uint32_t *)((uint32_t)hhcd->Instance + USB_OTG_HOST_PORT_BASE);
+  if ((hprt0 & USB_OTG_HPRT_PENA) != 0U)
+  {
+    return 0U;
+  }
+
+  s_port_lost_cnt++;
+  USBH_UsrLog("USB port disabled by HW (HPRT0=0x%08lX) in state %u, restarting (#%lu)",
+              (unsigned long)hprt0, (unsigned int)phost->gState,
+              (unsigned long)s_port_lost_cnt);
+
+  (void)USBH_LL_Stop(phost);
+
+  if (phost->pActiveClass != NULL)
+  {
+    phost->pActiveClass->DeInit(phost);
+    phost->pActiveClass = NULL;
+    if (phost->pUser != NULL)
+    {
+      phost->pUser(phost, HOST_USER_DISCONNECTION);
+    }
+  }
+
+  (void)DeInitStateMachine(phost);   /* gState = HOST_IDLE, is_connected untouched */
+  (void)USBH_LL_Start(phost);
+
+  /* give the device time to finish its own re-attach before the next reset */
+  USBH_Delay(300U);
+
+  return 1U;
+}
+
+/**
   * @brief  USBH_Process
   *         Background process of the USB Core.
   * @param  phost: Host Handle
@@ -634,6 +702,12 @@ USBH_StatusTypeDef USBH_Process(USBH_HandleTypeDef *phost)
       || (phost->device.is_ReEnumerated == 1U))
   {
     phost->gState = HOST_DEV_DISCONNECTED;
+  }
+
+  /* port silently disabled by HW while the device is still attached? */
+  if (USBH_PortLostRecover(phost) != 0U)
+  {
+    return USBH_OK;
   }
 
   switch (phost->gState)

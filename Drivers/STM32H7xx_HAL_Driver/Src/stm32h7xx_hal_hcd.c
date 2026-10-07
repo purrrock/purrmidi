@@ -228,11 +228,13 @@ static void HCD_LogGINT(HCD_HandleTypeDef *hhcd)
     s_gint_log_state.last_haintmsk = haintmsk;
     s_gint_log_state.last_log_tick = now;
 
-    printf("[HCDGINT] GINTSTS=0x%08lX GINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX\n",
+    printf("[HCDGINT] GINTSTS=0x%08lX GINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX HPRT0=0x%08lX HFNUM=0x%08lX\n",
            (unsigned long)gintsts,
            (unsigned long)gintmsk,
            (unsigned long)haint,
-           (unsigned long)haintmsk);
+           (unsigned long)haintmsk,
+           (unsigned long)USBx_HPRT0,
+           (unsigned long)USBx_HOST->HFNUM);
   }
 }
 
