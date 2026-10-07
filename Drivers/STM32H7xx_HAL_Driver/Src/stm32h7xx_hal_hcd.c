@@ -57,6 +57,70 @@
 #include "stm32h7xx_hal.h"
 #include <stdio.h>
 
+#define HCD_LOG_IRQ       1
+#define HCD_LOG_GINT      2
+#define HCD_LOG_HAINT     3
+#define HCD_LOG_DISPATCH  4
+#define HCD_LOG_HC        5
+#define HCD_LOG_CHH       6
+
+typedef struct
+{
+    uint32_t tick;
+    uint32_t type;
+    uint32_t arg0;
+    uint32_t arg1;
+    uint32_t arg2;
+    uint32_t arg3;
+} HCD_LogEntry;
+
+#define HCD_LOG_ENTRIES 256
+
+static volatile HCD_LogEntry hcd_log[HCD_LOG_ENTRIES];
+static volatile uint32_t hcd_log_write;
+
+static void HCD_LogEvent(uint32_t type,
+                         uint32_t arg0,
+                         uint32_t arg1,
+                         uint32_t arg2,
+                         uint32_t arg3)
+{
+    uint32_t index = hcd_log_write % HCD_LOG_ENTRIES;
+
+    hcd_log[index].tick = HAL_GetTick();
+    hcd_log[index].type = type;
+    hcd_log[index].arg0 = arg0;
+    hcd_log[index].arg1 = arg1;
+    hcd_log[index].arg2 = arg2;
+    hcd_log[index].arg3 = arg3;
+
+    __DMB();
+    hcd_log_write++;
+}
+
+void HCD_LogDump(void)
+{
+  uint32_t count = hcd_log_write;
+  uint32_t start = 0;
+
+  if (count > HCD_LOG_ENTRIES)
+  {
+    start = count - HCD_LOG_ENTRIES;
+  }
+
+  for (uint32_t i = start; i < count; i++)
+  {
+    uint32_t idx = i % HCD_LOG_ENTRIES;
+    printf("[HCDLOG] tick=%lu type=%lu a0=%08lX a1=%08lX a2=%08lX a3=%08lX\n",
+           (unsigned long)hcd_log[idx].tick,
+           (unsigned long)hcd_log[idx].type,
+           (unsigned long)hcd_log[idx].arg0,
+           (unsigned long)hcd_log[idx].arg1,
+           (unsigned long)hcd_log[idx].arg2,
+           (unsigned long)hcd_log[idx].arg3);
+  }
+}
+
 /* Minimal HCD Diagnostic Helpers and Rate Limiting */
 typedef struct {
   uint32_t last_hcint;
@@ -98,37 +162,6 @@ static HCD_GintLogState s_gint_log_state;
 static HCD_HaintLogState s_haint_log_state;
 static HCD_DispatchLogState s_dispatch_log_state[16];
 static uint8_t s_force_ch0_dispatch_log = 1U;
-
-static const char *HCD_HCStateStr(uint32_t state)
-{
-  switch (state) {
-    case HC_IDLE:       return "IDLE";
-    case HC_XFRC:       return "XFRC";
-    case HC_HALTED:     return "HALTED";
-    case HC_ACK:        return "ACK";
-    case HC_NAK:        return "NAK";
-    case HC_NYET:       return "NYET";
-    case HC_STALL:      return "STALL";
-    case HC_XACTERR:    return "XACTERR";
-    case HC_BBLERR:     return "BBLERR";
-    case HC_DATATGLERR: return "DATATGLERR";
-    default:            return "UNKNOWN";
-  }
-}
-
-static const char *HCD_URBStateStr(uint32_t urb)
-{
-  switch (urb) {
-    case URB_IDLE:     return "IDLE";
-    case URB_DONE:     return "DONE";
-    case URB_NOTREADY: return "NOTREADY";
-    case URB_NYET:     return "NYET";
-    case URB_ERROR:    return "ERROR";
-    case URB_STALL:    return "STALL";
-    case URB_NAK_WAIT: return "NAK_WAIT";
-    default:           return "UNKNOWN";
-  }
-}
 
 static const char *HCD_EPTypeStr(uint32_t type)
 {
@@ -175,7 +208,6 @@ static void HCD_LogIRQ(HCD_HandleTypeDef *hhcd, uint8_t chnum)
   uint32_t hcint = USBx_HC(chnum)->HCINT;
   uint32_t hcintmsk = USBx_HC(chnum)->HCINTMSK;
   uint32_t hctsiz = USBx_HC(chnum)->HCTSIZ;
-  uint32_t hcsplt = USBx_HC(chnum)->HCSPLT;
   uint32_t state = (uint32_t)hhcd->hc[chnum].state;
   uint32_t urb = (uint32_t)hhcd->hc[chnum].urb_state;
 
@@ -186,30 +218,16 @@ static void HCD_LogIRQ(HCD_HandleTypeDef *hhcd, uint8_t chnum)
 
   if (HCD_ShouldLog(&s_irq_log_state[chnum], hcint, hcintmsk, urb, state))
   {
-    uint32_t rpt = s_irq_log_state[chnum].repeat_count;
     s_irq_log_state[chnum].repeat_count = 0;
 
-   printf("[HCDIRQ] ch=%u HCINT=0x%03lX MSK=0x%03lX HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX state=%s urb=%s ep=%u dir=%s type=%s%s\n",
-           (unsigned int)chnum,
-           (unsigned long)hcint,
-           (unsigned long)hcintmsk,
-           (unsigned long)hcchar,
-           (unsigned long)hctsiz,
-           (unsigned long)hcsplt,
-           HCD_HCStateStr(state),
-           HCD_URBStateStr(urb),
-           (unsigned int)hhcd->hc[chnum].ep_num,
-           ((hcchar & USB_OTG_HCCHAR_EPDIR) == USB_OTG_HCCHAR_EPDIR) ? "IN" : "OUT",
-           HCD_EPTypeStr((uint32_t)hhcd->hc[chnum].ep_type),
-           (rpt > 0) ? " (rpt)" : "");
-  } 
+    HCD_LogEvent(HCD_LOG_IRQ, chnum, hcint, hcintmsk, hcchar);
+  }
 }
 
 /* Diagnostic GINT Logger */
 static void HCD_LogGINT(HCD_HandleTypeDef *hhcd)
 {
   const USB_OTG_GlobalTypeDef *USBx = hhcd->Instance;
-  uint32_t USBx_BASE = (uint32_t)USBx;
   uint32_t gintsts = USBx->GINTSTS;
   uint32_t gintmsk = USBx->GINTMSK;
   uint32_t haint = USBx_HOST->HAINT;
@@ -228,13 +246,7 @@ static void HCD_LogGINT(HCD_HandleTypeDef *hhcd)
     s_gint_log_state.last_haintmsk = haintmsk;
     s_gint_log_state.last_log_tick = now;
 
-    printf("[HCDGINT] GINTSTS=0x%08lX GINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX HPRT0=0x%08lX HFNUM=0x%08lX\n",
-           (unsigned long)gintsts,
-           (unsigned long)gintmsk,
-           (unsigned long)haint,
-           (unsigned long)haintmsk,
-           (unsigned long)USBx_HPRT0,
-           (unsigned long)USBx_HOST->HFNUM);
+    HCD_LogEvent(HCD_LOG_GINT, gintsts, gintmsk, haint, haintmsk);
   }
 }
 
@@ -246,7 +258,8 @@ static void HCD_LogHAINT(uint32_t bitmap)
     uint32_t old_bitmap = s_haint_log_state.last_bitmap;
     s_haint_log_state.initialized = 1;
     s_haint_log_state.last_bitmap = bitmap;
-    printf("[HCDHAINT] old=0x%08lX new=0x%08lX\n", (unsigned long)old_bitmap, (unsigned long)bitmap);
+
+    HCD_LogEvent(HCD_LOG_HAINT, old_bitmap, bitmap, 0, 0);
   }
 }
 
@@ -291,15 +304,7 @@ static void HCD_LogDispatch(HCD_HandleTypeDef *hhcd, uint8_t chnum)
       s_force_ch0_dispatch_log = 0U;
     }
 
-    printf("[HCDDISPATCH] GINTSTS=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX ch=%u HCINT=0x%03lX HCINTMSK=0x%03lX HCCHAR=0x%08lX HCTSIZ=0x%08lX\n",
-           (unsigned long)gintsts,
-           (unsigned long)haint,
-           (unsigned long)haintmsk,
-           (unsigned int)chnum,
-           (unsigned long)(hcint & 0x7FFU),
-           (unsigned long)(hcintmsk & 0x7FFU),
-           (unsigned long)hcchar,
-           (unsigned long)hctsiz);
+    HCD_LogEvent(HCD_LOG_DISPATCH, chnum, gintsts, haint, hcint);
   }
 }
 
@@ -311,65 +316,23 @@ static void HCD_LogHC(HCD_HandleTypeDef *hhcd, uint8_t chnum, uint8_t is_in, uin
 
   if (HCD_ShouldLog(&s_hc_log_state[chnum], raw_hcint, raw_hcintmsk, urb, state))
   {
-    uint32_t rpt = s_hc_log_state[chnum].repeat_count;
     s_hc_log_state[chnum].repeat_count = 0;
 
-    printf("[HCDHC] ch=%u dir=%s HCINT=0x%03lX MSK=0x%03lX flags: %s%s%s%s%s%s%s%s%s%s%s%s\n",
-           (unsigned int)chnum,
-           is_in ? "IN" : "OUT",
-           (unsigned long)raw_hcint,
-           (unsigned long)raw_hcintmsk,
-           (raw_hcint & USB_OTG_HCINT_XFRC)   ? "XFRC "   : "",
-           (raw_hcint & USB_OTG_HCINT_CHH)    ? "CHH "    : "",
-           (raw_hcint & USB_OTG_HCINT_AHBERR) ? "AHBERR " : "",
-           (raw_hcint & USB_OTG_HCINT_STALL)  ? "STALL "  : "",
-           (raw_hcint & USB_OTG_HCINT_NAK)    ? "NAK "    : "",
-           (raw_hcint & USB_OTG_HCINT_ACK)    ? "ACK "    : "",
-           (raw_hcint & USB_OTG_HCINT_NYET)   ? "NYET "   : "",
-           (raw_hcint & USB_OTG_HCINT_TXERR)  ? "TXERR "  : "",
-           (raw_hcint & USB_OTG_HCINT_BBERR)  ? "BBERR "  : "",
-           (raw_hcint & USB_OTG_HCINT_FRMOR)  ? "FRMOR "  : "",
-           (raw_hcint & USB_OTG_HCINT_DTERR)  ? "DTERR "  : "",
-           (rpt > 0) ? "(rpt)" : "");
+    HCD_LogEvent(HCD_LOG_HC, chnum, is_in, raw_hcint, raw_hcintmsk);
   }
 }
 
 /* Diagnostic #3 Logger */
 static void HCD_LogCHH(HCD_HandleTypeDef *hhcd, uint8_t chnum, uint8_t is_in, uint32_t prev_state, uint32_t raw_hcint, uint32_t raw_hcintmsk)
 {
-  const USB_OTG_GlobalTypeDef *USBx = hhcd->Instance;
-  uint32_t USBx_BASE = (uint32_t)USBx;
-  uint32_t hcchar = USBx_HC(chnum)->HCCHAR;
-  uint32_t hctsiz = USBx_HC(chnum)->HCTSIZ;
   uint32_t state = (uint32_t)hhcd->hc[chnum].state;
   uint32_t urb = (uint32_t)hhcd->hc[chnum].urb_state;
 
   if (HCD_ShouldLog(&s_chh_log_state[chnum], raw_hcint, raw_hcintmsk, urb, state))
   {
-    uint32_t rpt = s_chh_log_state[chnum].repeat_count;
     s_chh_log_state[chnum].repeat_count = 0;
 
-    printf("[HCDCHH] ch=%u dir=%s ep=%u type=%s prev_state=%s state=%s urb=%s ErrCnt=%lu NakCnt=%lu NyetCnt=%lu HCINT=0x%03lX MSK=0x%03lX HCCHAR=0x%08lX HCTSIZ=0x%08lX xfer_len=%lu xfer_cnt=%lu mps=%u ssplit=%u csplit=%u%s\n",
-           (unsigned int)chnum,
-           is_in ? "IN" : "OUT",
-           (unsigned int)hhcd->hc[chnum].ep_num,
-           HCD_EPTypeStr((uint32_t)hhcd->hc[chnum].ep_type),
-           HCD_HCStateStr(prev_state),
-           HCD_HCStateStr(state),
-           HCD_URBStateStr(urb),
-           (unsigned long)hhcd->hc[chnum].ErrCnt,
-           (unsigned long)hhcd->hc[chnum].NakCnt,
-           (unsigned long)hhcd->hc[chnum].NyetErrCnt,
-           (unsigned long)raw_hcint,
-           (unsigned long)raw_hcintmsk,
-           (unsigned long)hcchar,
-           (unsigned long)hctsiz,
-           (unsigned long)hhcd->hc[chnum].xfer_len,
-           (unsigned long)hhcd->hc[chnum].xfer_count,
-           (unsigned int)hhcd->hc[chnum].max_packet,
-           (unsigned int)hhcd->hc[chnum].do_ssplit,
-           (unsigned int)hhcd->hc[chnum].do_csplit,
-           (rpt > 0) ? " (rpt)" : "");
+    HCD_LogEvent(HCD_LOG_CHH, chnum, (is_in << 16) | prev_state, raw_hcint, raw_hcintmsk);
   }
 }
 
