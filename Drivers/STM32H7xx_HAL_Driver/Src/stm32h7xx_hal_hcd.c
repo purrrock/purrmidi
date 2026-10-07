@@ -91,12 +91,34 @@ typedef struct {
   uint32_t last_log_tick;
 } HCD_DispatchLogState;
 
+typedef struct {
+  uint32_t last_raw_hcint;
+  uint32_t last_cause_hcint;
+  uint32_t last_hcintmsk;
+  uint32_t last_hcchar;
+  uint32_t last_hctsiz;
+  uint32_t last_haint;
+  uint32_t last_haintmsk;
+  uint32_t last_gintsts;
+  uint32_t last_gintmsk;
+  uint32_t last_hfnum;
+  uint32_t last_hprt0;
+  uint32_t last_hc_state;
+  uint32_t last_urb_state;
+  uint32_t last_xfer_count;
+  uint32_t last_toggle_in;
+  uint32_t last_log_tick;
+  uint32_t repeat_count;
+} HCD_NotReadyLogState;
+
 static HCD_ChannelLogState s_irq_log_state[16];
 static HCD_ChannelLogState s_hc_log_state[16];
 static HCD_ChannelLogState s_chh_log_state[16];
 static HCD_GintLogState s_gint_log_state;
 static HCD_HaintLogState s_haint_log_state;
 static HCD_DispatchLogState s_dispatch_log_state[16];
+static HCD_NotReadyLogState s_notready_log_state[16];
+static uint32_t s_last_cause_hcint[16];
 static uint8_t s_force_ch0_dispatch_log = 1U;
 
 static const char *HCD_HCStateStr(uint32_t state)
@@ -202,6 +224,84 @@ static void HCD_LogIRQ(HCD_HandleTypeDef *hhcd, uint8_t chnum)
            ((hcchar & USB_OTG_HCCHAR_EPDIR) == USB_OTG_HCCHAR_EPDIR) ? "IN" : "OUT",
            HCD_EPTypeStr((uint32_t)hhcd->hc[chnum].ep_type),
            (rpt > 0) ? " (rpt)" : "");
+  }
+}
+
+/* Diagnostic NOTREADY Logger */
+static void HCD_LogNotReady(HCD_HandleTypeDef *hhcd, uint8_t chnum, uint32_t raw_hcint, uint32_t raw_hcintmsk)
+{
+  const USB_OTG_GlobalTypeDef *USBx = hhcd->Instance;
+  uint32_t USBx_BASE = (uint32_t)USBx;
+  uint32_t hcchar = USBx_HC(chnum)->HCCHAR;
+  uint32_t hctsiz = USBx_HC(chnum)->HCTSIZ;
+  uint32_t haint = USBx_HOST->HAINT;
+  uint32_t haintmsk = USBx_HOST->HAINTMSK;
+  uint32_t gintsts = USBx->GINTSTS;
+  uint32_t gintmsk = USBx->GINTMSK;
+  uint32_t hfnum = USBx_HOST->HFNUM;
+  uint32_t hprt0 = USBx_HPRT0;
+  uint32_t hc_state = (uint32_t)hhcd->hc[chnum].state;
+  uint32_t hc_urb_state = (uint32_t)hhcd->hc[chnum].urb_state;
+  uint32_t xfer_count = hhcd->hc[chnum].xfer_count;
+  uint32_t toggle_in = (uint32_t)hhcd->hc[chnum].toggle_in;
+  uint32_t cause_hcint = s_last_cause_hcint[chnum];
+  uint32_t now = HAL_GetTick();
+
+  HCD_NotReadyLogState *st = &s_notready_log_state[chnum];
+
+  uint8_t changed = (st->last_raw_hcint != raw_hcint ||
+                     st->last_cause_hcint != cause_hcint ||
+                     st->last_hcintmsk != raw_hcintmsk ||
+                     st->last_hcchar != hcchar ||
+                     st->last_hctsiz != hctsiz ||
+                     st->last_haint != haint ||
+                     st->last_haintmsk != haintmsk ||
+                     st->last_gintsts != gintsts ||
+                     st->last_gintmsk != gintmsk ||
+                     st->last_hprt0 != hprt0 ||
+                     st->last_hc_state != hc_state ||
+                     st->last_urb_state != hc_urb_state ||
+                     st->last_xfer_count != xfer_count ||
+                     st->last_toggle_in != toggle_in);
+
+  if (changed || (now - st->last_log_tick >= 1000U))
+  {
+    st->last_raw_hcint = raw_hcint;
+    st->last_cause_hcint = cause_hcint;
+    st->last_hcintmsk = raw_hcintmsk;
+    st->last_hcchar = hcchar;
+    st->last_hctsiz = hctsiz;
+    st->last_haint = haint;
+    st->last_haintmsk = haintmsk;
+    st->last_gintsts = gintsts;
+    st->last_gintmsk = gintmsk;
+    st->last_hfnum = hfnum;
+    st->last_hprt0 = hprt0;
+    st->last_hc_state = hc_state;
+    st->last_urb_state = hc_urb_state;
+    st->last_xfer_count = xfer_count;
+    st->last_toggle_in = toggle_in;
+    st->last_log_tick = now;
+
+    printf("[HCDNOTREADY] ch=%u HCINT=0x%08lX (cause=0x%08lX) HCINTMSK=0x%08lX HCCHAR=0x%08lX HCTSIZ=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX HFNUM=0x%08lX HPRT0=0x%08lX hc.state=%lu(%s) hc.urb_state=%lu(%s) hc.xfer_count=%lu hc.toggle_in=%lu\n",
+           (unsigned int)chnum,
+           (unsigned long)raw_hcint,
+           (unsigned long)cause_hcint,
+           (unsigned long)raw_hcintmsk,
+           (unsigned long)hcchar,
+           (unsigned long)hctsiz,
+           (unsigned long)haint,
+           (unsigned long)haintmsk,
+           (unsigned long)gintsts,
+           (unsigned long)gintmsk,
+           (unsigned long)hfnum,
+           (unsigned long)hprt0,
+           (unsigned long)hc_state,
+           HCD_HCStateStr(hc_state),
+           (unsigned long)hc_urb_state,
+           HCD_URBStateStr(hc_urb_state),
+           (unsigned long)xfer_count,
+           (unsigned long)toggle_in);
   }
 }
 
@@ -1646,6 +1746,11 @@ static void HCD_HC_IN_IRQHandler(HCD_HandleTypeDef *hhcd, uint8_t chnum)
   uint32_t raw_hcintmsk = USBx_HC(chnum)->HCINTMSK;
   HCD_HCStateTypeDef prev_state = hhcd->hc[chnum].state;
 
+  if ((raw_hcint & ~USB_OTG_HCINT_CHH) != 0U)
+  {
+    s_last_cause_hcint[chnum] = (raw_hcint & ~USB_OTG_HCINT_CHH);
+  }
+
   HCD_LogHC(hhcd, chnum, 1U, raw_hcint, raw_hcintmsk);
 
   if (__HAL_HCD_GET_CH_FLAG(hhcd, chnum, USB_OTG_HCINT_AHBERR))
@@ -1941,6 +2046,11 @@ static void HCD_HC_IN_IRQHandler(HCD_HandleTypeDef *hhcd, uint8_t chnum)
 
     HCD_LogCHH(hhcd, chnum, 1U, (uint32_t)prev_state, raw_hcint, raw_hcintmsk);
 
+    if (hhcd->hc[chnum].urb_state == URB_NOTREADY)
+    {
+      HCD_LogNotReady(hhcd, chnum, raw_hcint, raw_hcintmsk);
+    }
+
 #if (USE_HAL_HCD_REGISTER_CALLBACKS == 1U)
     hhcd->HC_NotifyURBChangeCallback(hhcd, chnum, hhcd->hc[chnum].urb_state);
 #else
@@ -2015,6 +2125,11 @@ static void HCD_HC_OUT_IRQHandler(HCD_HandleTypeDef *hhcd, uint8_t chnum)
   uint32_t raw_hcintmsk = USBx_HC(chnum)->HCINTMSK;
   HCD_HCStateTypeDef prev_state = hhcd->hc[chnum].state;
 
+  if ((raw_hcint & ~USB_OTG_HCINT_CHH) != 0U)
+  {
+    s_last_cause_hcint[chnum] = (raw_hcint & ~USB_OTG_HCINT_CHH);
+  }
+
   HCD_LogHC(hhcd, chnum, 0U, raw_hcint, raw_hcintmsk);
 
   if (__HAL_HCD_GET_CH_FLAG(hhcd, chnum, USB_OTG_HCINT_AHBERR))
@@ -2032,6 +2147,7 @@ static void HCD_HC_OUT_IRQHandler(HCD_HandleTypeDef *hhcd, uint8_t chnum)
       hhcd->hc[chnum].do_ping = 0U;
       hhcd->hc[chnum].urb_state = URB_NOTREADY;
       hhcd->hc[chnum].state = HC_ACK;
+      HCD_LogNotReady(hhcd, chnum, raw_hcint, raw_hcintmsk);
       (void)USB_HC_Halt(hhcd->Instance, chnum);
     }
 
@@ -2134,6 +2250,7 @@ static void HCD_HC_OUT_IRQHandler(HCD_HandleTypeDef *hhcd, uint8_t chnum)
       else
       {
         hhcd->hc[chnum].urb_state = URB_NOTREADY;
+        HCD_LogNotReady(hhcd, chnum, raw_hcint, raw_hcintmsk);
 
         /* Re-activate the channel  */
         tmpreg = USBx_HC(chnum)->HCCHAR;
@@ -2235,6 +2352,11 @@ static void HCD_HC_OUT_IRQHandler(HCD_HandleTypeDef *hhcd, uint8_t chnum)
     }
 
     HCD_LogCHH(hhcd, chnum, 0U, (uint32_t)prev_state, raw_hcint, raw_hcintmsk);
+
+    if (hhcd->hc[chnum].urb_state == URB_NOTREADY)
+    {
+      HCD_LogNotReady(hhcd, chnum, raw_hcint, raw_hcintmsk);
+    }
 
 #if (USE_HAL_HCD_REGISTER_CALLBACKS == 1U)
     hhcd->HC_NotifyURBChangeCallback(hhcd, chnum, hhcd->hc[chnum].urb_state);

@@ -141,6 +141,36 @@ static uint32_t s_haintmsk_change_count = 0U;
 static uint32_t s_xfer_call_count[16] = {0};
 static uint32_t s_launch_log_count[16] = {0};
 
+typedef struct {
+  uint32_t last_before;
+  uint32_t last_write;
+  uint32_t last_after;
+  uint32_t last_hctsiz;
+  uint32_t last_log_tick;
+} HCD_Submit84LogState;
+
+static HCD_Submit84LogState s_submit84_log_state[16];
+
+static uint8_t HCD_ShouldLogSubmit84(uint32_t ch_num, uint32_t before, uint32_t write, uint32_t after, uint32_t hctsiz)
+{
+  if (ch_num >= 16U) return 0U;
+  HCD_Submit84LogState *st = &s_submit84_log_state[ch_num];
+  uint32_t now = HAL_GetTick();
+  uint8_t changed = (st->last_before != before || st->last_write != write ||
+                     st->last_after != after || st->last_hctsiz != hctsiz);
+
+  if (changed || (now - st->last_log_tick >= 1000U))
+  {
+    st->last_before = before;
+    st->last_write = write;
+    st->last_after = after;
+    st->last_hctsiz = hctsiz;
+    st->last_log_tick = now;
+    return 1U;
+  }
+  return 0U;
+}
+
 static uint8_t HCD_ShouldLogXfer(USB_OTG_GlobalTypeDef *USBx, uint32_t ch_num, uint8_t *out_is_change)
 {
   uint32_t USBx_BASE = (uint32_t)USBx;
@@ -2226,6 +2256,20 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
   uint32_t launch_haintmsk = USBx_HOST->HAINTMSK;
   uint32_t launch_gintsts = USBx->GINTSTS;
   uint32_t launch_gintmsk = USBx->GINTMSK;
+
+  uint8_t ep_addr = (hc->ep_is_in ? 0x80U : 0x00U) | (hc->ep_num & 0x7FU);
+  if (ep_addr == 0x84U)
+  {
+    if (HCD_ShouldLogSubmit84(ch_num, launch_before_hcchar, tmpreg, launch_after_hcchar, launch_hctsiz))
+    {
+      printf("[HCDSUBMIT84] ch=%lu ep=0x84 HCCHAR before=0x%08lX write=0x%08lX after=0x%08lX HCTSIZ=0x%08lX\n",
+             (unsigned long)ch_num,
+             (unsigned long)launch_before_hcchar,
+             (unsigned long)tmpreg,
+             (unsigned long)launch_after_hcchar,
+             (unsigned long)launch_hctsiz);
+    }
+  }
 
   if (ch_num < 16U && s_launch_log_count[ch_num] < 10U)
   {
