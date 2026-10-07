@@ -80,8 +80,17 @@ void MX_USB_HOST_Process(void);
 // Перенаправление printf в UART
 int _write(int file, char *ptr, int len) {
     (void)file;
+    if (len <= 0) {
+        return 0;
+    }
+
     uint32_t timeout = (uint32_t)((len * 10U) / 115U) + 20U;
     if (HAL_UART_Transmit(&huart3, (uint8_t*)ptr, len, timeout) == HAL_OK) {
+        char last_char = ptr[len - 1];
+        if (last_char != '\n' && last_char != '\r') {
+            static const uint8_t newline[] = "\r\n";
+            HAL_UART_Transmit(&huart3, newline, 2, 20U);
+        }
         return len;
     }
     return 0;
