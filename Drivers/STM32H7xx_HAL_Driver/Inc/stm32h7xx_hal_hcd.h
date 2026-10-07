@@ -273,6 +273,7 @@ void HAL_HCD_PortEnabled_Callback(HCD_HandleTypeDef *hhcd);
 void HAL_HCD_PortDisabled_Callback(HCD_HandleTypeDef *hhcd);
 void HAL_HCD_HC_NotifyURBChange_Callback(HCD_HandleTypeDef *hhcd, uint8_t chnum,
                                          HCD_URBStateTypeDef urb_state);
+void HCD_LogDump(void);
 /**
   * @}
   */
