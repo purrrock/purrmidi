@@ -80,11 +80,24 @@ typedef struct {
   uint8_t initialized;
 } HCD_HaintLogState;
 
+typedef struct {
+  uint32_t last_gintsts;
+  uint32_t last_haint;
+  uint32_t last_haintmsk;
+  uint32_t last_hcint;
+  uint32_t last_hcintmsk;
+  uint32_t last_hcchar;
+  uint32_t last_hctsiz;
+  uint32_t last_log_tick;
+} HCD_DispatchLogState;
+
 static HCD_ChannelLogState s_irq_log_state[16];
 static HCD_ChannelLogState s_hc_log_state[16];
 static HCD_ChannelLogState s_chh_log_state[16];
 static HCD_GintLogState s_gint_log_state;
 static HCD_HaintLogState s_haint_log_state;
+static HCD_DispatchLogState s_dispatch_log_state[16];
+static uint8_t s_force_ch0_dispatch_log = 1U;
 
 static const char *HCD_HCStateStr(uint32_t state)
 {
@@ -228,9 +241,63 @@ static void HCD_LogHAINT(uint32_t bitmap)
 {
   if (!s_haint_log_state.initialized || s_haint_log_state.last_bitmap != bitmap)
   {
+    uint32_t old_bitmap = s_haint_log_state.last_bitmap;
     s_haint_log_state.initialized = 1;
     s_haint_log_state.last_bitmap = bitmap;
-    printf("[HCDHAINT] bitmap=0x%08lX\n", (unsigned long)bitmap);
+    printf("[HCDHAINT] old=0x%08lX new=0x%08lX\n", (unsigned long)old_bitmap, (unsigned long)bitmap);
+  }
+}
+
+/* Diagnostic Channel Dispatch Logger */
+static void HCD_LogDispatch(HCD_HandleTypeDef *hhcd, uint8_t chnum)
+{
+  const USB_OTG_GlobalTypeDef *USBx = hhcd->Instance;
+  uint32_t USBx_BASE = (uint32_t)USBx;
+  uint32_t gintsts = USBx->GINTSTS;
+  uint32_t haint = USBx_HOST->HAINT;
+  uint32_t haintmsk = USBx_HOST->HAINTMSK;
+  uint32_t hcint = USBx_HC(chnum)->HCINT;
+  uint32_t hcintmsk = USBx_HC(chnum)->HCINTMSK;
+  uint32_t hcchar = USBx_HC(chnum)->HCCHAR;
+  uint32_t hctsiz = USBx_HC(chnum)->HCTSIZ;
+  uint32_t now = HAL_GetTick();
+
+  HCD_DispatchLogState *st = &s_dispatch_log_state[chnum];
+  uint8_t force = (chnum == 0U && s_force_ch0_dispatch_log != 0U);
+
+  uint8_t changed = (st->last_gintsts != gintsts ||
+                     st->last_haint != haint ||
+                     st->last_haintmsk != haintmsk ||
+                     st->last_hcint != hcint ||
+                     st->last_hcintmsk != hcintmsk ||
+                     st->last_hcchar != hcchar ||
+                     st->last_hctsiz != hctsiz);
+
+  if (force || changed || (now - st->last_log_tick >= 1000U))
+  {
+    st->last_gintsts = gintsts;
+    st->last_haint = haint;
+    st->last_haintmsk = haintmsk;
+    st->last_hcint = hcint;
+    st->last_hcintmsk = hcintmsk;
+    st->last_hcchar = hcchar;
+    st->last_hctsiz = hctsiz;
+    st->last_log_tick = now;
+
+    if (chnum == 0U)
+    {
+      s_force_ch0_dispatch_log = 0U;
+    }
+
+    printf("[HCDDISPATCH] GINTSTS=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX ch=%u HCINT=0x%03lX HCINTMSK=0x%03lX HCCHAR=0x%08lX HCTSIZ=0x%08lX\n",
+           (unsigned long)gintsts,
+           (unsigned long)haint,
+           (unsigned long)haintmsk,
+           (unsigned int)chnum,
+           (unsigned long)(hcint & 0x7FFU),
+           (unsigned long)(hcintmsk & 0x7FFU),
+           (unsigned long)hcchar,
+           (unsigned long)hctsiz);
   }
 }
 
@@ -752,6 +819,11 @@ HAL_StatusTypeDef HAL_HCD_HC_SubmitRequest(HCD_HandleTypeDef *hhcd,
       break;
   }
 
+  if (ch_num == 0U)
+  {
+    s_force_ch0_dispatch_log = 1U;
+  }
+
   hhcd->hc[ch_num].xfer_buff = pbuff;
   hhcd->hc[ch_num].xfer_len  = length;
   hhcd->hc[ch_num].urb_state = URB_IDLE;
@@ -899,6 +971,7 @@ void HAL_HCD_IRQHandler(HCD_HandleTypeDef *hhcd)
       {
         if ((interrupt & (1UL << (i & 0xFU))) != 0U)
         {
+          HCD_LogDispatch(hhcd, (uint8_t)i);
           HCD_LogIRQ(hhcd, (uint8_t)i);
 
           if ((USBx_HC(i)->HCCHAR & USB_OTG_HCCHAR_EPDIR) == USB_OTG_HCCHAR_EPDIR)
