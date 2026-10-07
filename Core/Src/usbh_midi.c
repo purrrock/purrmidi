@@ -392,6 +392,15 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
             rx_length = MIDI_Handle->InEpSize;
         }
 
+        printf("[MIDI-REARM] before submit pipe=%u ep=0x%02X state=%u urb=%u hc=%u xfer=%lu toggle=%u\r\n",
+               MIDI_Handle->InPipe,
+               MIDI_Handle->InEp,
+               MIDI_Handle->data_rx_state,
+               USBH_LL_GetURBState(phost, MIDI_Handle->InPipe),
+               ((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].state,
+               (unsigned long)((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].xfer_count,
+               ((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].toggle_in);
+
         if (MIDI_Handle->InEpType == USB_EP_TYPE_INTR)
         {
             USBH_InterruptReceiveData(phost,
@@ -406,6 +415,14 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
                     rx_length,
                     MIDI_Handle->InPipe);
         }
+
+        printf("[MIDI-REARM] after submit pipe=%u urb=%u hc=%u xfer=%lu toggle=%u\r\n",
+               MIDI_Handle->InPipe,
+               USBH_LL_GetURBState(phost, MIDI_Handle->InPipe),
+               ((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].state,
+               (unsigned long)((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].xfer_count,
+               ((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].toggle_in);
+
         MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA_WAIT;
         break;
     }
@@ -413,8 +430,22 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
     case MIDI_RECEIVE_DATA_WAIT:
         URB_Status = USBH_LL_GetURBState(phost, MIDI_Handle->InPipe);
 
+        printf("[MIDI-URB] pipe=%u urb=%u hc=%u xfer=%lu toggle=%u\r\n",
+               MIDI_Handle->InPipe,
+               URB_Status,
+               ((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].state,
+               (unsigned long)((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].xfer_count,
+               ((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].toggle_in);
+
         if (URB_Status == USBH_URB_DONE)
         {
+            printf("[MIDI-DONE] pipe=%u len=%u hc=%u xfer=%lu toggle=%u\r\n",
+                   MIDI_Handle->InPipe,
+                   USBH_LL_GetLastXferSize(phost, MIDI_Handle->InPipe),
+                   ((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].state,
+                   (unsigned long)((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].xfer_count,
+                   ((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].toggle_in);
+
             MIDI_Handle->urb_done_cnt++;
             MIDI_Handle->LastRxLength = USBH_LL_GetLastXferSize(phost, MIDI_Handle->InPipe);
 			
@@ -438,6 +469,12 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
                 rx_length = MIDI_Handle->InEpSize;
             }
 
+            printf("[MIDI-NOTREADY] pipe=%u hc=%u xfer=%lu toggle=%u\r\n",
+                   MIDI_Handle->InPipe,
+                   ((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].state,
+                   (unsigned long)((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].xfer_count,
+                   ((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].toggle_in);
+
             if (MIDI_Handle->InEpType == USB_EP_TYPE_INTR)
             {
                 USBH_InterruptReceiveData(phost,
@@ -452,6 +489,14 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
                         rx_length,
                         MIDI_Handle->InPipe);
             }
+
+            printf("[MIDI-NOTREADY-REARMED] pipe=%u urb=%u hc=%u xfer=%lu toggle=%u\r\n",
+                   MIDI_Handle->InPipe,
+                   USBH_LL_GetURBState(phost, MIDI_Handle->InPipe),
+                   ((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].state,
+                   (unsigned long)((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].xfer_count,
+                   ((HCD_HandleTypeDef *)phost->pData)->hc[MIDI_Handle->InPipe].toggle_in);
+
             MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA_WAIT;
         }
         else if (URB_Status == USBH_URB_ERROR)
