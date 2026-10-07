@@ -180,6 +180,7 @@ static const char *URB_StateToString(USBH_URBStateTypeDef state)
   }
 }
 
+/*
 static void Log_Control_Transfer_Params(USBH_HandleTypeDef *phost)
 {
   USBH_UsrLog("[USBENUM] CTRL bmReq=0x%02X req=0x%02X wValue=0x%04X wIndex=0x%04X wLength=0x%04X",
@@ -200,7 +201,9 @@ static void Log_Control_Transfer_Params(USBH_HandleTypeDef *phost)
               phost->Control.pipe_in,
               phost->Control.pipe_out);
 }
+*/
 
+/*
 static void Log_HCD_URB_Info(USBH_HandleTypeDef *phost)
 {
   USBH_URBStateTypeDef urb_in = USBH_LL_GetURBState(phost, phost->Control.pipe_in);
@@ -227,6 +230,7 @@ static void Log_HCD_URB_Info(USBH_HandleTypeDef *phost)
                 URB_StateToString(urb_out), (unsigned long)xfer_out);
   }
 }
+*/
 
 #if (USBH_USE_OS == 1U)
 #if (osCMSIS < 0x20000U)
@@ -1036,16 +1040,16 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
   {
     if (s_prev_enum_state != (ENUM_StateTypeDef)0xFF)
     {
-      USBH_UsrLog("[USBENUM] STATE %s -> %s",
+      /*       USBH_UsrLog("[USBENUM] STATE %s -> %s",
                   ENUM_StateToString(s_prev_enum_state),
-                  ENUM_StateToString(phost->EnumState));
-      USBH_UsrLog("[USBENUM] STATE INFO gState=%s addr=%u speed=%u pipe_size=%u pipe_in=%u pipe_out=%u",
+                  ENUM_StateToString(phost->EnumState)); */
+      /*       USBH_UsrLog("[USBENUM] STATE INFO gState=%s addr=%u speed=%u pipe_size=%u pipe_in=%u pipe_out=%u",
                   HOST_StateToString(phost->gState),
                   phost->device.address,
                   phost->device.speed,
                   phost->Control.pipe_size,
                   phost->Control.pipe_in,
-                  phost->Control.pipe_out);
+                  phost->Control.pipe_out); */
     }
     s_prev_enum_state = phost->EnumState;
     s_step_started = 0U;
@@ -1059,16 +1063,16 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       ReqStatus = USBH_Get_DevDesc(phost, 8U);
       if (s_step_started == 0U)
       {
-        USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 START");
-        Log_Control_Transfer_Params(phost);
+        /*         USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 START"); */
+        /*         Log_Control_Transfer_Params(phost); */
         s_step_started = 1U;
         s_busy_count = 0U;
       }
 
       if (ReqStatus == USBH_OK)
       {
-        USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 DONE status=USBH_OK");
-        Log_HCD_URB_Info(phost);
+        /*         USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 DONE status=USBH_OK"); */
+        /*         Log_HCD_URB_Info(phost); */
         s_step_started = 0U;
         s_busy_count = 0U;
 
@@ -1088,8 +1092,8 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else if (ReqStatus == USBH_NOT_SUPPORTED)
       {
-        USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 FAIL status=USBH_NOT_SUPPORTED");
-        Log_HCD_URB_Info(phost);
+        /*         USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 FAIL status=USBH_NOT_SUPPORTED"); */
+        /*         Log_HCD_URB_Info(phost); */
         s_step_started = 0U;
         s_busy_count = 0U;
 
@@ -1118,13 +1122,13 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
           s_busy_count++;
           if ((s_busy_count % 1000U) == 0U)
           {
-            USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 BUSY count=%lu ...", (unsigned long)s_busy_count);
+            /*             USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 BUSY count=%lu ...", (unsigned long)s_busy_count); */
           }
         }
         else
         {
-          USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 FAIL status=%s", USBH_StatusToString(ReqStatus));
-          Log_HCD_URB_Info(phost);
+          /*           USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 FAIL status=%s", USBH_StatusToString(ReqStatus)); */
+          /*           Log_HCD_URB_Info(phost); */
           s_step_started = 0U;
           s_busy_count = 0U;
         }
@@ -1136,16 +1140,16 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       ReqStatus = USBH_Get_DevDesc(phost, USB_DEVICE_DESC_SIZE);
       if (s_step_started == 0U)
       {
-        USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC START");
-        Log_Control_Transfer_Params(phost);
+        /*         USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC START"); */
+        /*         Log_Control_Transfer_Params(phost); */
         s_step_started = 1U;
         s_busy_count = 0U;
       }
 
       if (ReqStatus == USBH_OK)
       {
-        USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC DONE status=USBH_OK");
-        Log_HCD_URB_Info(phost);
+        /*         USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC DONE status=USBH_OK"); */
+        /*         Log_HCD_URB_Info(phost); */
         s_step_started = 0U;
         s_busy_count = 0U;
 
@@ -1156,8 +1160,8 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else if (ReqStatus == USBH_NOT_SUPPORTED)
       {
-        USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC FAIL status=USBH_NOT_SUPPORTED");
-        Log_HCD_URB_Info(phost);
+        /*         USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC FAIL status=USBH_NOT_SUPPORTED"); */
+        /*         Log_HCD_URB_Info(phost); */
         s_step_started = 0U;
         s_busy_count = 0U;
 
@@ -1187,13 +1191,13 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
           s_busy_count++;
           if ((s_busy_count % 1000U) == 0U)
           {
-            USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC BUSY count=%lu ...", (unsigned long)s_busy_count);
+            /*             USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC BUSY count=%lu ...", (unsigned long)s_busy_count); */
           }
         }
         else
         {
-          USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC FAIL status=%s", USBH_StatusToString(ReqStatus));
-          Log_HCD_URB_Info(phost);
+          /*           USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC FAIL status=%s", USBH_StatusToString(ReqStatus)); */
+          /*           Log_HCD_URB_Info(phost); */
           s_step_started = 0U;
           s_busy_count = 0U;
         }
@@ -1205,16 +1209,16 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       ReqStatus = USBH_SetAddress(phost, USBH_DEVICE_ADDRESS);
       if (s_step_started == 0U)
       {
-        USBH_UsrLog("[USBENUM] SET_ADDRESS START");
-        Log_Control_Transfer_Params(phost);
+        /*         USBH_UsrLog("[USBENUM] SET_ADDRESS START"); */
+        /*         Log_Control_Transfer_Params(phost); */
         s_step_started = 1U;
         s_busy_count = 0U;
       }
 
       if (ReqStatus == USBH_OK)
       {
-        USBH_UsrLog("[USBENUM] SET_ADDRESS DONE status=USBH_OK");
-        Log_HCD_URB_Info(phost);
+        /*         USBH_UsrLog("[USBENUM] SET_ADDRESS DONE status=USBH_OK"); */
+        /*         Log_HCD_URB_Info(phost); */
         s_step_started = 0U;
         s_busy_count = 0U;
 
@@ -1237,8 +1241,8 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else if (ReqStatus == USBH_NOT_SUPPORTED)
       {
-        USBH_UsrLog("[USBENUM] SET_ADDRESS FAIL status=USBH_NOT_SUPPORTED");
-        Log_HCD_URB_Info(phost);
+        /*         USBH_UsrLog("[USBENUM] SET_ADDRESS FAIL status=USBH_NOT_SUPPORTED"); */
+        /*         Log_HCD_URB_Info(phost); */
         s_step_started = 0U;
         s_busy_count = 0U;
 
@@ -1256,13 +1260,13 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
           s_busy_count++;
           if ((s_busy_count % 1000U) == 0U)
           {
-            USBH_UsrLog("[USBENUM] SET_ADDRESS BUSY count=%lu ...", (unsigned long)s_busy_count);
+            /*             USBH_UsrLog("[USBENUM] SET_ADDRESS BUSY count=%lu ...", (unsigned long)s_busy_count); */
           }
         }
         else
         {
-          USBH_UsrLog("[USBENUM] SET_ADDRESS FAIL status=%s", USBH_StatusToString(ReqStatus));
-          Log_HCD_URB_Info(phost);
+          /*           USBH_UsrLog("[USBENUM] SET_ADDRESS FAIL status=%s", USBH_StatusToString(ReqStatus)); */
+          /*           Log_HCD_URB_Info(phost); */
           s_step_started = 0U;
           s_busy_count = 0U;
         }
@@ -1274,16 +1278,16 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       ReqStatus = USBH_Get_CfgDesc(phost, USB_CONFIGURATION_DESC_SIZE);
       if (s_step_started == 0U)
       {
-        USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 START");
-        Log_Control_Transfer_Params(phost);
+        /*         USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 START"); */
+        /*         Log_Control_Transfer_Params(phost); */
         s_step_started = 1U;
         s_busy_count = 0U;
       }
 
       if (ReqStatus == USBH_OK)
       {
-        USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 DONE status=USBH_OK");
-        Log_HCD_URB_Info(phost);
+        /*         USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 DONE status=USBH_OK"); */
+        /*         Log_HCD_URB_Info(phost); */
         s_step_started = 0U;
         s_busy_count = 0U;
 
@@ -1291,8 +1295,8 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else if (ReqStatus == USBH_NOT_SUPPORTED)
       {
-        USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 FAIL status=USBH_NOT_SUPPORTED");
-        Log_HCD_URB_Info(phost);
+        /*         USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 FAIL status=USBH_NOT_SUPPORTED"); */
+        /*         Log_HCD_URB_Info(phost); */
         s_step_started = 0U;
         s_busy_count = 0U;
 
@@ -1322,13 +1326,13 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
           s_busy_count++;
           if ((s_busy_count % 1000U) == 0U)
           {
-            USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 BUSY count=%lu ...", (unsigned long)s_busy_count);
+            /*             USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 BUSY count=%lu ...", (unsigned long)s_busy_count); */
           }
         }
         else
         {
-          USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 FAIL status=%s", USBH_StatusToString(ReqStatus));
-          Log_HCD_URB_Info(phost);
+          /*           USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 FAIL status=%s", USBH_StatusToString(ReqStatus)); */
+          /*           Log_HCD_URB_Info(phost); */
           s_step_started = 0U;
           s_busy_count = 0U;
         }
@@ -1340,16 +1344,16 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       ReqStatus = USBH_Get_CfgDesc(phost, phost->device.CfgDesc.wTotalLength);
       if (s_step_started == 0U)
       {
-        USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC START");
-        Log_Control_Transfer_Params(phost);
+        /*         USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC START"); */
+        /*         Log_Control_Transfer_Params(phost); */
         s_step_started = 1U;
         s_busy_count = 0U;
       }
 
       if (ReqStatus == USBH_OK)
       {
-        USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC DONE status=USBH_OK");
-        Log_HCD_URB_Info(phost);
+        /*         USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC DONE status=USBH_OK"); */
+        /*         Log_HCD_URB_Info(phost); */
         s_step_started = 0U;
         s_busy_count = 0U;
 
@@ -1357,8 +1361,8 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else if (ReqStatus == USBH_NOT_SUPPORTED)
       {
-        USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC FAIL status=USBH_NOT_SUPPORTED");
-        Log_HCD_URB_Info(phost);
+        /*         USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC FAIL status=USBH_NOT_SUPPORTED"); */
+        /*         Log_HCD_URB_Info(phost); */
         s_step_started = 0U;
         s_busy_count = 0U;
 
@@ -1388,13 +1392,13 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
           s_busy_count++;
           if ((s_busy_count % 1000U) == 0U)
           {
-            USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC BUSY count=%lu ...", (unsigned long)s_busy_count);
+            /*             USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC BUSY count=%lu ...", (unsigned long)s_busy_count); */
           }
         }
         else
         {
-          USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC FAIL status=%s", USBH_StatusToString(ReqStatus));
-          Log_HCD_URB_Info(phost);
+          /*           USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC FAIL status=%s", USBH_StatusToString(ReqStatus)); */
+          /*           Log_HCD_URB_Info(phost); */
           s_step_started = 0U;
           s_busy_count = 0U;
         }
@@ -1409,16 +1413,16 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
                                         phost->device.Data, 0xFFU);
         if (s_step_started == 0U)
         {
-          USBH_UsrLog("[USBENUM] GET_MFC_STRING START");
-          Log_Control_Transfer_Params(phost);
+          /*           USBH_UsrLog("[USBENUM] GET_MFC_STRING START"); */
+          /*           Log_Control_Transfer_Params(phost); */
           s_step_started = 1U;
           s_busy_count = 0U;
         }
 
         if (ReqStatus == USBH_OK)
         {
-          USBH_UsrLog("[USBENUM] GET_MFC_STRING DONE status=USBH_OK");
-          Log_HCD_URB_Info(phost);
+          /*           USBH_UsrLog("[USBENUM] GET_MFC_STRING DONE status=USBH_OK"); */
+          /*           Log_HCD_URB_Info(phost); */
           s_step_started = 0U;
           s_busy_count = 0U;
 
@@ -1432,8 +1436,8 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
         }
         else if (ReqStatus == USBH_NOT_SUPPORTED)
         {
-          USBH_UsrLog("[USBENUM] GET_MFC_STRING FAIL status=USBH_NOT_SUPPORTED");
-          Log_HCD_URB_Info(phost);
+          /*           USBH_UsrLog("[USBENUM] GET_MFC_STRING FAIL status=USBH_NOT_SUPPORTED"); */
+          /*           Log_HCD_URB_Info(phost); */
           s_step_started = 0U;
           s_busy_count = 0U;
 
@@ -1451,13 +1455,13 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
             s_busy_count++;
             if ((s_busy_count % 1000U) == 0U)
             {
-              USBH_UsrLog("[USBENUM] GET_MFC_STRING BUSY count=%lu ...", (unsigned long)s_busy_count);
+              /*               USBH_UsrLog("[USBENUM] GET_MFC_STRING BUSY count=%lu ...", (unsigned long)s_busy_count); */
             }
           }
           else
           {
-            USBH_UsrLog("[USBENUM] GET_MFC_STRING FAIL status=%s", USBH_StatusToString(ReqStatus));
-            Log_HCD_URB_Info(phost);
+            /*             USBH_UsrLog("[USBENUM] GET_MFC_STRING FAIL status=%s", USBH_StatusToString(ReqStatus)); */
+            /*             Log_HCD_URB_Info(phost); */
             s_step_started = 0U;
             s_busy_count = 0U;
           }
@@ -1465,8 +1469,8 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else
       {
-        USBH_UsrLog("[USBENUM] GET_MFC_STRING START");
-        USBH_UsrLog("[USBENUM] GET_MFC_STRING DONE status=USBH_OK");
+        /*         USBH_UsrLog("[USBENUM] GET_MFC_STRING START"); */
+        /*         USBH_UsrLog("[USBENUM] GET_MFC_STRING DONE status=USBH_OK"); */
         USBH_UsrLog("Manufacturer : N/A");
         phost->EnumState = ENUM_GET_PRODUCT_STRING_DESC;
 
@@ -1484,16 +1488,16 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
                                         phost->device.Data, 0xFFU);
         if (s_step_started == 0U)
         {
-          USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING START");
-          Log_Control_Transfer_Params(phost);
+          /*           USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING START"); */
+          /*           Log_Control_Transfer_Params(phost); */
           s_step_started = 1U;
           s_busy_count = 0U;
         }
 
         if (ReqStatus == USBH_OK)
         {
-          USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING DONE status=USBH_OK");
-          Log_HCD_URB_Info(phost);
+          /*           USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING DONE status=USBH_OK"); */
+          /*           Log_HCD_URB_Info(phost); */
           s_step_started = 0U;
           s_busy_count = 0U;
 
@@ -1503,8 +1507,8 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
         }
         else if (ReqStatus == USBH_NOT_SUPPORTED)
         {
-          USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING FAIL status=USBH_NOT_SUPPORTED");
-          Log_HCD_URB_Info(phost);
+          /*           USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING FAIL status=USBH_NOT_SUPPORTED"); */
+          /*           Log_HCD_URB_Info(phost); */
           s_step_started = 0U;
           s_busy_count = 0U;
 
@@ -1522,13 +1526,13 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
             s_busy_count++;
             if ((s_busy_count % 1000U) == 0U)
             {
-              USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING BUSY count=%lu ...", (unsigned long)s_busy_count);
+              /*               USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING BUSY count=%lu ...", (unsigned long)s_busy_count); */
             }
           }
           else
           {
-            USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING FAIL status=%s", USBH_StatusToString(ReqStatus));
-            Log_HCD_URB_Info(phost);
+            /*             USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING FAIL status=%s", USBH_StatusToString(ReqStatus)); */
+            /*             Log_HCD_URB_Info(phost); */
             s_step_started = 0U;
             s_busy_count = 0U;
           }
@@ -1536,8 +1540,8 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else
       {
-        USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING START");
-        USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING DONE status=USBH_OK");
+        /*         USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING START"); */
+        /*         USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING DONE status=USBH_OK"); */
         USBH_UsrLog("Product : N/A");
         phost->EnumState = ENUM_GET_SERIALNUM_STRING_DESC;
 
@@ -1555,16 +1559,16 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
                                         phost->device.Data, 0xFFU);
         if (s_step_started == 0U)
         {
-          USBH_UsrLog("[USBENUM] GET_SERIAL_STRING START");
-          Log_Control_Transfer_Params(phost);
+          /*           USBH_UsrLog("[USBENUM] GET_SERIAL_STRING START"); */
+          /*           Log_Control_Transfer_Params(phost); */
           s_step_started = 1U;
           s_busy_count = 0U;
         }
 
         if (ReqStatus == USBH_OK)
         {
-          USBH_UsrLog("[USBENUM] GET_SERIAL_STRING DONE status=USBH_OK");
-          Log_HCD_URB_Info(phost);
+          /*           USBH_UsrLog("[USBENUM] GET_SERIAL_STRING DONE status=USBH_OK"); */
+          /*           Log_HCD_URB_Info(phost); */
           s_step_started = 0U;
           s_busy_count = 0U;
 
@@ -1574,8 +1578,8 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
         }
         else if (ReqStatus == USBH_NOT_SUPPORTED)
         {
-          USBH_UsrLog("[USBENUM] GET_SERIAL_STRING FAIL status=USBH_NOT_SUPPORTED");
-          Log_HCD_URB_Info(phost);
+          /*           USBH_UsrLog("[USBENUM] GET_SERIAL_STRING FAIL status=USBH_NOT_SUPPORTED"); */
+          /*           Log_HCD_URB_Info(phost); */
           s_step_started = 0U;
           s_busy_count = 0U;
 
@@ -1589,13 +1593,13 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
             s_busy_count++;
             if ((s_busy_count % 1000U) == 0U)
             {
-              USBH_UsrLog("[USBENUM] GET_SERIAL_STRING BUSY count=%lu ...", (unsigned long)s_busy_count);
+              /*               USBH_UsrLog("[USBENUM] GET_SERIAL_STRING BUSY count=%lu ...", (unsigned long)s_busy_count); */
             }
           }
           else
           {
-            USBH_UsrLog("[USBENUM] GET_SERIAL_STRING FAIL status=%s", USBH_StatusToString(ReqStatus));
-            Log_HCD_URB_Info(phost);
+            /*             USBH_UsrLog("[USBENUM] GET_SERIAL_STRING FAIL status=%s", USBH_StatusToString(ReqStatus)); */
+            /*             Log_HCD_URB_Info(phost); */
             s_step_started = 0U;
             s_busy_count = 0U;
           }
@@ -1603,8 +1607,8 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else
       {
-        USBH_UsrLog("[USBENUM] GET_SERIAL_STRING START");
-        USBH_UsrLog("[USBENUM] GET_SERIAL_STRING DONE status=USBH_OK");
+        /*         USBH_UsrLog("[USBENUM] GET_SERIAL_STRING START"); */
+        /*         USBH_UsrLog("[USBENUM] GET_SERIAL_STRING DONE status=USBH_OK"); */
         USBH_UsrLog("Serial Number : N/A");
         Status = USBH_OK;
       }

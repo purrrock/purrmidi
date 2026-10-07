@@ -1591,13 +1591,13 @@ HAL_StatusTypeDef USB_HostInit(USB_OTG_GlobalTypeDef *USBx, USB_OTG_CfgTypeDef c
                     USB_OTG_GINTMSK_SOFM             | USB_OTG_GINTSTS_DISCINT | \
                     USB_OTG_GINTMSK_PXFRM_IISOOXFRM  | USB_OTG_GINTMSK_WUIM);
 
-  printf("[HCDINIT] GINTSTS=0x%08lX GINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX HFNUM=0x%08lX HPRT=0x%08lX\n",
+  /*   printf("[HCDINIT] GINTSTS=0x%08lX GINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX HFNUM=0x%08lX HPRT=0x%08lX\n",
          (unsigned long)USBx->GINTSTS,
          (unsigned long)USBx->GINTMSK,
          (unsigned long)USBx_HOST->HAINT,
          (unsigned long)USBx_HOST->HAINTMSK,
          (unsigned long)USBx_HOST->HFNUM,
-         (unsigned long)USBx_HPRT0);
+         (unsigned long)USBx_HPRT0); */
 
   return ret;
 }
@@ -1891,7 +1891,7 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
   {
     if (is_haintmsk_change)
     {
-      printf("[HCDXFER] ENTER (#%lu HAINTMSK 0x%08lX->0x%08lX) ch=%u dir=%u ep=%u type=%u len=%lu count=%lu pid=%u HCCHAR=0x%08lX HCTSIZ=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
+      /*       printf("[HCDXFER] ENTER (#%lu HAINTMSK 0x%08lX->0x%08lX) ch=%u dir=%u ep=%u type=%u len=%lu count=%lu pid=%u HCCHAR=0x%08lX HCTSIZ=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
              (unsigned long)s_haintmsk_change_count,
              (unsigned long)prev_haintmsk,
              (unsigned long)cur_haintmsk,
@@ -1909,12 +1909,12 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
              (unsigned long)USBx_HOST->HAINT,
              (unsigned long)cur_haintmsk,
              (unsigned long)USBx->GINTSTS,
-             (unsigned long)USBx->GINTMSK);
+             (unsigned long)USBx->GINTMSK); */
       s_last_haintmsk = cur_haintmsk;
     }
     else
     {
-      printf("[HCDXFER] ENTER ch=%u dir=%u ep=%u type=%u len=%lu count=%lu pid=%u HCCHAR=0x%08lX HCTSIZ=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
+      /*       printf("[HCDXFER] ENTER ch=%u dir=%u ep=%u type=%u len=%lu count=%lu pid=%u HCCHAR=0x%08lX HCTSIZ=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
              (unsigned int)ch_num,
              (unsigned int)hc->ep_is_in,
              (unsigned int)hc->ep_num,
@@ -1929,7 +1929,7 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
              (unsigned long)USBx_HOST->HAINT,
              (unsigned long)cur_haintmsk,
              (unsigned long)USBx->GINTSTS,
-             (unsigned long)USBx->GINTMSK);
+             (unsigned long)USBx->GINTMSK); */
     }
   }
 
@@ -1958,7 +1958,7 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
       {
         if (is_haintmsk_change_c0)
         {
-          printf("[HCDXFER] EXIT ch=%u status=%d (#%lu HAINTMSK 0x%08lX->0x%08lX) HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
+          /*           printf("[HCDXFER] EXIT ch=%u status=%d (#%lu HAINTMSK 0x%08lX->0x%08lX) HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
                  (unsigned int)ch_num,
                  (int)HAL_OK,
                  (unsigned long)s_haintmsk_change_count,
@@ -1972,12 +1972,12 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
                  (unsigned long)USBx_HOST->HAINT,
                  (unsigned long)cur_haintmsk_c0,
                  (unsigned long)USBx->GINTSTS,
-                 (unsigned long)USBx->GINTMSK);
+                 (unsigned long)USBx->GINTMSK); */
           s_last_haintmsk = cur_haintmsk_c0;
         }
         else
         {
-          printf("[HCDXFER] EXIT ch=%u status=%d HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
+          /*           printf("[HCDXFER] EXIT ch=%u status=%d HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
                  (unsigned int)ch_num,
                  (int)HAL_OK,
                  (unsigned long)USBx_HC(ch_num)->HCCHAR,
@@ -1988,7 +1988,7 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
                  (unsigned long)USBx_HOST->HAINT,
                  (unsigned long)cur_haintmsk_c0,
                  (unsigned long)USBx->GINTSTS,
-                 (unsigned long)USBx->GINTMSK);
+                 (unsigned long)USBx->GINTMSK); */
         }
       }
       if (ch_num < 16U)
@@ -2169,7 +2169,7 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
   {
     if (is_haintmsk_change_b)
     {
-      printf("[HCDXFER] CONFIG (#%lu HAINTMSK 0x%08lX->0x%08lX) ch=%u HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
+      /*       printf("[HCDXFER] CONFIG (#%lu HAINTMSK 0x%08lX->0x%08lX) ch=%u HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
              (unsigned long)s_haintmsk_change_count,
              (unsigned long)prev_haintmsk_b,
              (unsigned long)cur_haintmsk_b,
@@ -2182,12 +2182,12 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
              (unsigned long)USBx_HOST->HAINT,
              (unsigned long)cur_haintmsk_b,
              (unsigned long)USBx->GINTSTS,
-             (unsigned long)USBx->GINTMSK);
+             (unsigned long)USBx->GINTMSK); */
       s_last_haintmsk = cur_haintmsk_b;
     }
     else
     {
-      printf("[HCDXFER] CONFIG ch=%u HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
+      /*       printf("[HCDXFER] CONFIG ch=%u HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
              (unsigned int)ch_num,
              (unsigned long)USBx_HC(ch_num)->HCCHAR,
              (unsigned long)USBx_HC(ch_num)->HCTSIZ,
@@ -2197,7 +2197,7 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
              (unsigned long)USBx_HOST->HAINT,
              (unsigned long)cur_haintmsk_b,
              (unsigned long)USBx->GINTSTS,
-             (unsigned long)USBx->GINTMSK);
+             (unsigned long)USBx->GINTMSK); */
     }
   }
 
@@ -2230,7 +2230,7 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
   if (ch_num < 16U && s_launch_log_count[ch_num] < 10U)
   {
     s_launch_log_count[ch_num]++;
-    printf("[HCDLAUNCH] ch=%lu before HCCHAR=0x%08lX write=0x%08lX after HCCHAR=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HCTSIZ=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
+    /*     printf("[HCDLAUNCH] ch=%lu before HCCHAR=0x%08lX write=0x%08lX after HCCHAR=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HCTSIZ=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
            (unsigned long)ch_num,
            (unsigned long)launch_before_hcchar,
            (unsigned long)tmpreg,
@@ -2241,7 +2241,7 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
            (unsigned long)launch_haint,
            (unsigned long)launch_haintmsk,
            (unsigned long)launch_gintsts,
-           (unsigned long)launch_gintmsk);
+           (unsigned long)launch_gintmsk); */
   }
 
   if (dma != 0U) /* dma mode */
@@ -2255,7 +2255,7 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
     {
       if (is_haintmsk_change_c1)
       {
-        printf("[HCDXFER] EXIT ch=%u status=%d (#%lu HAINTMSK 0x%08lX->0x%08lX) HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
+        /*         printf("[HCDXFER] EXIT ch=%u status=%d (#%lu HAINTMSK 0x%08lX->0x%08lX) HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
                (unsigned int)ch_num,
                (int)HAL_OK,
                (unsigned long)s_haintmsk_change_count,
@@ -2269,12 +2269,12 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
                (unsigned long)USBx_HOST->HAINT,
                (unsigned long)cur_haintmsk_c1,
                (unsigned long)USBx->GINTSTS,
-               (unsigned long)USBx->GINTMSK);
+               (unsigned long)USBx->GINTMSK); */
         s_last_haintmsk = cur_haintmsk_c1;
       }
       else
       {
-        printf("[HCDXFER] EXIT ch=%u status=%d HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
+        /*         printf("[HCDXFER] EXIT ch=%u status=%d HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
                (unsigned int)ch_num,
                (int)HAL_OK,
                (unsigned long)USBx_HC(ch_num)->HCCHAR,
@@ -2285,7 +2285,7 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
                (unsigned long)USBx_HOST->HAINT,
                (unsigned long)cur_haintmsk_c1,
                (unsigned long)USBx->GINTSTS,
-               (unsigned long)USBx->GINTMSK);
+               (unsigned long)USBx->GINTMSK); */
       }
     }
     if (ch_num < 16U)
@@ -2342,7 +2342,7 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
   {
     if (is_haintmsk_change_c2)
     {
-      printf("[HCDXFER] EXIT ch=%u status=%d (#%lu HAINTMSK 0x%08lX->0x%08lX) HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
+      /*       printf("[HCDXFER] EXIT ch=%u status=%d (#%lu HAINTMSK 0x%08lX->0x%08lX) HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
              (unsigned int)ch_num,
              (int)HAL_OK,
              (unsigned long)s_haintmsk_change_count,
@@ -2356,12 +2356,12 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
              (unsigned long)USBx_HOST->HAINT,
              (unsigned long)cur_haintmsk_c2,
              (unsigned long)USBx->GINTSTS,
-             (unsigned long)USBx->GINTMSK);
+             (unsigned long)USBx->GINTMSK); */
       s_last_haintmsk = cur_haintmsk_c2;
     }
     else
     {
-      printf("[HCDXFER] EXIT ch=%u status=%d HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
+      /*       printf("[HCDXFER] EXIT ch=%u status=%d HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
              (unsigned int)ch_num,
              (int)HAL_OK,
              (unsigned long)USBx_HC(ch_num)->HCCHAR,
@@ -2372,7 +2372,7 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
              (unsigned long)USBx_HOST->HAINT,
              (unsigned long)cur_haintmsk_c2,
              (unsigned long)USBx->GINTSTS,
-             (unsigned long)USBx->GINTMSK);
+             (unsigned long)USBx->GINTMSK); */
     }
   }
 
