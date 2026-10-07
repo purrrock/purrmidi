@@ -81,9 +81,9 @@ void MX_USB_HOST_Process(void);
 int _write(int file, char *ptr, int len) {
     (void)file;
     uint32_t timeout = (uint32_t)((len * 10U) / 115U) + 20U;
-    if (HAL_UART_Transmit(&huart3, (uint8_t*)ptr, len, timeout) == HAL_OK) {
-        return len;
-    }
+     if (HAL_UART_Transmit(&huart3, (uint8_t*)ptr, len, timeout) == HAL_OK) {
+         return len;
+     }
     return 0;
 }
 

@@ -189,7 +189,7 @@ static void HCD_LogIRQ(HCD_HandleTypeDef *hhcd, uint8_t chnum)
     uint32_t rpt = s_irq_log_state[chnum].repeat_count;
     s_irq_log_state[chnum].repeat_count = 0;
 
-   printf("[HCDIRQ] ch=%u HCINT=0x%03lX MSK=0x%03lX HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX state=%s urb=%s ep=%u dir=%s type=%s%s\n",
+    printf("[HCDIRQ] ch=%u HCINT=0x%03lX MSK=0x%03lX HCCHAR=0x%08lX HCTSIZ=0x%08lX HCSPLT=0x%08lX state=%s urb=%s ep=%u dir=%s type=%s%s\n",
            (unsigned int)chnum,
            (unsigned long)hcint,
            (unsigned long)hcintmsk,
@@ -202,7 +202,7 @@ static void HCD_LogIRQ(HCD_HandleTypeDef *hhcd, uint8_t chnum)
            ((hcchar & USB_OTG_HCCHAR_EPDIR) == USB_OTG_HCCHAR_EPDIR) ? "IN" : "OUT",
            HCD_EPTypeStr((uint32_t)hhcd->hc[chnum].ep_type),
            (rpt > 0) ? " (rpt)" : "");
-  } 
+  }
 }
 
 /* Diagnostic GINT Logger */
