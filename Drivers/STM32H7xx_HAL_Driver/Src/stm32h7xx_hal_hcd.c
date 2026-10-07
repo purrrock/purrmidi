@@ -228,6 +228,7 @@ static void HCD_LogIRQ(HCD_HandleTypeDef *hhcd, uint8_t chnum)
 static void HCD_LogGINT(HCD_HandleTypeDef *hhcd)
 {
   const USB_OTG_GlobalTypeDef *USBx = hhcd->Instance;
+  uint32_t USBx_BASE = (uint32_t)USBx;
   uint32_t gintsts = USBx->GINTSTS;
   uint32_t gintmsk = USBx->GINTMSK;
   uint32_t haint = USBx_HOST->HAINT;
