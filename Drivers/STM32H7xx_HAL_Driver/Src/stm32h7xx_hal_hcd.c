@@ -967,6 +967,10 @@ void HAL_HCD_IRQHandler(HCD_HandleTypeDef *hhcd)
     {
       interrupt = USB_HC_ReadInterrupt(hhcd->Instance);
       HCD_LogHAINT(interrupt);
+      if (interrupt == 0U)
+      {
+        HCD_LogDispatch(hhcd, 0U);
+      }
       for (i = 0U; i < hhcd->Init.Host_channels; i++)
       {
         if ((interrupt & (1UL << (i & 0xFU))) != 0U)
