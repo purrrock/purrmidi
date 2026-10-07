@@ -139,6 +139,7 @@ static uint32_t s_last_haintmsk = 0xFFFFFFFFU;
 static uint8_t s_haintmsk_init = 0U;
 static uint32_t s_haintmsk_change_count = 0U;
 static uint32_t s_xfer_call_count[16] = {0};
+static uint32_t s_launch_log_count[16] = {0};
 
 static uint8_t HCD_ShouldLogXfer(USB_OTG_GlobalTypeDef *USBx, uint32_t ch_num, uint8_t *out_is_change)
 {
@@ -2213,7 +2214,34 @@ HAL_StatusTypeDef USB_HC_StartXfer(USB_OTG_GlobalTypeDef *USBx, USB_OTG_HCTypeDe
     tmpreg &= ~USB_OTG_HCCHAR_EPDIR;
   }
   tmpreg |= USB_OTG_HCCHAR_CHENA;
+
+  uint32_t launch_before_hcchar = USBx_HC(ch_num)->HCCHAR;
   USBx_HC(ch_num)->HCCHAR = tmpreg;
+  uint32_t launch_after_hcchar = USBx_HC(ch_num)->HCCHAR;
+  uint32_t launch_hcint = USBx_HC(ch_num)->HCINT;
+  uint32_t launch_hcintmsk = USBx_HC(ch_num)->HCINTMSK;
+  uint32_t launch_hctsiz = USBx_HC(ch_num)->HCTSIZ;
+  uint32_t launch_haint = USBx_HOST->HAINT;
+  uint32_t launch_haintmsk = USBx_HOST->HAINTMSK;
+  uint32_t launch_gintsts = USBx->GINTSTS;
+  uint32_t launch_gintmsk = USBx->GINTMSK;
+
+  if (ch_num < 16U && s_launch_log_count[ch_num] < 10U)
+  {
+    s_launch_log_count[ch_num]++;
+    printf("[HCDLAUNCH] ch=%lu before HCCHAR=0x%08lX write=0x%08lX after HCCHAR=0x%08lX HCINT=0x%08lX HCINTMSK=0x%08lX HCTSIZ=0x%08lX HAINT=0x%08lX HAINTMSK=0x%08lX GINTSTS=0x%08lX GINTMSK=0x%08lX\n",
+           (unsigned long)ch_num,
+           (unsigned long)launch_before_hcchar,
+           (unsigned long)tmpreg,
+           (unsigned long)launch_after_hcchar,
+           (unsigned long)launch_hcint,
+           (unsigned long)launch_hcintmsk,
+           (unsigned long)launch_hctsiz,
+           (unsigned long)launch_haint,
+           (unsigned long)launch_haintmsk,
+           (unsigned long)launch_gintsts,
+           (unsigned long)launch_gintmsk);
+  }
 
   if (dma != 0U) /* dma mode */
   {
