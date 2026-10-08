@@ -243,6 +243,15 @@ SECTIONS
 
 
 
+  /* DMA buffers: DMA1/DMA2 cannot access DTCM (.data/.bss live there),
+     so audio ring buffer goes to AXI SRAM. Not zeroed by startup -> clear it in code. */
+  .dma_buffer (NOLOAD) : ALIGN(32)
+  {
+    *(.dma_buffer)
+    *(.dma_buffer*)
+    . = ALIGN(32);
+  } >RAM
+
   /* Remove information from the standard libraries */
   /DISCARD/ :
   {

@@ -36,6 +36,7 @@
 #include "midi_queue.h"
 #include "midi_usb.h"
 #include "usbh_midi.h"
+#include "midi_dispatch.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -65,6 +66,16 @@ static volatile uint32_t note_off_count = 0;
 static uint8_t active_notes[128];
 static uint16_t active_note_count = 0;
 
+/* 1 = print [USBDIAG1..3] to UART (debug only), 0 = silent */
+#define USB_DIAG_UART 0
+
+/* Audio: 48 kHz, stereo, 16 bit. Circular DMA ring split into two halves.
+ * It must NOT be placed in DTCM (DMA2 cannot reach it): own section in AXI SRAM,
+ * see .dma_buffer in the linker script. D-Cache is off, so no cache maintenance needed. */
+#define AUDIO_BUFFER_FRAMES  256U                      /* stereo frames in the whole ring (2 x 128) */
+#define AUDIO_BUFFER_SIZE    (AUDIO_BUFFER_FRAMES * 2U) /* int16 items passed to SAI DMA */
+static int16_t audio_buffer[AUDIO_BUFFER_SIZE] __attribute__((section(".dma_buffer"), aligned(32)));
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -87,6 +98,7 @@ int _write(int file, char *ptr, int len) {
     return 0;
 }
 
+#if USB_DIAG_UART
 static void Print_USB_Diag(uint32_t max_loop_dt)
 {
     MIDI_Diag_t diag = {0};
@@ -127,6 +139,7 @@ static void Print_USB_Diag(uint32_t max_loop_dt)
            diag.hc_err_cnt,
            diag.hc_toggle_in);
 }
+#endif /* USB_DIAG_UART */
 
 /* USER CODE END 0 */
 
@@ -174,7 +187,11 @@ int main(void)
   Synth_Init();      // Инициализация простого синтезатора
   PluckSynth_Init(); // Инициализация синтезатора струны
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
-  // HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t*)audio_buffer, AUDIO_BUFFER_SIZE);
+  memset(audio_buffer, 0, sizeof(audio_buffer));  /* .dma_buffer is not zeroed by startup */
+  if (HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer, AUDIO_BUFFER_SIZE) != HAL_OK)
+  {
+    Error_Handler();
+  }
   printf("Waiting for USB device to be attached...\r\n");
   HAL_GPIO_WritePin(DEBUG_LED_GPIO_Port, DEBUG_LED_Pin, GPIO_PIN_RESET);
   /* USER CODE END 2 */
@@ -182,13 +199,16 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
+#if USB_DIAG_UART
   uint32_t prev_loop_tick = HAL_GetTick();
   uint32_t max_loop_dt = 0;
-  static uint32_t last_report = 0;
   static bool silent_episode_reported = false;
+#endif
+  static uint32_t last_report = 0;
 
   while (1)
   {
+#if USB_DIAG_UART
     uint32_t current_tick = HAL_GetTick();
     uint32_t loop_dt = current_tick - prev_loop_tick;
     prev_loop_tick = current_tick;
@@ -197,6 +217,7 @@ int main(void)
     {
         max_loop_dt = loop_dt;
     }
+#endif
 
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
@@ -215,6 +236,8 @@ int main(void)
     {
         // printf("[MIDI] %02X %02X %02X\r\n",
         //        event.status, event.data1, event.data2);
+
+        MIDI_Dispatch(&event);   /* Note On/Off, CC -> PluckSynth (lock-free FIFO to the audio ISR) */
 
         uint8_t command = event.status & MIDI_STATUS_MASK;
         uint8_t note = event.data1;
@@ -264,6 +287,8 @@ int main(void)
     }
 
     uint32_t now = HAL_GetTick();
+
+#if USB_DIAG_UART
     uint32_t silence_ms = now - MIDI_USB_GetLastPacketTick();
 
     if (!MIDI_USB_IsConnected() || silence_ms <= 3000)
@@ -276,6 +301,7 @@ int main(void)
         silent_episode_reported = true;
         prev_loop_tick = HAL_GetTick();
     }
+#endif
 
     if (now - last_report >= 10000)
     {
@@ -287,9 +313,11 @@ int main(void)
                note_off_count,
                MIDI_Queue_GetOverrunCount(),
                MIDI_USB_GetReceiveErrorsCount());
+#if USB_DIAG_UART
         Print_USB_Diag(max_loop_dt);
         max_loop_dt = 0;
         prev_loop_tick = HAL_GetTick();
+#endif
     }
   }
 
@@ -356,20 +384,21 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 
-/*
-void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai) {
+/* Audio DMA callbacks (DMA2_Stream0 ISR): refill the half that was just played.
+ * Half-transfer -> first half is free; transfer-complete -> second half is free. */
+void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai)
+{
     if (hsai->Instance == SAI1_Block_A) {
-        // Заполняем первую половину буфера (AUDIO_BUFFER_FRAMES / 2 стереопар)
         PluckSynth_FillStereoBuffer(&audio_buffer[0], AUDIO_BUFFER_FRAMES / 2);
     }
 }
 
-void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai) {
+void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai)
+{
     if (hsai->Instance == SAI1_Block_A) {
-        // Заполняем вторую половину буфера
-        PluckSynth_FillStereoBuffer(&audio_buffer[AUDIO_BUFFER_FRAMES], AUDIO_BUFFER_FRAMES / 2);
+        PluckSynth_FillStereoBuffer(&audio_buffer[AUDIO_BUFFER_SIZE / 2], AUDIO_BUFFER_FRAMES / 2);
     }
-} */
+}
 
 /* USER CODE END 4 */
 
