@@ -29,7 +29,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
-#include "synth.h"        // отладочный синусоидальный тон
+// #include "synth.h"        // отладочный синусоидальный тон
 #include "pluck_synth.h" // Karplus-Strong
 #include "display.h"
 #include "midi_event.h"
@@ -184,7 +184,7 @@ int main(void)
   Display_Init();
   MIDI_Queue_Init();
   MIDI_USB_Init();
-  Synth_Init();      // Инициализация простого синтезатора
+  // Synth_Init();      // Инициализация простого синтезатора
   PluckSynth_Init(); // Инициализация синтезатора струны
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
   memset(audio_buffer, 0, sizeof(audio_buffer));  /* .dma_buffer is not zeroed by startup */
