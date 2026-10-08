@@ -66,7 +66,7 @@ static volatile uint32_t note_off_count = 0;
 static uint8_t active_notes[128];
 static uint16_t active_note_count = 0;
 
-/* 1 = print [USBDIAG1..3] to UART (debug only), 0 = silent */
+/* 1 = print [STATS] and [USBDIAG1..3] to UART (debug only), 0 = silent */
 #define USB_DIAG_UART 0
 
 /* Audio: 48 kHz, stereo, 16 bit. Circular DMA ring split into two halves.
@@ -204,7 +204,9 @@ int main(void)
   uint32_t max_loop_dt = 0;
   static bool silent_episode_reported = false;
 #endif
+#if USB_DIAG_UART
   static uint32_t last_report = 0;
+#endif
 
   while (1)
   {
@@ -286,9 +288,8 @@ int main(void)
         }
     }
 
-    uint32_t now = HAL_GetTick();
-
 #if USB_DIAG_UART
+    uint32_t now = HAL_GetTick();
     uint32_t silence_ms = now - MIDI_USB_GetLastPacketTick();
 
     if (!MIDI_USB_IsConnected() || silence_ms <= 3000)
@@ -303,6 +304,7 @@ int main(void)
     }
 #endif
 
+#if USB_DIAG_UART
     if (now - last_report >= 10000)
     {
         last_report = now;
@@ -313,12 +315,11 @@ int main(void)
                note_off_count,
                MIDI_Queue_GetOverrunCount(),
                MIDI_USB_GetReceiveErrorsCount());
-#if USB_DIAG_UART
         Print_USB_Diag(max_loop_dt);
         max_loop_dt = 0;
         prev_loop_tick = HAL_GetTick();
-#endif
     }
+#endif
   }
 
   /* USER CODE END 3 */
