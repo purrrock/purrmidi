@@ -14,6 +14,12 @@ void Display_SetMidiConnected(bool connected);
 
 void Display_SetLastNote(uint8_t note);
 
+void Display_SetNoteState(
+    const uint8_t *active_notes,
+    uint16_t active_note_count,
+    uint8_t last_note
+);
+
 #ifdef __cplusplus
 }
 #endif

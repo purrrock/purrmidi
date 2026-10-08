@@ -1,4 +1,5 @@
 #include "display.h"
+#include "chord_detector.h"
 
 #include "main.h"
 #include "stm32h7xx_hal.h"
@@ -190,27 +191,69 @@ static void Display_DrawStatus(void)
         midi_connected ? "MIDI: connected   " : "MIDI: disconnected");
 }
 
-static void Display_DrawNote(void)
+static void Display_DrawNoteState(
+    const uint8_t *active_notes,
+    uint16_t active_note_count,
+    uint8_t note_val)
 {
-    char text[16];
+    char text[20];
 
-    if (!have_last_note)
+    if (active_note_count == 0)
     {
+        /* Затираем область текстом из 18 пробелов (18 * 8px = 144px > DISPLAY_WIDTH) */
+        Display_DrawString(2, 32, 16, "                  ");
         return;
     }
 
-    /* Нота 0..11 -> октава -1, поэтому знаковый int, а не uint8_t */
-    const int octave = (int)(last_note / 12U) - 1;
+    if (active_note_count < 3)
+    {
+        /* Нота 0..11 -> октава -1, поэтому знаковый int, а не uint8_t */
+        const int octave = (int)(note_val / 12U) - 1;
 
-    /* Пробелы в конце затирают прежнюю, более длинную запись ("A#-1") */
-    snprintf(
-        text,
-        sizeof(text),
-        "%s%d    ",
-        note_names[last_note % 12U],
-        octave);
+        /* Заполняем область строкой с хвостовыми пробелами (18 символов) */
+        snprintf(
+            text,
+            sizeof(text),
+            "%-18s",
+            "");
+        snprintf(
+            text,
+            sizeof(text),
+            "%s%d",
+            note_names[note_val % 12U],
+            octave);
 
-    Display_DrawString(2, 32, 16, text);
+        /* Дополняем пробелами до 18 символов для гарантированной очистки старого текста */
+        size_t len = strlen(text);
+        while (len < 18 && len < sizeof(text) - 1)
+        {
+            text[len++] = ' ';
+        }
+        text[len] = '\0';
+
+        Display_DrawString(2, 32, 16, text);
+    }
+    else
+    {
+        char chord_name[16];
+        if (ChordDetector_Detect(active_notes, active_note_count, chord_name, sizeof(chord_name)))
+        {
+            snprintf(text, sizeof(text), "ch %s", chord_name);
+        }
+        else
+        {
+            snprintf(text, sizeof(text), "ch ???");
+        }
+
+        size_t len = strlen(text);
+        while (len < 18 && len < sizeof(text) - 1)
+        {
+            text[len++] = ' ';
+        }
+        text[len] = '\0';
+
+        Display_DrawString(2, 32, 16, text);
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -246,7 +289,10 @@ void Display_Init(void)
     ST7735_FillRect(&st7735, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, COLOR_BLACK);
     Display_DrawString(2, 1, 12, "PurrMidi");
     Display_DrawStatus();
-    Display_DrawNote();
+    if (have_last_note)
+    {
+        Display_DrawNoteState(NULL, 1, last_note);
+    }
 
     ST7735_DisplayOn(&st7735);
     HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, LCD_BL_ON); // включаем подсветку
@@ -265,12 +311,17 @@ void Display_SetMidiConnected(bool connected)
 
 void Display_SetLastNote(uint8_t note)
 {
-    if (have_last_note && last_note == note)
-    {
-        return;
-    }
-
     last_note = note;
     have_last_note = true;
-    Display_DrawNote();
+    Display_DrawNoteState(NULL, 1, note);
+}
+
+void Display_SetNoteState(
+    const uint8_t *active_notes,
+    uint16_t active_note_count,
+    uint8_t note_val)
+{
+    last_note = note_val;
+    have_last_note = (active_note_count > 0);
+    Display_DrawNoteState(active_notes, active_note_count, note_val);
 }

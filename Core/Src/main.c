@@ -260,7 +260,7 @@ int main(void)
                 GPIO_PIN_SET
             );
 
-            Display_SetLastNote(note);
+            Display_SetNoteState(active_notes, active_note_count, note);
         }
         else if (command == MIDI_STATUS_NOTE_OFF ||
                  (command == MIDI_STATUS_NOTE_ON && event.data2 == 0))
@@ -276,6 +276,8 @@ int main(void)
                     active_note_count--;
                 }
             }
+
+            Display_SetNoteState(active_notes, active_note_count, note);
 
             if (active_note_count == 0)
             {

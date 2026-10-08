@@ -107,6 +107,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/usbh_midi.c
     Core/Src/pluck_synth.cpp
     Core/Src/display.c
+    Core/Src/chord_detector.c
     Engine/midi/midi_queue.c
     Engine/midi/midi_dispatch.c
     Platform/midi_usb/midi_usb.c
