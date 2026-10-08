@@ -21,6 +21,7 @@ endif()
 # purrmidi_core static library
 add_library(purrmidi_core STATIC
     "${CMAKE_SOURCE_DIR}/Core/Src/pluck_synth.cpp"
+    "${CMAKE_SOURCE_DIR}/Core/Src/chord_detector.c"
     "${CMAKE_SOURCE_DIR}/Engine/midi/midi_queue.c"
     "${CMAKE_SOURCE_DIR}/Engine/midi/midi_dispatch.c"
     "${DAISYSP_DIR}/DaisySP-LGPL/Source/PhysicalModeling/pluck.cpp"
