@@ -63,10 +63,6 @@ osThreadAttr_t USBH_Thread_Atrr;
 #endif
 #endif /* (USBH_USE_OS == 1U) */
 
-static ENUM_StateTypeDef s_prev_enum_state = (ENUM_StateTypeDef)0xFF;
-static uint8_t s_step_started = 0U;
-static uint32_t s_busy_count = 0U;
-
 
 /**
   * @}
@@ -79,158 +75,6 @@ static uint32_t s_busy_count = 0U;
 static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost);
 static void USBH_HandleSof(USBH_HandleTypeDef *phost);
 static USBH_StatusTypeDef DeInitStateMachine(USBH_HandleTypeDef *phost);
-
-static const char *USBH_StatusToString(USBH_StatusTypeDef status)
-{
-  switch (status)
-  {
-    case USBH_OK:                 return "USBH_OK";
-    case USBH_BUSY:               return "USBH_BUSY";
-    case USBH_FAIL:               return "USBH_FAIL";
-    case USBH_NOT_SUPPORTED:      return "USBH_NOT_SUPPORTED";
-    case USBH_UNRECOVERED_ERROR:  return "USBH_UNRECOVERED_ERROR";
-    case USBH_ERROR_SPEED_UNKNOWN:return "USBH_ERROR_SPEED_UNKNOWN";
-    default:                      return "USBH_UNKNOWN";
-  }
-}
-
-static const char *ENUM_StateToString(ENUM_StateTypeDef state)
-{
-  switch (state)
-  {
-    case ENUM_IDLE:                     return "ENUM_IDLE";
-    case ENUM_GET_FULL_DEV_DESC:        return "ENUM_GET_FULL_DEV_DESC";
-    case ENUM_SET_ADDR:                 return "ENUM_SET_ADDR";
-    case ENUM_GET_CFG_DESC:             return "ENUM_GET_CFG_DESC";
-    case ENUM_GET_FULL_CFG_DESC:        return "ENUM_GET_FULL_CFG_DESC";
-    case ENUM_GET_MFC_STRING_DESC:      return "ENUM_GET_MFC_STRING_DESC";
-    case ENUM_GET_PRODUCT_STRING_DESC:  return "ENUM_GET_PRODUCT_STRING_DESC";
-    case ENUM_GET_SERIALNUM_STRING_DESC:return "ENUM_GET_SERIALNUM_STRING_DESC";
-    default:                            return "ENUM_UNKNOWN";
-  }
-}
-
-static const char *CTRL_StateToString(CTRL_StateTypeDef state)
-{
-  switch (state)
-  {
-    case CTRL_IDLE:           return "CTRL_IDLE";
-    case CTRL_SETUP:          return "CTRL_SETUP";
-    case CTRL_SETUP_WAIT:     return "CTRL_SETUP_WAIT";
-    case CTRL_DATA_IN:        return "CTRL_DATA_IN";
-    case CTRL_DATA_IN_WAIT:   return "CTRL_DATA_IN_WAIT";
-    case CTRL_DATA_OUT:       return "CTRL_DATA_OUT";
-    case CTRL_DATA_OUT_WAIT:  return "CTRL_DATA_OUT_WAIT";
-    case CTRL_STATUS_IN:      return "CTRL_STATUS_IN";
-    case CTRL_STATUS_IN_WAIT: return "CTRL_STATUS_IN_WAIT";
-    case CTRL_STATUS_OUT:     return "CTRL_STATUS_OUT";
-    case CTRL_STATUS_OUT_WAIT:return "CTRL_STATUS_OUT_WAIT";
-    case CTRL_ERROR:          return "CTRL_ERROR";
-    case CTRL_STALLED:        return "CTRL_STALLED";
-    case CTRL_COMPLETE:       return "CTRL_COMPLETE";
-    default:                  return "CTRL_UNKNOWN";
-  }
-}
-
-static const char *HOST_StateToString(HOST_StateTypeDef state)
-{
-  switch (state)
-  {
-    case HOST_IDLE:                   return "HOST_IDLE";
-    case HOST_DEV_WAIT_FOR_ATTACHMENT:return "HOST_DEV_WAIT_FOR_ATTACHMENT";
-    case HOST_DEV_ATTACHED:           return "HOST_DEV_ATTACHED";
-    case HOST_DEV_DISCONNECTED:       return "HOST_DEV_DISCONNECTED";
-    case HOST_DETECT_DEVICE_SPEED:    return "HOST_DETECT_DEVICE_SPEED";
-    case HOST_ENUMERATION:            return "HOST_ENUMERATION";
-    case HOST_CLASS_REQUEST:          return "HOST_CLASS_REQUEST";
-    case HOST_INPUT:                  return "HOST_INPUT";
-    case HOST_SET_CONFIGURATION:      return "HOST_SET_CONFIGURATION";
-    case HOST_SET_WAKEUP_FEATURE:     return "HOST_SET_WAKEUP_FEATURE";
-    case HOST_CHECK_CLASS:            return "HOST_CHECK_CLASS";
-    case HOST_CLASS:                  return "HOST_CLASS";
-    case HOST_SUSPENDED:              return "HOST_SUSPENDED";
-    case HOST_ABORT_STATE:            return "HOST_ABORT_STATE";
-    default:                          return "HOST_UNKNOWN";
-  }
-}
-
-static const char *CMD_StateToString(CMD_StateTypeDef state)
-{
-  switch (state)
-  {
-    case CMD_IDLE: return "CMD_IDLE";
-    case CMD_SEND: return "CMD_SEND";
-    case CMD_WAIT: return "CMD_WAIT";
-    default:       return "CMD_UNKNOWN";
-  }
-}
-
-static const char *URB_StateToString(USBH_URBStateTypeDef state)
-{
-  switch (state)
-  {
-    case USBH_URB_IDLE:     return "URB_IDLE";
-    case USBH_URB_DONE:     return "URB_DONE";
-    case USBH_URB_NOTREADY: return "URB_NOTREADY";
-    case USBH_URB_NYET:     return "URB_NYET";
-    case USBH_URB_ERROR:    return "URB_ERROR";
-    case USBH_URB_STALL:    return "URB_STALL";
-    case USBH_URB_NAK_WAIT: return "URB_NAK_WAIT";
-    default:                return "URB_UNKNOWN";
-  }
-}
-
-/*
-static void Log_Control_Transfer_Params(USBH_HandleTypeDef *phost)
-{
-  USBH_UsrLog("[USBENUM] CTRL bmReq=0x%02X req=0x%02X wValue=0x%04X wIndex=0x%04X wLength=0x%04X",
-              phost->Control.setup.b.bmRequestType,
-              phost->Control.setup.b.bRequest,
-              phost->Control.setup.b.wValue.w,
-              phost->Control.setup.b.wIndex.w,
-              phost->Control.setup.b.wLength.w);
-  USBH_UsrLog("[USBENUM] CTRL state=%s req_state=%s err_cnt=%u timer=%u addr=%u speed=%u mps=%u pipe_size=%u pipe_in=%u pipe_out=%u",
-              CTRL_StateToString(phost->Control.state),
-              CMD_StateToString(phost->RequestState),
-              phost->Control.errorcount,
-              phost->Control.timer,
-              phost->device.address,
-              phost->device.speed,
-              phost->device.DevDesc.bMaxPacketSize,
-              phost->Control.pipe_size,
-              phost->Control.pipe_in,
-              phost->Control.pipe_out);
-}
-*/
-
-/*
-static void Log_HCD_URB_Info(USBH_HandleTypeDef *phost)
-{
-  USBH_URBStateTypeDef urb_in = USBH_LL_GetURBState(phost, phost->Control.pipe_in);
-  USBH_URBStateTypeDef urb_out = USBH_LL_GetURBState(phost, phost->Control.pipe_out);
-  uint32_t xfer_in = USBH_LL_GetLastXferSize(phost, phost->Control.pipe_in);
-  uint32_t xfer_out = USBH_LL_GetLastXferSize(phost, phost->Control.pipe_out);
-
-  HCD_HandleTypeDef *pHandle = (HCD_HandleTypeDef *)phost->pData;
-  if (pHandle != NULL)
-  {
-    uint8_t in_pipe = phost->Control.pipe_in;
-    uint8_t out_pipe = phost->Control.pipe_out;
-
-    USBH_UsrLog("[USBENUM] HCD IN_pipe=%u urb=%s xfer=%lu hc_state=%u err_cnt=%u | OUT_pipe=%u urb=%s xfer=%lu hc_state=%u err_cnt=%u",
-                in_pipe, URB_StateToString(urb_in), (unsigned long)xfer_in,
-                pHandle->hc[in_pipe].state, pHandle->hc[in_pipe].ErrCnt,
-                out_pipe, URB_StateToString(urb_out), (unsigned long)xfer_out,
-                pHandle->hc[out_pipe].state, pHandle->hc[out_pipe].ErrCnt);
-  }
-  else
-  {
-    USBH_UsrLog("[USBENUM] HCD URB_in=%s xfer_in=%lu | URB_out=%s xfer_out=%lu",
-                URB_StateToString(urb_in), (unsigned long)xfer_in,
-                URB_StateToString(urb_out), (unsigned long)xfer_out);
-  }
-}
-*/
 
 #if (USBH_USE_OS == 1U)
 #if (osCMSIS < 0x20000U)
@@ -401,10 +245,6 @@ static USBH_StatusTypeDef DeInitStateMachine(USBH_HandleTypeDef *phost)
   phost->device.speed = (uint8_t)USBH_SPEED_FULL;
   phost->device.RstCnt = 0U;
   phost->device.EnumCnt = 0U;
-
-  s_prev_enum_state = (ENUM_StateTypeDef)0xFF;
-  s_step_started = 0U;
-  s_busy_count = 0U;
 
   /* Reset the device struct */
   USBH_memset(&phost->device.CfgDesc_Raw, 0, sizeof(phost->device.CfgDesc_Raw));
@@ -623,74 +463,6 @@ USBH_StatusTypeDef USBH_ReEnumerate(USBH_HandleTypeDef *phost)
 
 
 /**
-  * @brief  Recover from a port that was disabled by hardware while the device
-  *         is still attached.
-  *
-  *         Some devices (e.g. Jieli based SMK25Mini) drop and re-assert their
-  *         D+ pull-up shortly after the host port reset. The OTG core reacts
-  *         with DISCINT + PCDET and clears HPRT0.PENA, i.e. the port is dead
-  *         and no SOF/SETUP is sent anymore. The stock event logic does not
-  *         notice it (the Connect callback overwrites is_disconnected, or the
-  *         Disconnect callback is skipped because PCSTS is already 1 again), so
-  *         the first control request waits forever without any error.
-  *
-  *         Detection: port is not enabled although the stack believes the device
-  *         is connected and past the reset phase. Recovery: stop/start the HCD
-  *         (halts stuck channels, flushes FIFOs), reset the state machine and
-  *         go back to HOST_IDLE; is_connected is kept, so the normal
-  *         "connected -> port reset -> enumeration" sequence runs again.
-  * @param  phost: Host Handle
-  * @retval 1 if a recovery was started, 0 otherwise
-  */
-static uint8_t USBH_PortLostRecover(USBH_HandleTypeDef *phost)
-{
-  static uint32_t s_port_lost_cnt = 0U;
-  const HCD_HandleTypeDef *hhcd = (const HCD_HandleTypeDef *)phost->pData;
-  uint32_t hprt0;
-
-  if ((hhcd == NULL) ||
-      (phost->device.is_connected == 0U) ||
-      (phost->device.is_disconnected != 0U) ||
-      (phost->device.is_ReEnumerated != 0U) ||
-      (phost->gState < HOST_ENUMERATION) ||
-      (phost->gState > HOST_CLASS))
-  {
-    return 0U;
-  }
-
-  hprt0 = *(__IO uint32_t *)((uint32_t)hhcd->Instance + USB_OTG_HOST_PORT_BASE);
-  if ((hprt0 & USB_OTG_HPRT_PENA) != 0U)
-  {
-    return 0U;
-  }
-
-  s_port_lost_cnt++;
-  USBH_UsrLog("USB port disabled by HW (HPRT0=0x%08lX) in state %u, restarting (#%lu)",
-              (unsigned long)hprt0, (unsigned int)phost->gState,
-              (unsigned long)s_port_lost_cnt);
-
-  (void)USBH_LL_Stop(phost);
-
-  if (phost->pActiveClass != NULL)
-  {
-    phost->pActiveClass->DeInit(phost);
-    phost->pActiveClass = NULL;
-    if (phost->pUser != NULL)
-    {
-      phost->pUser(phost, HOST_USER_DISCONNECTION);
-    }
-  }
-
-  (void)DeInitStateMachine(phost);   /* gState = HOST_IDLE, is_connected untouched */
-  (void)USBH_LL_Start(phost);
-
-  /* give the device time to finish its own re-attach before the next reset */
-  USBH_Delay(300U);
-
-  return 1U;
-}
-
-/**
   * @brief  USBH_Process
   *         Background process of the USB Core.
   * @param  phost: Host Handle
@@ -706,12 +478,6 @@ USBH_StatusTypeDef USBH_Process(USBH_HandleTypeDef *phost)
       || (phost->device.is_ReEnumerated == 1U))
   {
     phost->gState = HOST_DEV_DISCONNECTED;
-  }
-
-  /* port silently disabled by HW while the device is still attached? */
-  if (USBH_PortLostRecover(phost) != 0U)
-  {
-    return USBH_OK;
   }
 
   switch (phost->gState)
@@ -1035,47 +801,13 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
   USBH_StatusTypeDef Status = USBH_BUSY;
   USBH_StatusTypeDef ReqStatus = USBH_BUSY;
 
-  /* Check for EnumState transition */
-  if (phost->EnumState != s_prev_enum_state)
-  {
-    if (s_prev_enum_state != (ENUM_StateTypeDef)0xFF)
-    {
-      /*       USBH_UsrLog("[USBENUM] STATE %s -> %s",
-                  ENUM_StateToString(s_prev_enum_state),
-                  ENUM_StateToString(phost->EnumState)); */
-      /*       USBH_UsrLog("[USBENUM] STATE INFO gState=%s addr=%u speed=%u pipe_size=%u pipe_in=%u pipe_out=%u",
-                  HOST_StateToString(phost->gState),
-                  phost->device.address,
-                  phost->device.speed,
-                  phost->Control.pipe_size,
-                  phost->Control.pipe_in,
-                  phost->Control.pipe_out); */
-    }
-    s_prev_enum_state = phost->EnumState;
-    s_step_started = 0U;
-    s_busy_count = 0U;
-  }
-
   switch (phost->EnumState)
   {
     case ENUM_IDLE:
       /* Get Device Desc for only 1st 8 bytes : To get EP0 MaxPacketSize */
       ReqStatus = USBH_Get_DevDesc(phost, 8U);
-      if (s_step_started == 0U)
-      {
-        /*         USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 START"); */
-        /*         Log_Control_Transfer_Params(phost); */
-        s_step_started = 1U;
-        s_busy_count = 0U;
-      }
-
       if (ReqStatus == USBH_OK)
       {
-        /*         USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 DONE status=USBH_OK"); */
-        /*         Log_HCD_URB_Info(phost); */
-        s_step_started = 0U;
-        s_busy_count = 0U;
-
         phost->Control.pipe_size = phost->device.DevDesc.bMaxPacketSize;
 
         phost->EnumState = ENUM_GET_FULL_DEV_DESC;
@@ -1092,11 +824,6 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else if (ReqStatus == USBH_NOT_SUPPORTED)
       {
-        /*         USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 FAIL status=USBH_NOT_SUPPORTED"); */
-        /*         Log_HCD_URB_Info(phost); */
-        s_step_started = 0U;
-        s_busy_count = 0U;
-
         USBH_ErrLog("Control error: Get Device Descriptor request failed");
         phost->device.EnumCnt++;
         if (phost->device.EnumCnt > 3U)
@@ -1117,42 +844,15 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else
       {
-        if (ReqStatus == USBH_BUSY)
-        {
-          s_busy_count++;
-          if ((s_busy_count % 1000U) == 0U)
-          {
-            /*             USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 BUSY count=%lu ...", (unsigned long)s_busy_count); */
-          }
-        }
-        else
-        {
-          /*           USBH_UsrLog("[USBENUM] GET_DEV_DESC_8 FAIL status=%s", USBH_StatusToString(ReqStatus)); */
-          /*           Log_HCD_URB_Info(phost); */
-          s_step_started = 0U;
-          s_busy_count = 0U;
-        }
+        /* .. */
       }
       break;
 
     case ENUM_GET_FULL_DEV_DESC:
       /* Get FULL Device Desc  */
       ReqStatus = USBH_Get_DevDesc(phost, USB_DEVICE_DESC_SIZE);
-      if (s_step_started == 0U)
-      {
-        /*         USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC START"); */
-        /*         Log_Control_Transfer_Params(phost); */
-        s_step_started = 1U;
-        s_busy_count = 0U;
-      }
-
       if (ReqStatus == USBH_OK)
       {
-        /*         USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC DONE status=USBH_OK"); */
-        /*         Log_HCD_URB_Info(phost); */
-        s_step_started = 0U;
-        s_busy_count = 0U;
-
         USBH_UsrLog("PID: %xh", phost->device.DevDesc.idProduct);
         USBH_UsrLog("VID: %xh", phost->device.DevDesc.idVendor);
 
@@ -1160,11 +860,6 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else if (ReqStatus == USBH_NOT_SUPPORTED)
       {
-        /*         USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC FAIL status=USBH_NOT_SUPPORTED"); */
-        /*         Log_HCD_URB_Info(phost); */
-        s_step_started = 0U;
-        s_busy_count = 0U;
-
         USBH_ErrLog("Control error: Get Full Device Descriptor request failed");
         phost->device.EnumCnt++;
         if (phost->device.EnumCnt > 3U)
@@ -1186,42 +881,15 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else
       {
-        if (ReqStatus == USBH_BUSY)
-        {
-          s_busy_count++;
-          if ((s_busy_count % 1000U) == 0U)
-          {
-            /*             USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC BUSY count=%lu ...", (unsigned long)s_busy_count); */
-          }
-        }
-        else
-        {
-          /*           USBH_UsrLog("[USBENUM] GET_FULL_DEV_DESC FAIL status=%s", USBH_StatusToString(ReqStatus)); */
-          /*           Log_HCD_URB_Info(phost); */
-          s_step_started = 0U;
-          s_busy_count = 0U;
-        }
+        /* .. */
       }
       break;
 
     case ENUM_SET_ADDR:
       /* set address */
       ReqStatus = USBH_SetAddress(phost, USBH_DEVICE_ADDRESS);
-      if (s_step_started == 0U)
-      {
-        /*         USBH_UsrLog("[USBENUM] SET_ADDRESS START"); */
-        /*         Log_Control_Transfer_Params(phost); */
-        s_step_started = 1U;
-        s_busy_count = 0U;
-      }
-
       if (ReqStatus == USBH_OK)
       {
-        /*         USBH_UsrLog("[USBENUM] SET_ADDRESS DONE status=USBH_OK"); */
-        /*         Log_HCD_URB_Info(phost); */
-        s_step_started = 0U;
-        s_busy_count = 0U;
-
         USBH_Delay(2U);
         phost->device.address = USBH_DEVICE_ADDRESS;
 
@@ -1241,11 +909,6 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else if (ReqStatus == USBH_NOT_SUPPORTED)
       {
-        /*         USBH_UsrLog("[USBENUM] SET_ADDRESS FAIL status=USBH_NOT_SUPPORTED"); */
-        /*         Log_HCD_URB_Info(phost); */
-        s_step_started = 0U;
-        s_busy_count = 0U;
-
         USBH_ErrLog("Control error: Device Set Address request failed");
 
         /* Buggy Device can't complete get device desc request */
@@ -1255,51 +918,19 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else
       {
-        if (ReqStatus == USBH_BUSY)
-        {
-          s_busy_count++;
-          if ((s_busy_count % 1000U) == 0U)
-          {
-            /*             USBH_UsrLog("[USBENUM] SET_ADDRESS BUSY count=%lu ...", (unsigned long)s_busy_count); */
-          }
-        }
-        else
-        {
-          /*           USBH_UsrLog("[USBENUM] SET_ADDRESS FAIL status=%s", USBH_StatusToString(ReqStatus)); */
-          /*           Log_HCD_URB_Info(phost); */
-          s_step_started = 0U;
-          s_busy_count = 0U;
-        }
+        /* .. */
       }
       break;
 
     case ENUM_GET_CFG_DESC:
       /* get standard configuration descriptor */
       ReqStatus = USBH_Get_CfgDesc(phost, USB_CONFIGURATION_DESC_SIZE);
-      if (s_step_started == 0U)
-      {
-        /*         USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 START"); */
-        /*         Log_Control_Transfer_Params(phost); */
-        s_step_started = 1U;
-        s_busy_count = 0U;
-      }
-
       if (ReqStatus == USBH_OK)
       {
-        /*         USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 DONE status=USBH_OK"); */
-        /*         Log_HCD_URB_Info(phost); */
-        s_step_started = 0U;
-        s_busy_count = 0U;
-
         phost->EnumState = ENUM_GET_FULL_CFG_DESC;
       }
       else if (ReqStatus == USBH_NOT_SUPPORTED)
       {
-        /*         USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 FAIL status=USBH_NOT_SUPPORTED"); */
-        /*         Log_HCD_URB_Info(phost); */
-        s_step_started = 0U;
-        s_busy_count = 0U;
-
         USBH_ErrLog("Control error: Get Device configuration descriptor request failed");
         phost->device.EnumCnt++;
         if (phost->device.EnumCnt > 3U)
@@ -1321,51 +952,19 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else
       {
-        if (ReqStatus == USBH_BUSY)
-        {
-          s_busy_count++;
-          if ((s_busy_count % 1000U) == 0U)
-          {
-            /*             USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 BUSY count=%lu ...", (unsigned long)s_busy_count); */
-          }
-        }
-        else
-        {
-          /*           USBH_UsrLog("[USBENUM] GET_CFG_DESC_9 FAIL status=%s", USBH_StatusToString(ReqStatus)); */
-          /*           Log_HCD_URB_Info(phost); */
-          s_step_started = 0U;
-          s_busy_count = 0U;
-        }
+        /* .. */
       }
       break;
 
     case ENUM_GET_FULL_CFG_DESC:
       /* get FULL config descriptor (config, interface, endpoints) */
       ReqStatus = USBH_Get_CfgDesc(phost, phost->device.CfgDesc.wTotalLength);
-      if (s_step_started == 0U)
-      {
-        /*         USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC START"); */
-        /*         Log_Control_Transfer_Params(phost); */
-        s_step_started = 1U;
-        s_busy_count = 0U;
-      }
-
       if (ReqStatus == USBH_OK)
       {
-        /*         USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC DONE status=USBH_OK"); */
-        /*         Log_HCD_URB_Info(phost); */
-        s_step_started = 0U;
-        s_busy_count = 0U;
-
         phost->EnumState = ENUM_GET_MFC_STRING_DESC;
       }
       else if (ReqStatus == USBH_NOT_SUPPORTED)
       {
-        /*         USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC FAIL status=USBH_NOT_SUPPORTED"); */
-        /*         Log_HCD_URB_Info(phost); */
-        s_step_started = 0U;
-        s_busy_count = 0U;
-
         USBH_ErrLog("Control error: Get Device configuration descriptor request failed");
         phost->device.EnumCnt++;
         if (phost->device.EnumCnt > 3U)
@@ -1387,21 +986,7 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
       }
       else
       {
-        if (ReqStatus == USBH_BUSY)
-        {
-          s_busy_count++;
-          if ((s_busy_count % 1000U) == 0U)
-          {
-            /*             USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC BUSY count=%lu ...", (unsigned long)s_busy_count); */
-          }
-        }
-        else
-        {
-          /*           USBH_UsrLog("[USBENUM] GET_FULL_CFG_DESC FAIL status=%s", USBH_StatusToString(ReqStatus)); */
-          /*           Log_HCD_URB_Info(phost); */
-          s_step_started = 0U;
-          s_busy_count = 0U;
-        }
+        /* .. */
       }
       break;
 
@@ -1411,21 +996,8 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
         /* Check that Manufacturer String is available */
         ReqStatus = USBH_Get_StringDesc(phost, phost->device.DevDesc.iManufacturer,
                                         phost->device.Data, 0xFFU);
-        if (s_step_started == 0U)
-        {
-          /*           USBH_UsrLog("[USBENUM] GET_MFC_STRING START"); */
-          /*           Log_Control_Transfer_Params(phost); */
-          s_step_started = 1U;
-          s_busy_count = 0U;
-        }
-
         if (ReqStatus == USBH_OK)
         {
-          /*           USBH_UsrLog("[USBENUM] GET_MFC_STRING DONE status=USBH_OK"); */
-          /*           Log_HCD_URB_Info(phost); */
-          s_step_started = 0U;
-          s_busy_count = 0U;
-
           /* User callback for Manufacturing string */
           USBH_UsrLog("Manufacturer : %s", (char *)(void *)phost->device.Data);
           phost->EnumState = ENUM_GET_PRODUCT_STRING_DESC;
@@ -1436,11 +1008,6 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
         }
         else if (ReqStatus == USBH_NOT_SUPPORTED)
         {
-          /*           USBH_UsrLog("[USBENUM] GET_MFC_STRING FAIL status=USBH_NOT_SUPPORTED"); */
-          /*           Log_HCD_URB_Info(phost); */
-          s_step_started = 0U;
-          s_busy_count = 0U;
-
           USBH_UsrLog("Manufacturer : N/A");
           phost->EnumState = ENUM_GET_PRODUCT_STRING_DESC;
 
@@ -1450,27 +1017,11 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
         }
         else
         {
-          if (ReqStatus == USBH_BUSY)
-          {
-            s_busy_count++;
-            if ((s_busy_count % 1000U) == 0U)
-            {
-              /*               USBH_UsrLog("[USBENUM] GET_MFC_STRING BUSY count=%lu ...", (unsigned long)s_busy_count); */
-            }
-          }
-          else
-          {
-            /*             USBH_UsrLog("[USBENUM] GET_MFC_STRING FAIL status=%s", USBH_StatusToString(ReqStatus)); */
-            /*             Log_HCD_URB_Info(phost); */
-            s_step_started = 0U;
-            s_busy_count = 0U;
-          }
+          /* .. */
         }
       }
       else
       {
-        /*         USBH_UsrLog("[USBENUM] GET_MFC_STRING START"); */
-        /*         USBH_UsrLog("[USBENUM] GET_MFC_STRING DONE status=USBH_OK"); */
         USBH_UsrLog("Manufacturer : N/A");
         phost->EnumState = ENUM_GET_PRODUCT_STRING_DESC;
 
@@ -1486,32 +1037,14 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
         /* Check that Product string is available */
         ReqStatus = USBH_Get_StringDesc(phost, phost->device.DevDesc.iProduct,
                                         phost->device.Data, 0xFFU);
-        if (s_step_started == 0U)
-        {
-          /*           USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING START"); */
-          /*           Log_Control_Transfer_Params(phost); */
-          s_step_started = 1U;
-          s_busy_count = 0U;
-        }
-
         if (ReqStatus == USBH_OK)
         {
-          /*           USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING DONE status=USBH_OK"); */
-          /*           Log_HCD_URB_Info(phost); */
-          s_step_started = 0U;
-          s_busy_count = 0U;
-
           /* User callback for Product string */
           USBH_UsrLog("Product : %s", (char *)(void *)phost->device.Data);
           phost->EnumState = ENUM_GET_SERIALNUM_STRING_DESC;
         }
         else if (ReqStatus == USBH_NOT_SUPPORTED)
         {
-          /*           USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING FAIL status=USBH_NOT_SUPPORTED"); */
-          /*           Log_HCD_URB_Info(phost); */
-          s_step_started = 0U;
-          s_busy_count = 0U;
-
           USBH_UsrLog("Product : N/A");
           phost->EnumState = ENUM_GET_SERIALNUM_STRING_DESC;
 
@@ -1521,27 +1054,11 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
         }
         else
         {
-          if (ReqStatus == USBH_BUSY)
-          {
-            s_busy_count++;
-            if ((s_busy_count % 1000U) == 0U)
-            {
-              /*               USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING BUSY count=%lu ...", (unsigned long)s_busy_count); */
-            }
-          }
-          else
-          {
-            /*             USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING FAIL status=%s", USBH_StatusToString(ReqStatus)); */
-            /*             Log_HCD_URB_Info(phost); */
-            s_step_started = 0U;
-            s_busy_count = 0U;
-          }
+          /* .. */
         }
       }
       else
       {
-        /*         USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING START"); */
-        /*         USBH_UsrLog("[USBENUM] GET_PRODUCT_STRING DONE status=USBH_OK"); */
         USBH_UsrLog("Product : N/A");
         phost->EnumState = ENUM_GET_SERIALNUM_STRING_DESC;
 
@@ -1557,58 +1074,24 @@ static USBH_StatusTypeDef USBH_HandleEnum(USBH_HandleTypeDef *phost)
         /* Check that Serial number string is available */
         ReqStatus = USBH_Get_StringDesc(phost, phost->device.DevDesc.iSerialNumber,
                                         phost->device.Data, 0xFFU);
-        if (s_step_started == 0U)
-        {
-          /*           USBH_UsrLog("[USBENUM] GET_SERIAL_STRING START"); */
-          /*           Log_Control_Transfer_Params(phost); */
-          s_step_started = 1U;
-          s_busy_count = 0U;
-        }
-
         if (ReqStatus == USBH_OK)
         {
-          /*           USBH_UsrLog("[USBENUM] GET_SERIAL_STRING DONE status=USBH_OK"); */
-          /*           Log_HCD_URB_Info(phost); */
-          s_step_started = 0U;
-          s_busy_count = 0U;
-
           /* User callback for Serial number string */
           USBH_UsrLog("Serial Number : %s", (char *)(void *)phost->device.Data);
           Status = USBH_OK;
         }
         else if (ReqStatus == USBH_NOT_SUPPORTED)
         {
-          /*           USBH_UsrLog("[USBENUM] GET_SERIAL_STRING FAIL status=USBH_NOT_SUPPORTED"); */
-          /*           Log_HCD_URB_Info(phost); */
-          s_step_started = 0U;
-          s_busy_count = 0U;
-
           USBH_UsrLog("Serial Number : N/A");
           Status = USBH_OK;
         }
         else
         {
-          if (ReqStatus == USBH_BUSY)
-          {
-            s_busy_count++;
-            if ((s_busy_count % 1000U) == 0U)
-            {
-              /*               USBH_UsrLog("[USBENUM] GET_SERIAL_STRING BUSY count=%lu ...", (unsigned long)s_busy_count); */
-            }
-          }
-          else
-          {
-            /*             USBH_UsrLog("[USBENUM] GET_SERIAL_STRING FAIL status=%s", USBH_StatusToString(ReqStatus)); */
-            /*             Log_HCD_URB_Info(phost); */
-            s_step_started = 0U;
-            s_busy_count = 0U;
-          }
+          /* .. */
         }
       }
       else
       {
-        /*         USBH_UsrLog("[USBENUM] GET_SERIAL_STRING START"); */
-        /*         USBH_UsrLog("[USBENUM] GET_SERIAL_STRING DONE status=USBH_OK"); */
         USBH_UsrLog("Serial Number : N/A");
         Status = USBH_OK;
       }

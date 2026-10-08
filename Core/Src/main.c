@@ -29,7 +29,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
-#include "synth.h"       // 
+#include "synth.h"        // отладочный синусоидальный тон
 #include "pluck_synth.h" // Karplus-Strong
 #include "display.h"
 #include "midi_event.h"
