@@ -64,6 +64,7 @@ static volatile uint32_t note_on_count = 0;
 static volatile uint32_t note_off_count = 0;
 
 static uint8_t active_notes[128];
+static uint8_t active_note_stack[128];
 static uint16_t active_note_count = 0;
 
 /* 1 = print [STATS] and [USBDIAG1..3] to UART (debug only), 0 = silent */
@@ -251,6 +252,7 @@ int main(void)
             if (note < 128 && active_notes[note] == 0)
             {
                 active_notes[note] = 1;
+                active_note_stack[active_note_count] = note;
                 active_note_count++;
             }
 
@@ -260,7 +262,8 @@ int main(void)
                 GPIO_PIN_SET
             );
 
-            Display_SetNoteState(active_notes, active_note_count, note);
+            uint8_t last_active_note = (active_note_count > 0) ? active_note_stack[active_note_count - 1] : 0;
+            Display_SetNoteState(active_notes, active_note_count, last_active_note);
         }
         else if (command == MIDI_STATUS_NOTE_OFF ||
                  (command == MIDI_STATUS_NOTE_ON && event.data2 == 0))
@@ -271,13 +274,27 @@ int main(void)
             {
                 active_notes[note] = 0;
 
+                /* Удаляем ноту из active_note_stack */
+                for (uint16_t i = 0; i < active_note_count; i++)
+                {
+                    if (active_note_stack[i] == note)
+                    {
+                        for (uint16_t j = i; j < active_note_count - 1; j++)
+                        {
+                            active_note_stack[j] = active_note_stack[j + 1];
+                        }
+                        break;
+                    }
+                }
+
                 if (active_note_count > 0)
                 {
                     active_note_count--;
                 }
             }
 
-            Display_SetNoteState(active_notes, active_note_count, note);
+            uint8_t last_active_note = (active_note_count > 0) ? active_note_stack[active_note_count - 1] : 0;
+            Display_SetNoteState(active_notes, active_note_count, last_active_note);
 
             if (active_note_count == 0)
             {

@@ -210,12 +210,6 @@ static void Display_DrawNoteState(
         /* Нота 0..11 -> октава -1, поэтому знаковый int, а не uint8_t */
         const int octave = (int)(note_val / 12U) - 1;
 
-        /* Заполняем область строкой с хвостовыми пробелами (18 символов) */
-        snprintf(
-            text,
-            sizeof(text),
-            "%-18s",
-            "");
         snprintf(
             text,
             sizeof(text),

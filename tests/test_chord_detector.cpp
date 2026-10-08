@@ -4,6 +4,53 @@
 #include <iostream>
 #include <vector>
 
+/*
+ * Simulated active note tracking stack as used in main.c
+ */
+struct NoteTracker {
+    uint8_t active_notes[128];
+    uint8_t active_note_stack[128];
+    uint16_t active_note_count;
+
+    NoteTracker() : active_note_count(0) {
+        std::memset(active_notes, 0, sizeof(active_notes));
+        std::memset(active_note_stack, 0, sizeof(active_note_stack));
+    }
+
+    void note_on(uint8_t note, uint8_t velocity) {
+        if (velocity == 0) {
+            note_off(note);
+            return;
+        }
+        if (note < 128 && active_notes[note] == 0) {
+            active_notes[note] = 1;
+            active_note_stack[active_note_count] = note;
+            active_note_count++;
+        }
+    }
+
+    void note_off(uint8_t note) {
+        if (note < 128 && active_notes[note] != 0) {
+            active_notes[note] = 0;
+            for (uint16_t i = 0; i < active_note_count; i++) {
+                if (active_note_stack[i] == note) {
+                    for (uint16_t j = i; j < active_note_count - 1; j++) {
+                        active_note_stack[j] = active_note_stack[j + 1];
+                    }
+                    break;
+                }
+            }
+            if (active_note_count > 0) {
+                active_note_count--;
+            }
+        }
+    }
+
+    uint8_t get_last_active_note() const {
+        return (active_note_count > 0) ? active_note_stack[active_note_count - 1] : 0;
+    }
+};
+
 static void set_notes(uint8_t *active_notes, uint16_t &count, const std::vector<uint8_t> &notes)
 {
     std::memset(active_notes, 0, 128);
@@ -32,6 +79,57 @@ static void test_case(const std::vector<uint8_t> &notes, bool expected_detected,
     {
         assert(std::strcmp(name, expected_name) == 0);
     }
+}
+
+static void test_note_off_regression()
+{
+    NoteTracker tracker;
+
+    /* 1. C4 ON, E4 ON, E4 OFF => remaining C4 */
+    tracker.note_on(60, 100); // C4
+    assert(tracker.get_last_active_note() == 60);
+    assert(tracker.active_note_count == 1);
+
+    tracker.note_on(64, 100); // E4
+    assert(tracker.get_last_active_note() == 64);
+    assert(tracker.active_note_count == 2);
+
+    tracker.note_off(64); // E4 OFF
+    assert(tracker.get_last_active_note() == 60); // Must be C4, NOT E4!
+    assert(tracker.active_note_count == 1);
+
+    /* 2. C4 ON, E4 ON, C4 OFF => remaining E4 */
+    tracker.note_off(60);
+    tracker.note_on(60, 100); // C4
+    tracker.note_on(64, 100); // E4
+    tracker.note_off(60);     // C4 OFF
+    assert(tracker.get_last_active_note() == 64); // Must be E4
+    assert(tracker.active_note_count == 1);
+
+    /* 3. C4 ON, E4 ON, G4 ON, G4 OFF => remaining C4 + E4 (active count 2, last note E4) */
+    tracker.note_off(64);
+    tracker.note_on(60, 100); // C4
+    tracker.note_on(64, 100); // E4
+    tracker.note_on(67, 100); // G4 (3 notes -> chord C)
+    assert(tracker.active_note_count == 3);
+
+    char chord[16] = {0};
+    assert(ChordDetector_Detect(tracker.active_notes, tracker.active_note_count, chord, sizeof(chord)) == true);
+    assert(std::strcmp(chord, "C") == 0);
+
+    tracker.note_off(67); // G4 OFF
+    assert(tracker.active_note_count == 2);
+    assert(tracker.get_last_active_note() == 64); // Last active note is E4
+    assert(ChordDetector_Detect(tracker.active_notes, tracker.active_note_count, chord, sizeof(chord)) == false);
+
+    /* 4. Note On with velocity = 0 behaves as Note Off */
+    tracker.note_on(60, 0); // Release C4 via velocity 0
+    assert(tracker.active_note_count == 1);
+    assert(tracker.get_last_active_note() == 64);
+
+    tracker.note_on(64, 0); // Release E4 via velocity 0
+    assert(tracker.active_note_count == 0);
+    assert(tracker.get_last_active_note() == 0);
 }
 
 int main()
@@ -88,6 +186,9 @@ int main()
     test_case({52, 60, 67}, true, "C/E");
     test_case({55, 60, 64, 67}, true, "C/G");
 
-    std::cout << "All chord_detector tests passed successfully!" << std::endl;
+    /* Regression tests for Note Off & Note On velocity=0 active note tracking */
+    test_note_off_regression();
+
+    std::cout << "All chord_detector and note_off regression tests passed successfully!" << std::endl;
     return 0;
 }
