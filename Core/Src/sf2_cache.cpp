@@ -320,25 +320,45 @@ void SF2Cache_ProcessRequests(void)
 
     std::memset(g_cache[slot].samples, 0, sizeof(g_cache[slot].samples));
 
+    bool read_success = false;
+
     if (bytes_to_read > 0) {
 #if SF2_HOST_MODE
         if (g_host_file) {
-            std::fseek(g_host_file, (long)file_offset, SEEK_SET);
-            std::fread(g_cache[slot].samples, 1, bytes_to_read, g_host_file);
+            std::clearerr(g_host_file);
+            if (std::fseek(g_host_file, (long)file_offset, SEEK_SET) == 0) {
+                size_t bytes_read = std::fread(g_cache[slot].samples, 1, bytes_to_read, g_host_file);
+                if (bytes_read == (size_t)bytes_to_read && std::ferror(g_host_file) == 0) {
+                    read_success = true;
+                }
+            }
         }
 #else
         if (g_fatfs_open) {
             UINT br = 0;
             if (f_lseek(&g_fatfs_file, (FSIZE_t)file_offset) == FR_OK) {
-                f_read(&g_fatfs_file, g_cache[slot].samples, (UINT)bytes_to_read, &br);
+                if (f_read(&g_fatfs_file, g_cache[slot].samples, (UINT)bytes_to_read, &br) == FR_OK) {
+                    if ((uint32_t)br == bytes_to_read) {
+                        read_success = true;
+                    }
+                }
             }
         }
 #endif
     }
 
-    g_cache[slot].block_index.store(block_idx, std::memory_order_release);
-    g_cache[slot].last_used_tick = g_lru_clock.load(std::memory_order_relaxed);
-    g_cache[slot].state.store(SF2_BLOCK_READY, std::memory_order_release);
+    if (read_success) {
+        g_cache[slot].block_index.store(block_idx, std::memory_order_release);
+        g_cache[slot].last_used_tick = g_lru_clock.load(std::memory_order_relaxed);
+        g_cache[slot].state.store(SF2_BLOCK_READY, std::memory_order_release);
+    } else {
+        g_cache[slot].block_index.store(0xFFFFFFFFU, std::memory_order_release);
+        g_cache[slot].state.store(SF2_BLOCK_EMPTY, std::memory_order_release);
+        if (bytes_to_read > 0) {
+            SF2Cache_RequestBlock(block_idx);
+        }
+        return;
+    }
 }
 
 short SF2Cache_GetSample(tsf *f, uint32_t sample_index, int *last_slot_hint)
