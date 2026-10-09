@@ -42,6 +42,21 @@ static void test_note_on_off() {
     CHECK(render_peak(1024) == 0);
 }
 
+static void test_repeated_note_on() {
+    OrganSynth_Init();
+
+    // Repeated Note On for same pitch
+    OrganSynth_NoteOn(60, 100);
+    render_peak(512);
+    OrganSynth_NoteOn(60, 120);
+    render_peak(512);
+
+    // Single Note Off should clear all instances of pitch 60
+    OrganSynth_NoteOff(60);
+    render_peak(2048);
+    CHECK(render_peak(1024) == 0);
+}
+
 static void test_drawbars_and_chorus() {
     OrganSynth_Init();
 
@@ -91,12 +106,28 @@ static void test_all_notes_off() {
     CHECK(render_peak(1024) == 0);
 }
 
+static void test_queue_overflow_recovery() {
+    OrganSynth_Init();
+
+    // Fill queue to overflow (> 64 items)
+    for (int i = 0; i < 80; ++i) {
+        OrganSynth_NoteOn(static_cast<uint8_t>(30 + (i % 40)), 100);
+    }
+    CHECK(OrganSynth_GetDroppedEventCount() > 0);
+
+    // Process buffer: overflow panic triggers deactivate_all()
+    render_peak(2048);
+    CHECK(render_peak(1024) == 0);
+}
+
 int main() {
     test_init_silence();
     test_note_on_off();
+    test_repeated_note_on();
     test_drawbars_and_chorus();
     test_out_of_bounds_notes();
     test_all_notes_off();
+    test_queue_overflow_recovery();
 
     if (g_failures != 0) {
         std::cerr << "test_organ_host: " << g_failures << " check(s) failed" << std::endl;

@@ -15,10 +15,13 @@ struct Event {
 };
 
 constexpr uint32_t ORGAN_EVENT_FIFO_SIZE = 64;
+constexpr uint32_t ORGAN_MAX_EVENTS_PER_BLOCK = 16;
 
 Event                 g_fifo[ORGAN_EVENT_FIFO_SIZE];
 std::atomic<uint32_t> g_fifo_head{0};
 std::atomic<uint32_t> g_fifo_tail{0};
+std::atomic<uint32_t> g_dropped_events{0};
+std::atomic<bool>     g_overflow_occurred{false};
 
 synth::synth_organ    g_organ;
 
@@ -28,6 +31,8 @@ bool fifo_push(const Event& ev)
     uint32_t tail = g_fifo_tail.load(std::memory_order_acquire);
 
     if (head - tail >= ORGAN_EVENT_FIFO_SIZE) {
+        g_dropped_events.fetch_add(1, std::memory_order_relaxed);
+        g_overflow_occurred.store(true, std::memory_order_release);
         return false;
     }
     g_fifo[head & (ORGAN_EVENT_FIFO_SIZE - 1)] = ev;
@@ -71,12 +76,7 @@ void process_event(const Event& ev)
         case EV_CC:
             if (ev.a == 120 || ev.a == 123) {
                 // All Sound Off / All Notes Off
-                cmd.status = midi::status_t::NOTE_OFF;
-                cmd.value  = 0;
-                for (uint8_t note = 24; note <= 84; ++note) {
-                    cmd.data = note;
-                    g_organ.push_midi_cmd(cmd);
-                }
+                g_organ.deactivate_all();
             } else {
                 cmd.status = midi::status_t::CONTROLLER_CHANGE;
                 cmd.data   = ev.a;
@@ -92,9 +92,19 @@ void process_event(const Event& ev)
 
 void process_events()
 {
+    if (g_overflow_occurred.exchange(false, std::memory_order_acquire)) {
+        // Queue overflow: flush stale FIFO events and deactivate all voices
+        Event dummy;
+        while (fifo_pop(dummy)) {}
+        g_organ.deactivate_all();
+        return;
+    }
+
+    uint32_t processed = 0;
     Event ev;
-    while (fifo_pop(ev)) {
+    while (processed < ORGAN_MAX_EVENTS_PER_BLOCK && fifo_pop(ev)) {
         process_event(ev);
+        processed++;
     }
 }
 
@@ -107,6 +117,13 @@ void OrganSynth_Init(void)
     g_organ.init();
     g_fifo_head.store(0, std::memory_order_relaxed);
     g_fifo_tail.store(0, std::memory_order_relaxed);
+    g_dropped_events.store(0, std::memory_order_relaxed);
+    g_overflow_occurred.store(false, std::memory_order_relaxed);
+}
+
+uint32_t OrganSynth_GetDroppedEventCount(void)
+{
+    return g_dropped_events.load(std::memory_order_relaxed);
 }
 
 void OrganSynth_NoteOn(uint8_t midi_note, uint8_t velocity)

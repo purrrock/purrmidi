@@ -64,16 +64,21 @@ namespace synth
 		std::for_each(phase_table.begin(),
 					phase_table.end(),
 					[](uint32_t &phase){phase = 0;});
-		for (auto &osc : oscillators)
-			{
-			osc.deactivate();
-			}
+		deactivate_all();
 		voice::voice_organ::init(static_cast<const cc::value_t*>(cc_drawbars.data()),
 								static_cast<const uint32_t*>(phase_table.data()));
 		fx = efx::efx_chorus();
 		#ifdef CHORUS_TEST
 		fx.activate();
 		#endif
+		}
+
+	void synth_organ::deactivate_all()
+		{
+		for (auto &osc : oscillators)
+			{
+			osc.deactivate();
+			}
 		}
 
 	void synth_organ::push_midi_cmd(const midi::command_t &cmd)
@@ -92,16 +97,30 @@ namespace synth
 				return;
 				}
 			const uint8_t osc_note = cmd.data - tables::FEAT_LOWEST_GEAR;
-			auto osc_iterator = std::find_if(oscillators.begin(),oscillators.end(),
-											[](auto &osc) -> bool
-											{return !osc.is_active();});
-			if(osc_iterator != oscillators.end())
+
+			// 1. Check if note is already active on a voice -> re-trigger/re-activate it
+			auto existing = std::find_if(oscillators.begin(), oscillators.end(),
+										 [osc_note](auto &osc) -> bool
+										 { return osc.is_active() && osc.get_note() == osc_note; });
+			if (existing != oscillators.end())
 				{
-				osc_iterator->activate(osc_note);
+				existing->activate(osc_note);
+				return;
 				}
-			#ifdef TESTBENCH
-			std::cout << "synth_organ::push_midi_cmd(): Activate oscillator. Note: " << cmd.data << std::endl;
-			#endif
+
+			// 2. Find an inactive voice
+			auto inactive = std::find_if(oscillators.begin(), oscillators.end(),
+										 [](auto &osc) -> bool
+										 { return !osc.is_active(); });
+			if (inactive != oscillators.end())
+				{
+				inactive->activate(osc_note);
+				return;
+				}
+
+			// 3. Voice stealing if all 12 voices are active: steal first voice
+			oscillators[0].deactivate();
+			oscillators[0].activate(osc_note);
 			return;
 			}
 		if(cmd.status == midi::status_t::NOTE_OFF)
@@ -111,13 +130,12 @@ namespace synth
 				return;
 				}
 			const uint8_t osc_note = cmd.data - tables::FEAT_LOWEST_GEAR;
-			auto osc_iterator = std::find_if(oscillators.begin(),oscillators.end(),
-								[&](auto &osc) -> bool
-								{return osc.get_note() == osc_note ? true : false;});
-
-			if(osc_iterator != oscillators.end())
+			for (auto &osc : oscillators)
 				{
-				osc_iterator->deactivate();
+				if (osc.is_active() && osc.get_note() == osc_note)
+					{
+					osc.deactivate();
+					}
 				}
 			return;
 			}

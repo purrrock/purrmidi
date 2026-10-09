@@ -86,6 +86,11 @@ namespace synth
 		* Resets and initializes the organ state and rebinds drawbars and phase table.
 		*/
 		void init();
+
+		/**
+		* Deactivates all active voices immediately.
+		*/
+		void deactivate_all();
 		private:
 		/**
 		* Updates the global phase table.

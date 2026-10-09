@@ -43,6 +43,9 @@ void OrganSynth_ControlChange(uint8_t control, uint8_t value);
  */
 void OrganSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames);
 
+/** Returns number of dropped MIDI events due to FIFO overflow. */
+uint32_t OrganSynth_GetDroppedEventCount(void);
+
 #ifdef __cplusplus
 }
 #endif
