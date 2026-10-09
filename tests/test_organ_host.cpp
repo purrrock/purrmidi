@@ -119,10 +119,94 @@ static void test_queue_overflow_recovery() {
     CHECK(render_peak(1024) == 0);
 }
 
-static void test_init_clears_active_notes_immediately() {
+static void test_cc77_cc78_preserved_after_cc120() {
     OrganSynth_Init();
 
-    // Modify envelope attack/release via CC 77/78
+    // Set slow attack (CC 77) and slow release (CC 78)
+    OrganSynth_ControlChange(77, 1);
+    OrganSynth_ControlChange(78, 1);
+
+    OrganSynth_NoteOn(60, 100);
+    render_peak(1024);
+
+    // CC 120 = All Sound Off
+    OrganSynth_ControlChange(120, 0);
+    CHECK(render_peak(128) == 0);
+
+    // Play new note and verify slow attack is preserved
+    OrganSynth_NoteOn(60, 100);
+    int peak_slow_attack = render_peak(512);
+    CHECK(peak_slow_attack < 200);
+
+    render_peak(1024); // reach sustain
+    OrganSynth_NoteOff(60);
+
+    // Verify slow release is preserved (sound is still playing after 300 frames)
+    int peak_slow_release = render_peak(300);
+    CHECK(peak_slow_release > 0);
+}
+
+static void test_cc77_cc78_preserved_after_cc123() {
+    OrganSynth_Init();
+
+    // Set slow attack (CC 77) and slow release (CC 78)
+    OrganSynth_ControlChange(77, 1);
+    OrganSynth_ControlChange(78, 1);
+
+    OrganSynth_NoteOn(60, 100);
+    render_peak(1024);
+
+    // CC 123 = All Notes Off
+    OrganSynth_ControlChange(123, 0);
+    CHECK(render_peak(128) == 0);
+
+    // Play new note and verify slow attack is preserved
+    OrganSynth_NoteOn(60, 100);
+    int peak_slow_attack = render_peak(512);
+    CHECK(peak_slow_attack < 200);
+
+    render_peak(1024); // reach sustain
+    OrganSynth_NoteOff(60);
+
+    // Verify slow release is preserved
+    int peak_slow_release = render_peak(300);
+    CHECK(peak_slow_release > 0);
+}
+
+static void test_cc77_cc78_preserved_after_fifo_overflow() {
+    OrganSynth_Init();
+
+    // Set slow attack (CC 77) and slow release (CC 78) and process them
+    OrganSynth_ControlChange(77, 1);
+    OrganSynth_ControlChange(78, 1);
+    render_peak(128); // process CC events into synth state
+
+    // Fill queue to overflow (> 64 items)
+    for (int i = 0; i < 80; ++i) {
+        OrganSynth_NoteOn(static_cast<uint8_t>(30 + (i % 40)), 100);
+    }
+    CHECK(OrganSynth_GetDroppedEventCount() > 0);
+
+    // Overflow recovery flushes FIFO and resets all voices
+    CHECK(render_peak(128) == 0);
+
+    // Play new note and verify slow attack is preserved
+    OrganSynth_NoteOn(60, 100);
+    int peak_slow_attack = render_peak(512);
+    CHECK(peak_slow_attack < 200);
+
+    render_peak(1024); // reach sustain
+    OrganSynth_NoteOff(60);
+
+    // Verify slow release is preserved
+    int peak_slow_release = render_peak(300);
+    CHECK(peak_slow_release > 0);
+}
+
+static void test_cc77_cc78_reset_on_reinit() {
+    OrganSynth_Init();
+
+    // Set slow attack (CC 77) and slow release (CC 78)
     OrganSynth_ControlChange(77, 1);
     OrganSynth_ControlChange(78, 1);
 
@@ -131,16 +215,21 @@ static void test_init_clears_active_notes_immediately() {
     OrganSynth_NoteOn(64, 100);
     CHECK(render_peak(256) > 0);
 
-    // Calling OrganSynth_Init must reset all voices and envelope parameters immediately
+    // Calling OrganSynth_Init must reset all voices and restore envelope parameters to defaults
     OrganSynth_Init();
     CHECK(render_peak(256) == 0);
 
-    // Verify envelope speeds are restored to defaults on subsequent note on
+    // Verify envelope attack speed is restored to default (fast attack)
     OrganSynth_NoteOn(60, 100);
-    CHECK(render_peak(256) > 0);
+    int peak_fast_attack = render_peak(512);
+    CHECK(peak_fast_attack > 500);
+
+    render_peak(1024); // reach sustain
     OrganSynth_NoteOff(60);
-    render_peak(2048);
-    CHECK(render_peak(1024) == 0);
+
+    // Verify envelope release speed is restored to default (sound dies off within 500 frames)
+    render_peak(500);
+    CHECK(render_peak(256) == 0);
 }
 
 static void test_max_drawbars_full_polyphony() {
@@ -182,7 +271,10 @@ int main() {
     test_out_of_bounds_notes();
     test_all_notes_off();
     test_queue_overflow_recovery();
-    test_init_clears_active_notes_immediately();
+    test_cc77_cc78_preserved_after_cc120();
+    test_cc77_cc78_preserved_after_cc123();
+    test_cc77_cc78_preserved_after_fifo_overflow();
+    test_cc77_cc78_reset_on_reinit();
     test_max_drawbars_full_polyphony();
 
     if (g_failures != 0) {

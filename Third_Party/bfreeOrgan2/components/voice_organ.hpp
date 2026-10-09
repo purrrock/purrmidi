@@ -32,6 +32,11 @@ namespace synth
 	{
 	namespace voice
 		{
+		/** Slope Values for AR Envelope. */
+		constexpr uint32_t clean_cut_value = 5000;
+		/** Slope Values for AR Envelope. */
+		constexpr uint32_t cleanest_cut_value = 2000;
+
 		/** @brief Synchronous organ voice class for bfreeOrgan2.
 		*/
 		class voice_organ : public voice_base
