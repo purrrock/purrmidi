@@ -325,6 +325,7 @@ void SF2Cache_ProcessRequests(void)
     if (bytes_to_read > 0) {
 #if SF2_HOST_MODE
         if (g_host_file) {
+            std::clearerr(g_host_file);
             if (std::fseek(g_host_file, (long)file_offset, SEEK_SET) == 0) {
                 size_t bytes_read = std::fread(g_cache[slot].samples, 1, bytes_to_read, g_host_file);
                 if (bytes_read == (size_t)bytes_to_read && std::ferror(g_host_file) == 0) {
