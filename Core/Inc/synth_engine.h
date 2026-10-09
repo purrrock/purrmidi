@@ -1,73 +1,87 @@
 #ifndef SYNTH_ENGINE_H
 #define SYNTH_ENGINE_H
 
+#include <stdint.h>
+
 /*
  * Единый интерфейс звукового движка PurrMidi.
  *
- * Конкретный синтезатор выбирается на ЭТАПЕ КОМПИЛЯЦИИ (прошивка STM32 и
- * Windows-версия используют один и тот же механизм):
+ * В прошивку (и в Windows-версию) всегда входят ВСЕ синтезаторы, а активный
+ * выбирается во время работы сообщением MIDI Program Change (0xC0):
  *
- *     cmake ... -DPURRMIDI_SYNTH=sine     (одноголосая синусоида)
- *     cmake ... -DPURRMIDI_SYNTH=pluck    (Карплус-Стронг, DaisySP Pluck) — по умолчанию
- *     cmake ... -DPURRMIDI_SYNTH=epiano   (полифоническое FM-электропиано)
+ *     Program | Синтезатор
+ *     --------+--------------------------------------------------------
+ *        0    | E-Piano  — полифоническое FM-электропиано (по умолчанию)
+ *        1    | Pluck    — Карплус-Стронг, DaisySP Pluck
+ *        2    | Sine     — одноголосая синусоида (проверка тракта)
  *
- * CMake определяет ровно один из макросов PURRMIDI_SYNTH_SINE / _PLUCK / _EPIANO.
- * Если не определён ни один (например, файл собирается вне CMake), используется
- * pluck — как и было до появления выбора синтезатора.
+ * Номера программ вне диапазона заворачиваются по модулю SYNTH_ENGINE_COUNT
+ * (program % 3), поэтому кнопки «+/−» на любой клавиатуре всегда выбирают
+ * какой-нибудь инструмент, а не «молчат». Канал сообщения не учитывается (omni).
  *
- * Все функции — простые макро-алиасы на функции выбранного движка, т.е.
- * накладных расходов нет, а остальной код (MIDI-диспетчер, main.c, Windows-приложение)
- * не зависит от конкретной реализации.
+ * Состояние выбора в энергонезависимой памяти НЕ сохраняется: после включения
+ * питания всегда звучит E-Piano.
  *
  * Формат аудио: 48 кГц, signed 16 бит, стерео с чередованием (L, R, L, R...).
+ *
+ * Контекст вызовов (контракт одинаков для всех движков):
+ *   SynthEngine_Init / NoteOn / NoteOff / ControlChange / ProgramChange / Select
+ *       — из основного цикла (main / MIDI-поток), только из ОДНОГО контекста;
+ *   SynthEngine_FillStereoBuffer
+ *       — из аудио-прерывания DMA (STM32) или аудио-потока (ПК).
+ *
+ * Переключение движка не блокирует аудио-прерывание: пока идёт смена,
+ * FillStereoBuffer просто отдаёт тишину (см. synth_engine.cpp).
  */
 
-#if !defined(PURRMIDI_SYNTH_SINE) && !defined(PURRMIDI_SYNTH_PLUCK) && !defined(PURRMIDI_SYNTH_EPIANO)
-#define PURRMIDI_SYNTH_PLUCK 1
+#ifdef __cplusplus
+extern "C" {
 #endif
 
-#if (defined(PURRMIDI_SYNTH_SINE) + defined(PURRMIDI_SYNTH_PLUCK) + defined(PURRMIDI_SYNTH_EPIANO)) != 1
-#error "Нужно определить ровно один из PURRMIDI_SYNTH_SINE / PURRMIDI_SYNTH_PLUCK / PURRMIDI_SYNTH_EPIANO"
-#endif
+/* Порядок элементов = номер MIDI-программы (Program Change). */
+typedef enum {
+    SYNTH_ENGINE_EPIANO = 0,
+    SYNTH_ENGINE_PLUCK  = 1,
+    SYNTH_ENGINE_SINE   = 2,
+    SYNTH_ENGINE_COUNT
+} SynthEngineId;
 
-#if defined(PURRMIDI_SYNTH_SINE)
-    #include "sine_synth.h"
-    #define SYNTH_ENGINE_NAME                   "sine"
-    #define SynthEngine_Init                    SineSynth_Init
-    #define SynthEngine_NoteOn                  SineSynth_NoteOn
-    #define SynthEngine_NoteOff                 SineSynth_NoteOff
-    #define SynthEngine_ControlChange           SineSynth_ControlChange
-    #define SynthEngine_FillStereoBuffer        SineSynth_FillStereoBuffer
-#elif defined(PURRMIDI_SYNTH_PLUCK)
-    #include "pluck_synth.h"
-    #define SYNTH_ENGINE_NAME                   "pluck"
-    #define SynthEngine_Init                    PluckSynth_Init
-    #define SynthEngine_NoteOn                  PluckSynth_NoteOn
-    #define SynthEngine_NoteOff                 PluckSynth_NoteOff
-    #define SynthEngine_ControlChange           PluckSynth_ControlChange
-    #define SynthEngine_FillStereoBuffer        PluckSynth_FillStereoBuffer
-#else /* PURRMIDI_SYNTH_EPIANO */
-    #include "epiano_synth.h"
-    #define SYNTH_ENGINE_NAME                   "epiano"
-    #define SynthEngine_Init                    EPianoSynth_Init
-    #define SynthEngine_NoteOn                  EPianoSynth_NoteOn
-    #define SynthEngine_NoteOff                 EPianoSynth_NoteOff
-    #define SynthEngine_ControlChange           EPianoSynth_ControlChange
-    #define SynthEngine_FillStereoBuffer        EPianoSynth_FillStereoBuffer
-#endif
+/* Синтезатор, который звучит после включения питания. */
+#define SYNTH_ENGINE_DEFAULT SYNTH_ENGINE_EPIANO
 
-/*
- * Контракт, одинаковый для всех движков:
- *
- *   void SynthEngine_Init(void);
- *   void SynthEngine_NoteOn(uint8_t midi_note, uint8_t velocity);   // velocity 0 == NoteOff
- *   void SynthEngine_NoteOff(uint8_t midi_note);
- *   void SynthEngine_ControlChange(uint8_t control, uint8_t value);
- *   void SynthEngine_FillStereoBuffer(int16_t *buffer, uint32_t num_frames);
- *
- * NoteOn/NoteOff/ControlChange вызываются из основного цикла (контекст main / MIDI-потока),
- * FillStereoBuffer — из аудио-прерывания DMA (или аудио-потока на ПК).
- * Передача событий между этими контекстами реализована внутри движка без блокировок.
+/** Сброс и включение синтезатора по умолчанию (E-Piano). Можно вызывать повторно. */
+void SynthEngine_Init(void);
+
+void SynthEngine_NoteOn(uint8_t midi_note, uint8_t velocity);   /* velocity 0 == NoteOff */
+void SynthEngine_NoteOff(uint8_t midi_note);
+void SynthEngine_ControlChange(uint8_t control, uint8_t value);
+
+/**
+ * MIDI Program Change: выбор синтезатора по номеру программы (program % SYNTH_ENGINE_COUNT).
+ * Если нужный синтезатор уже активен — ничего не происходит (звучащие ноты не обрываются).
  */
+void SynthEngine_ProgramChange(uint8_t program);
+
+/**
+ * Явный выбор синтезатора. Новый движок стартует «с нуля» (все ноты сброшены).
+ * @return 0, если id вне диапазона; иначе 1.
+ */
+int SynthEngine_Select(SynthEngineId id);
+
+/** Текущий активный синтезатор. */
+SynthEngineId SynthEngine_GetCurrent(void);
+
+/** Имя синтезатора: "epiano" / "pluck" / "sine" (для логов). Для неверного id — "?". */
+const char *SynthEngine_GetEngineName(SynthEngineId id);
+
+/** Имя активного синтезатора. */
+const char *SynthEngine_GetName(void);
+
+/** Блочное заполнение стереобуфера (L, R, L, R...). */
+void SynthEngine_FillStereoBuffer(int16_t *buffer, uint32_t num_frames);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SYNTH_ENGINE_H */

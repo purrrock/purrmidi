@@ -10,9 +10,6 @@ endif()
 
 set(CMAKE_PROJECT_NAME purrmidi)
 
-# Выбор синтезатора на этапе компиляции: -DPURRMIDI_SYNTH=sine|pluck|epiano
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/purrmidi_synth.cmake)
-
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
@@ -38,77 +35,81 @@ add_executable(${CMAKE_PROJECT_NAME})
 add_subdirectory(cmake/stm32cubemx)
 
 # ---------------------------------------------------------------------------
-# DaisySP (нужна только синтезатору pluck)
+# DaisySP
 # ---------------------------------------------------------------------------
 
-if(PURRMIDI_SYNTH_NEEDS_DAISYSP)
-    set(DAISYSP_DIR
-        "${CMAKE_CURRENT_SOURCE_DIR}/Middlewares/Third_Party/DaisySP"
+set(DAISYSP_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/Middlewares/Third_Party/DaisySP"
+)
+
+if(NOT EXISTS "${DAISYSP_DIR}/Source")
+    message(FATAL_ERROR
+        "DaisySP source directory not found: ${DAISYSP_DIR}/Source\n"
+        "Initialize the DaisySP git submodule:\n"
+        "git submodule update --init --recursive"
     )
-
-    if(NOT EXISTS "${DAISYSP_DIR}/Source")
-        message(FATAL_ERROR
-            "DaisySP source directory not found: ${DAISYSP_DIR}/Source\n"
-            "Initialize the DaisySP git submodule:\n"
-            "git submodule update --init --recursive"
-        )
-    endif()
-
-    # Compile DaisySP C++ sources directly into a static library.
-    file(GLOB_RECURSE DAISYSP_SOURCES CONFIGURE_DEPENDS
-        "${DAISYSP_DIR}/Source/*.cpp"
-        "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.cpp"
-    )
-
-    if(NOT DAISYSP_SOURCES)
-        message(FATAL_ERROR
-            "No DaisySP C++ source files found in ${DAISYSP_DIR}/Source"
-        )
-    endif()
-
-    add_library(DaisySP STATIC
-        ${DAISYSP_SOURCES}
-    )
-
-    # Передаем аппаратные флаги микроконтроллера (-mcpu, -mthumb) из CubeMX в DaisySP
-    target_link_libraries(DaisySP PRIVATE stm32cubemx)
-
-    # Add the DaisySP source directory and all its subdirectories
-    # to the include search path.
-    file(GLOB_RECURSE DAISYSP_HEADERS CONFIGURE_DEPENDS
-        "${DAISYSP_DIR}/Source/*.h"
-        "${DAISYSP_DIR}/Source/*.hpp"
-        "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.h"
-        "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.hpp"
-    )
-
-    set(DAISYSP_INCLUDE_DIRS
-        "${DAISYSP_DIR}/Source"
-        "${DAISYSP_DIR}/DaisySP-LGPL/Source"
-    )
-
-    foreach(HEADER ${DAISYSP_HEADERS})
-        get_filename_component(HEADER_DIR "${HEADER}" DIRECTORY)
-        list(APPEND DAISYSP_INCLUDE_DIRS "${HEADER_DIR}")
-    endforeach()
-
-    list(REMOVE_DUPLICATES DAISYSP_INCLUDE_DIRS)
-
-    target_include_directories(DaisySP PUBLIC
-        ${DAISYSP_INCLUDE_DIRS}
-    )
-
-    target_compile_definitions(DaisySP PUBLIC USE_DAISYSP_LGPL)
-
-    target_compile_features(DaisySP PUBLIC cxx_std_17)
 endif()
+
+# Compile DaisySP C++ sources directly into a static library.
+file(GLOB_RECURSE DAISYSP_SOURCES CONFIGURE_DEPENDS
+    "${DAISYSP_DIR}/Source/*.cpp"
+    "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.cpp"
+)
+
+if(NOT DAISYSP_SOURCES)
+    message(FATAL_ERROR
+        "No DaisySP C++ source files found in ${DAISYSP_DIR}/Source"
+    )
+endif()
+
+add_library(DaisySP STATIC
+    ${DAISYSP_SOURCES}
+)
+
+# Передаем аппаратные флаги микроконтроллера (-mcpu, -mthumb) из CubeMX в DaisySP
+target_link_libraries(DaisySP PRIVATE stm32cubemx)
+
+# Add the DaisySP source directory and all its subdirectories
+# to the include search path.
+file(GLOB_RECURSE DAISYSP_HEADERS CONFIGURE_DEPENDS
+    "${DAISYSP_DIR}/Source/*.h"
+    "${DAISYSP_DIR}/Source/*.hpp"
+    "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.h"
+    "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.hpp"
+)
+
+set(DAISYSP_INCLUDE_DIRS
+    "${DAISYSP_DIR}/Source"
+    "${DAISYSP_DIR}/DaisySP-LGPL/Source"
+)
+
+foreach(HEADER ${DAISYSP_HEADERS})
+    get_filename_component(HEADER_DIR "${HEADER}" DIRECTORY)
+    list(APPEND DAISYSP_INCLUDE_DIRS "${HEADER_DIR}")
+endforeach()
+
+list(REMOVE_DUPLICATES DAISYSP_INCLUDE_DIRS)
+
+target_include_directories(DaisySP PUBLIC
+    ${DAISYSP_INCLUDE_DIRS}
+)
+
+target_compile_definitions(DaisySP PUBLIC USE_DAISYSP_LGPL)
+
+target_compile_features(DaisySP PUBLIC cxx_std_17)
 
 # ---------------------------------------------------------------------------
 # Application sources
 # ---------------------------------------------------------------------------
 
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    ${PURRMIDI_SYNTH_SOURCES}
+    # Звуковые движки (все входят в прошивку, выбор — по MIDI Program Change)
+    Core/Src/synth_engine.cpp
+    Core/Src/epiano_synth.cpp
+    Core/Src/pluck_synth.cpp
+    Core/Src/sine_synth.c
+    Core/Src/synth.c
+
     Core/Src/usbh_midi.c
     Core/Src/display.c
     Core/Src/chord_detector.c
@@ -120,9 +121,6 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/st7735.c
     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/st7735_reg.c
 )
-
-# Макрос выбранного синтезатора (PURRMIDI_SYNTH_SINE / _PLUCK / _EPIANO) для synth_engine.h
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE ${PURRMIDI_SYNTH_DEFINE})
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Inc
@@ -138,8 +136,5 @@ list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 # Простой синтаксис (без PRIVATE) для совместимости со скриптом CubeMX
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
+    DaisySP
 )
-
-if(PURRMIDI_SYNTH_NEEDS_DAISYSP)
-    target_link_libraries(${CMAKE_PROJECT_NAME} DaisySP)
-endif()

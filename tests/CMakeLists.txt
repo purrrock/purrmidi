@@ -10,16 +10,13 @@ target_include_directories(test_midi_decode PRIVATE
 target_compile_features(test_midi_decode PRIVATE cxx_std_17)
 add_test(NAME test_midi_decode COMMAND test_midi_decode)
 
-# Тесты отдельных синтезаторов линкуются с их собственными библиотеками,
-# поэтому выполняются независимо от выбранного PURRMIDI_SYNTH.
-if(TARGET purrmidi_synth_pluck)
-    add_executable(test_pluck_host
-        test_pluck_host.cpp
-    )
-    target_link_libraries(test_pluck_host PRIVATE purrmidi_synth_pluck)
-    target_compile_features(test_pluck_host PRIVATE cxx_std_17)
-    add_test(NAME test_pluck_host COMMAND test_pluck_host)
-endif()
+# Тесты отдельных синтезаторов линкуются с их собственными библиотеками.
+add_executable(test_pluck_host
+    test_pluck_host.cpp
+)
+target_link_libraries(test_pluck_host PRIVATE purrmidi_synth_pluck)
+target_compile_features(test_pluck_host PRIVATE cxx_std_17)
+add_test(NAME test_pluck_host COMMAND test_pluck_host)
 
 add_executable(test_sine_host
     test_sine_host.cpp
@@ -41,6 +38,14 @@ add_executable(test_queue_dispatch
 target_link_libraries(test_queue_dispatch PRIVATE purrmidi_core)
 target_compile_features(test_queue_dispatch PRIVATE cxx_std_17)
 add_test(NAME test_queue_dispatch COMMAND test_queue_dispatch)
+
+add_executable(test_synth_switch
+    test_synth_switch.cpp
+)
+find_package(Threads REQUIRED)
+target_link_libraries(test_synth_switch PRIVATE purrmidi_core Threads::Threads)
+target_compile_features(test_synth_switch PRIVATE cxx_std_17)
+add_test(NAME test_synth_switch COMMAND test_synth_switch)
 
 add_executable(test_chord_detector
     test_chord_detector.cpp

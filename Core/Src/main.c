@@ -31,7 +31,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
-#include "synth_engine.h" // выбранный при компиляции синтезатор: sine / pluck / epiano (см. PURRMIDI_SYNTH в CMake)
+#include "synth_engine.h" // синтезаторы epiano / pluck / sine; переключаются по MIDI Program Change
 #include "display.h"
 #include "midi_event.h"
 #include "midi_queue.h"
@@ -189,8 +189,8 @@ int main(void)
   Display_Init();
   MIDI_Queue_Init();
   MIDI_USB_Init();
-  SynthEngine_Init(); // Инициализация синтезатора, выбранного на этапе компиляции
-  printf("Synth engine: %s\r\n", SYNTH_ENGINE_NAME);
+  SynthEngine_Init(); // Включает синтезатор по умолчанию (E-Piano); дальше выбор — по Program Change
+  printf("Synth engine: %s\r\n", SynthEngine_GetName());
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
   memset(audio_buffer, 0, sizeof(audio_buffer));  /* .dma_buffer is not zeroed by startup */
   if (HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer, AUDIO_BUFFER_SIZE) != HAL_OK)
@@ -245,10 +245,15 @@ int main(void)
         // printf("[MIDI] %02X %02X %02X\r\n",
         //        event.status, event.data1, event.data2);
 
-        MIDI_Dispatch(&event);   /* Note On/Off, CC -> выбранный синтезатор (lock-free FIFO в аудио-ISR) */
+        MIDI_Dispatch(&event);   /* Note On/Off, CC -> активный синтезатор (lock-free FIFO в аудио-ISR); Program Change -> смена синтезатора */
 
         uint8_t command = event.status & MIDI_STATUS_MASK;
         uint8_t note = event.data1;
+
+        if (command == MIDI_STATUS_PROGRAM_CHANGE)
+        {
+            printf("[PC] program %u -> %s\r\n", event.data1, SynthEngine_GetName());
+        }
 
         if (command == MIDI_STATUS_NOTE_ON && event.data2 != 0)
         {

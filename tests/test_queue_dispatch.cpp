@@ -59,6 +59,6 @@ void test_queue_overrun() {
 int main() {
     test_queue_and_dispatch();
     test_queue_overrun();
-    std::cout << "test_queue_dispatch passed successfully (synth: " << SYNTH_ENGINE_NAME << ")." << std::endl;
+    std::cout << "test_queue_dispatch passed successfully (synth: " << SynthEngine_GetName() << ")." << std::endl;
     return 0;
 }

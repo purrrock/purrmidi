@@ -269,7 +269,7 @@ int main(int argc, char* argv[]) {
             std::cerr << "Failed to start audio output." << std::endl;
             return 1;
         }
-        std::cout << "Synth engine: " << SYNTH_ENGINE_NAME << "\n";
+        std::cout << "Synth engine: " << SynthEngine_GetName() << " (Program Change: 0=epiano, 1=pluck, 2=sine)\n";
         std::cout << "Synth player running. Press ENTER or Ctrl+C to stop...\n";
     } else {
         std::cout << "MIDI Monitor running. Press ENTER or Ctrl+C to stop...\n";
@@ -284,6 +284,11 @@ int main(int argc, char* argv[]) {
         MIDI_Event_t event;
         while (MIDI_Queue_Pop(&event)) {
             MIDI_Dispatch(&event);
+            if ((event.status & MIDI_STATUS_MASK) == MIDI_STATUS_PROGRAM_CHANGE) {
+                std::lock_guard<std::mutex> lock(g_console_mutex);
+                std::cout << "[PC] program " << static_cast<int>(event.data1)
+                          << " -> synth engine: " << SynthEngine_GetName() << "\n";
+            }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }

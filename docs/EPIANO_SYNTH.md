@@ -1,14 +1,10 @@
-# FM-электропиано (`PURRMIDI_SYNTH=epiano`)
+# FM-электропиано (Program Change 0, по умолчанию)
 
 Полифонический FM-синтезатор в духе Rhodes / Yamaha DX7 «E.PIANO 1». Файлы: `Core/Inc/epiano_synth.h`, `Core/Src/epiano_synth.cpp`. Внешних зависимостей (DaisySP и т.п.) нет.
 
-## Выбор при сборке
+## Выбор инструмента
 
-```bash
-cmake --preset Release-epiano            # прошивка STM32
-cmake --preset win-msvc-release-epiano   # Windows
-# либо для любого пресета: -DPURRMIDI_SYNTH=epiano
-```
+E-Piano — синтезатор по умолчанию: он звучит после включения питания. Из других инструментов на него можно вернуться сообщением MIDI **Program Change 0** (см. `Core/Inc/synth_engine.h`). Остальные программы: `1` — Pluck, `2` — Sine; номера `3…127` заворачиваются по модулю 3.
 
 ## Структура голоса
 
@@ -40,7 +36,7 @@ cmake --preset win-msvc-release-epiano   # Windows
 | CC72 | время релиза (0,08–1,7 с) |
 | CC120 / CC123 | All Sound Off / All Notes Off |
 
-Pitch bend, aftertouch и Program Change пока не обрабатываются (диспетчер их не передаёт).
+Program Change обрабатывается диспетчером (`synth_engine`) и выбирает инструмент, а не параметры E-Piano. Pitch bend и aftertouch пока не обрабатываются (диспетчер их не передаёт).
 
 ## Потоки и память
 

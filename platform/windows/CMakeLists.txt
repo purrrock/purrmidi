@@ -8,23 +8,15 @@ endif()
 
 option(PURRMIDI_BUILD_TESTS "Build host unit tests" ON)
 
-# Выбор синтезатора на этапе компиляции: -DPURRMIDI_SYNTH=sine|pluck|epiano
-include("${CMAKE_SOURCE_DIR}/cmake/purrmidi_synth.cmake")
-
-# Библиотека pluck собирается, если она выбрана или нужна тестам
-set(PURRMIDI_BUILD_PLUCK OFF)
-if(PURRMIDI_SYNTH_NEEDS_DAISYSP OR PURRMIDI_BUILD_TESTS)
-    set(PURRMIDI_BUILD_PLUCK ON)
-endif()
-
+# Все синтезаторы (epiano / pluck / sine) входят в сборку; активный выбирается
+# во время работы сообщением MIDI Program Change (см. Core/Inc/synth_engine.h).
 set(DAISYSP_DIR "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/DaisySP")
-if(PURRMIDI_BUILD_PLUCK AND NOT EXISTS "${DAISYSP_DIR}/Source")
+if(NOT EXISTS "${DAISYSP_DIR}/Source")
     message(FATAL_ERROR
         "Исходники DaisySP не найдены: ${DAISYSP_DIR}/Source\n"
         "Выполните команду для инициализации подмодулей:\n"
         "git submodule update --init --recursive\n"
-        "(DaisySP нужна только синтезатору pluck; для сборки без неё: "
-        "-DPURRMIDI_SYNTH=epiano -DPURRMIDI_BUILD_TESTS=OFF)"
+        "(DaisySP нужна синтезатору pluck, а он всегда входит в сборку)"
     )
 endif()
 
@@ -48,37 +40,34 @@ target_include_directories(purrmidi_synth_epiano PUBLIC "${CMAKE_SOURCE_DIR}/Cor
 target_compile_features(purrmidi_synth_epiano PUBLIC cxx_std_17)
 
 # pluck: Карплус-Стронг на DaisySP Pluck
-if(PURRMIDI_BUILD_PLUCK)
-    add_library(purrmidi_synth_pluck STATIC
-        "${CMAKE_SOURCE_DIR}/Core/Src/pluck_synth.cpp"
-        "${DAISYSP_DIR}/DaisySP-LGPL/Source/PhysicalModeling/pluck.cpp"
-    )
-    target_include_directories(purrmidi_synth_pluck PUBLIC
-        "${CMAKE_SOURCE_DIR}/Core/Inc"
-        "${DAISYSP_DIR}/Source"
-        "${DAISYSP_DIR}/DaisySP-LGPL/Source"
-    )
-    target_compile_definitions(purrmidi_synth_pluck PUBLIC USE_DAISYSP_LGPL)
-    target_compile_features(purrmidi_synth_pluck PUBLIC cxx_std_17)
-endif()
+add_library(purrmidi_synth_pluck STATIC
+    "${CMAKE_SOURCE_DIR}/Core/Src/pluck_synth.cpp"
+    "${DAISYSP_DIR}/DaisySP-LGPL/Source/PhysicalModeling/pluck.cpp"
+)
+target_include_directories(purrmidi_synth_pluck PUBLIC
+    "${CMAKE_SOURCE_DIR}/Core/Inc"
+    "${DAISYSP_DIR}/Source"
+    "${DAISYSP_DIR}/DaisySP-LGPL/Source"
+)
+target_compile_definitions(purrmidi_synth_pluck PUBLIC USE_DAISYSP_LGPL)
+target_compile_features(purrmidi_synth_pluck PUBLIC cxx_std_17)
 
 foreach(_synth sine pluck epiano)
-    if(TARGET purrmidi_synth_${_synth})
-        if(MSVC)
-            target_compile_options(purrmidi_synth_${_synth} PRIVATE /utf-8 /W4)
-        else()
-            target_compile_options(purrmidi_synth_${_synth} PRIVATE -Wall -Wextra)
-        endif()
-        if(UNIX)
-            target_link_libraries(purrmidi_synth_${_synth} PUBLIC m)
-        endif()
+    if(MSVC)
+        target_compile_options(purrmidi_synth_${_synth} PRIVATE /utf-8 /W4)
+    else()
+        target_compile_options(purrmidi_synth_${_synth} PRIVATE -Wall -Wextra)
+    endif()
+    if(UNIX)
+        target_link_libraries(purrmidi_synth_${_synth} PUBLIC m)
     endif()
 endforeach()
 
 # ---------------------------------------------------------------------------
-# purrmidi_core: MIDI-очередь + диспетчер + ВЫБРАННЫЙ синтезатор
+# purrmidi_core: MIDI-очередь + диспетчер + рантайм-переключатель синтезаторов
 # ---------------------------------------------------------------------------
 add_library(purrmidi_core STATIC
+    "${CMAKE_SOURCE_DIR}/Core/Src/synth_engine.cpp"
     "${CMAKE_SOURCE_DIR}/Core/Src/chord_detector.c"
     "${CMAKE_SOURCE_DIR}/Engine/midi/midi_queue.c"
     "${CMAKE_SOURCE_DIR}/Engine/midi/midi_dispatch.c"
@@ -89,9 +78,11 @@ target_include_directories(purrmidi_core PUBLIC
     "${CMAKE_SOURCE_DIR}/Engine/midi"
 )
 
-# Макрос PURRMIDI_SYNTH_* виден и приложению, и тестам (для synth_engine.h)
-target_compile_definitions(purrmidi_core PUBLIC ${PURRMIDI_SYNTH_DEFINE})
-target_link_libraries(purrmidi_core PUBLIC purrmidi_synth_${PURRMIDI_SYNTH_NAME})
+target_link_libraries(purrmidi_core PUBLIC
+    purrmidi_synth_epiano
+    purrmidi_synth_pluck
+    purrmidi_synth_sine
+)
 target_compile_features(purrmidi_core PUBLIC c_std_11 cxx_std_17)
 
 if(MSVC)
