@@ -1,10 +1,12 @@
 // Automated unit tests for SoundFont synthesizer and SF2 cache.
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <thread>
 #include <vector>
 
 #include "sf2_cache.h"
@@ -125,11 +127,66 @@ static void test_cache_block_requests_and_hits() {
     SoundFontSynth_NoteOff(60);
 }
 
+static void test_sf2_cache_reader_protection() {
+    bool ok = SoundFontSynth_InitSF2();
+    if (!ok) {
+        return;
+    }
+
+    SF2Cache_Reset();
+
+    // Fill cache blocks 0..31
+    for (uint32_t i = 0; i < SF2_CACHE_BLOCKS; ++i) {
+        SF2Cache_RequestBlock(i);
+        SF2Cache_ProcessRequests();
+    }
+
+    // SoundFont synth active note to generate sample requests
+    SoundFontSynth_NoteOn(60, 100);
+
+    std::atomic<bool> stop_flag{false};
+    std::atomic<bool> thread_started{false};
+
+    // Audio thread context simulator
+    std::thread audio_thread([&]() {
+        thread_started.store(true, std::memory_order_release);
+        std::vector<int16_t> audio_buf(128 * 2, 0);
+        while (!stop_flag.load(std::memory_order_relaxed)) {
+            SoundFontSynth_FillStereoBuffer(audio_buf.data(), 128);
+        }
+    });
+
+    while (!thread_started.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+
+    // Process background requests and force continuous eviction while audio thread is actively reading
+    for (uint32_t pass = 0; pass < 200; ++pass) {
+        for (uint32_t b = 32; b < 64; ++b) {
+            SF2Cache_RequestBlock(b);
+            SF2Cache_ProcessRequests();
+        }
+    }
+
+    stop_flag.store(true, std::memory_order_release);
+    audio_thread.join();
+
+    SoundFontSynth_NoteOff(60);
+
+    // After reader finishes, verify cache can process eviction and load requested blocks properly
+    SF2Cache_RequestBlock(100);
+    SF2Cache_ProcessRequests();
+
+    std::vector<int16_t> post_buf(128 * 2, 0);
+    SoundFontSynth_FillStereoBuffer(post_buf.data(), 128);
+}
+
 int main() {
     test_engine_registration_and_pc();
     test_sf2_loading_and_cache_streaming();
     test_missing_or_corrupt_file_handling();
     test_cache_block_requests_and_hits();
+    test_sf2_cache_reader_protection();
 
     if (g_failures != 0) {
         std::cerr << "test_soundfont_host: " << g_failures << " check(s) failed" << std::endl;

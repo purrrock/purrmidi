@@ -17,9 +17,10 @@ extern "C" {
 #define SF2_CACHE_BLOCKS  32U      /* 32 blocks x 2 KB = 64 KB total RAM sample cache */
 
 typedef enum {
-    SF2_BLOCK_EMPTY   = 0,
-    SF2_BLOCK_LOADING = 1,
-    SF2_BLOCK_READY   = 2
+    SF2_BLOCK_EMPTY    = 0,
+    SF2_BLOCK_LOADING  = 1,
+    SF2_BLOCK_READY    = 2,
+    SF2_BLOCK_EVICTING = 3
 } SF2BlockState;
 
 /** Open SF2 file using platform file backend (FatFs on firmware, stdio on host). */
