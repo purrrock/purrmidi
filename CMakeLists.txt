@@ -104,21 +104,21 @@ target_compile_features(DaisySP PUBLIC cxx_std_17)
 
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Звуковые движки (все входят в прошивку, выбор — по MIDI Program Change)
-    Core/Src/synth_engine.cpp
-    Core/Src/epiano_synth.cpp
-    Core/Src/organ_synth.cpp
-    Core/Src/pluck_synth.cpp
-    Core/Src/sine_synth.c
-    Core/Src/soundfont_synth.cpp
-    Core/Src/sf2_cache.cpp
-    Core/Src/tinysoundfont_impl.cpp
-    Core/Src/synth.c
+    Engine/synth/synth_engine.cpp
+    Engine/synth/epiano_synth.cpp
+    Engine/synth/organ_synth.cpp
+    Engine/synth/pluck_synth.cpp
+    Engine/synth/sine_synth.c
+    Engine/synth/soundfont_synth.cpp
+    Engine/synth/sf2_cache.cpp
+    Engine/synth/tinysoundfont_impl.cpp
+    Engine/synth/synth.c
 
-    Third_Party/bfreeOrgan2/synth_organ.cpp
-    Third_Party/bfreeOrgan2/components/voice_organ.cpp
-    Third_Party/bfreeOrgan2/components/efx_chorus.cpp
-    Third_Party/bfreeOrgan2/components/env_ar.cpp
-    Third_Party/bfreeOrgan2/components/env_click.cpp
+    Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp
+    Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp
+    Middlewares/Third_Party/bfreeOrgan2/components/efx_chorus.cpp
+    Middlewares/Third_Party/bfreeOrgan2/components/env_ar.cpp
+    Middlewares/Third_Party/bfreeOrgan2/components/env_click.cpp
 
     Core/Src/usbh_midi.c
     Core/Src/display.c
@@ -144,9 +144,10 @@ endif()
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Inc
     Engine/midi
+    Engine/synth
     Platform/midi_usb
-    Third_Party/bfreeOrgan2
-    Third_Party/bfreeOrgan2/components
+    Middlewares/Third_Party/bfreeOrgan2
+    Middlewares/Third_Party/bfreeOrgan2/components
     Middlewares/Third_Party/TinySoundFont
 
     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735
