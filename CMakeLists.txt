@@ -129,6 +129,15 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/st7735_reg.c
 )
 
+# SD-карта (SDMMC1 + FatFs): модуль собирается только после того, как CubeMX
+# сгенерировал sdmmc.h и FatFs (см. README, раздел "Работа с SD-картой").
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Core/Inc/sdmmc.h"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/FATFS/App/fatfs.h")
+    target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+        Core/Src/sd_storage.c
+    )
+endif()
+
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Inc
     Engine/midi
