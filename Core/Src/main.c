@@ -208,8 +208,6 @@ int main(void)
   uint32_t prev_loop_tick = HAL_GetTick();
   uint32_t max_loop_dt = 0;
   static bool silent_episode_reported = false;
-#endif
-#if USB_DIAG_UART
   static uint32_t last_report = 0;
 #endif
 
@@ -219,7 +217,6 @@ int main(void)
     uint32_t current_tick = HAL_GetTick();
     uint32_t loop_dt = current_tick - prev_loop_tick;
     prev_loop_tick = current_tick;
-
     if (loop_dt > max_loop_dt)
     {
         max_loop_dt = loop_dt;
@@ -242,9 +239,7 @@ int main(void)
 
     while (MIDI_Queue_Pop(&event))
     {
-        // printf("[MIDI] %02X %02X %02X\r\n",
-        //        event.status, event.data1, event.data2);
-
+        // printf("[MIDI] %02X %02X %02X\r\n", event.status, event.data1, event.data2);
         MIDI_Dispatch(&event);   /* Note On/Off, CC -> активный синтезатор (lock-free FIFO в аудио-ISR); Program Change -> смена синтезатора */
 
         uint8_t command = event.status & MIDI_STATUS_MASK;
@@ -320,7 +315,6 @@ int main(void)
 #if USB_DIAG_UART
     uint32_t now = HAL_GetTick();
     uint32_t silence_ms = now - MIDI_USB_GetLastPacketTick();
-
     if (!MIDI_USB_IsConnected() || silence_ms <= 3000)
     {
         silent_episode_reported = false;
@@ -331,9 +325,6 @@ int main(void)
         silent_episode_reported = true;
         prev_loop_tick = HAL_GetTick();
     }
-#endif
-
-#if USB_DIAG_UART
     if (now - last_report >= 10000)
     {
         last_report = now;
