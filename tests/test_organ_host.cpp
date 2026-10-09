@@ -120,6 +120,37 @@ static void test_queue_overflow_recovery() {
     CHECK(render_peak(1024) == 0);
 }
 
+static void test_max_drawbars_full_polyphony() {
+    OrganSynth_Init();
+
+    // Set all 9 drawbars to max (127)
+    for (uint8_t cc = 20; cc <= 28; ++cc) {
+        OrganSynth_ControlChange(cc, 127);
+    }
+
+    // Play 12 distinct notes simultaneously (full 12-voice polyphony)
+    for (uint8_t note = 36; note < 48; ++note) {
+        OrganSynth_NoteOn(note, 127);
+    }
+
+    std::vector<int16_t> buf(2048 * 2, 0);
+    OrganSynth_FillStereoBuffer(buf.data(), 2048);
+
+    int peak = 0;
+    for (int16_t sample : buf) {
+        int abs_val = sample < 0 ? -static_cast<int>(sample) : static_cast<int>(sample);
+        if (abs_val > peak) peak = abs_val;
+    }
+
+    CHECK(peak > 0);
+    CHECK(peak <= 32767);
+
+    // Clean release via All Notes Off
+    OrganSynth_ControlChange(123, 0);
+    render_peak(2048);
+    CHECK(render_peak(1024) == 0);
+}
+
 int main() {
     test_init_silence();
     test_note_on_off();
@@ -128,6 +159,7 @@ int main() {
     test_out_of_bounds_notes();
     test_all_notes_off();
     test_queue_overflow_recovery();
+    test_max_drawbars_full_polyphony();
 
     if (g_failures != 0) {
         std::cerr << "test_organ_host: " << g_failures << " check(s) failed" << std::endl;

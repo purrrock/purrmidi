@@ -1,9 +1,0 @@
-test_midi_decode 3 0.00118386
-test_pluck_host 3 0.020844
-test_sine_host 3 0.00293634
-test_epiano_host 3 0.0687733
-test_organ_host 2 0.00988154
-test_queue_dispatch 3 0.0013305
-test_synth_switch 3 0.16389
-test_chord_detector 3 0.00123878
----

@@ -94,8 +94,6 @@ namespace synth
 			voice::sample_t sample = 0;
 			while(i)
 				{
-				//sample += get_tonewheel(--i);
-				//TEST IF WE CAN STORE IN TABLE A WAVE BETTER THAT 8 BIT
 				sample += get_tonewheel(--i);
 				}
 
@@ -103,11 +101,21 @@ namespace synth
 
 			//Check activity of envelope generator.
 			_is_active = envelope.is_running();
+
+			// Multiply tonewheel sum by envelope level in int64_t to prevent signed 32-bit integer overflow,
+			// then safely clamp to int32_t range before returning.
+			int64_t full_sample = static_cast<int64_t>(sample) * static_cast<int64_t>(env_level);
+			if (full_sample > 2147483647LL) {
+				full_sample = 2147483647LL;
+			} else if (full_sample < -2147483648LL) {
+				full_sample = -2147483648LL;
+			}
+
 			#ifdef TESTBENCH
 			if(sample!=0)
 			std::cout << "voice_organ::get_sample() INFO: Got Sample: " << std::hex << sample << std::endl;
 			#endif
-			return static_cast<voice::sample_t>(sample*env_level);
+			return static_cast<voice::sample_t>(full_sample);
 			}
 
 		inline voice::sample_t voice_organ::get_tonewheel(uint8_t tone)
