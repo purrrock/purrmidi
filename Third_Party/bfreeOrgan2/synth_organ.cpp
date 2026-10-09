@@ -65,6 +65,11 @@ namespace synth
 					phase_table.end(),
 					[](uint32_t &phase){phase = 0;});
 		reset_all();
+		for (auto &osc : oscillators)
+			{
+			osc.set_attack(voice::clean_cut_value);
+			osc.set_release(voice::clean_cut_value);
+			}
 		voice::voice_organ::init(static_cast<const cc::value_t*>(cc_drawbars.data()),
 								static_cast<const uint32_t*>(phase_table.data()));
 		fx = efx::efx_chorus();

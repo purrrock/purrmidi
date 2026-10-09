@@ -27,11 +27,6 @@ namespace synth
 	{
 	namespace voice
 		{
-		/** Slope Values for AR Envelope. */
-		constexpr uint32_t clean_cut_value = 5000;
-		/** Slope Values for AR Envelope. */
-		constexpr uint32_t cleanest_cut_value = 2000;
-
 		const cc::value_t *voice_organ::_drawbars;
 		const uint32_t *voice_organ::_phase_table;
 
@@ -74,8 +69,6 @@ namespace synth
 			_is_active = false;
 			my_note = INVALID_NOTE;
 			envelope.reset();
-			envelope.set_speed(env::env_feature_t::ATTACK, clean_cut_value);
-			envelope.set_speed(env::env_feature_t::RELEASE, clean_cut_value);
 			}
 
 		inline bool voice_organ::is_active()
