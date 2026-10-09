@@ -181,12 +181,205 @@ static void test_sf2_cache_reader_protection() {
     SoundFontSynth_FillStereoBuffer(post_buf.data(), 128);
 }
 
+#include <fstream>
+
+struct TestTSFLayout {
+    void *presets;
+    float *fontSamples;
+    unsigned int smpl_file_offset;
+    unsigned int smpl_sample_count;
+};
+
+static void test_sf2_cache_load_error_handling() {
+    TestTSFLayout fake_tsf_layout;
+    std::memset(&fake_tsf_layout, 0, sizeof(fake_tsf_layout));
+    tsf *fake_tsf = reinterpret_cast<tsf *>(&fake_tsf_layout);
+
+    // 1. Successful load of full block
+    {
+        const char *fname = "test_sf2_full.bin";
+        std::ofstream ofs(fname, std::ios::binary);
+        int16_t samples[1024];
+        for (int i = 0; i < 1024; ++i) {
+            samples[i] = static_cast<int16_t>(i + 100);
+        }
+        ofs.write(reinterpret_cast<const char *>(samples), sizeof(samples));
+        ofs.close();
+
+        SF2Cache_CloseFile();
+        CHECK(SF2Cache_OpenFile(fname) == true);
+        SF2Cache_SetSmplFileOffset(0, 1024);
+        fake_tsf_layout.smpl_sample_count = 1024;
+
+        SF2Cache_RequestBlock(0);
+        SF2Cache_ProcessRequests();
+
+        CHECK(SF2Cache_GetSample(fake_tsf, 0, nullptr) == 100);
+        CHECK(SF2Cache_GetSample(fake_tsf, 1023, nullptr) == 1123);
+
+        SF2Cache_CloseFile();
+        std::remove(fname);
+    }
+
+    // 2. Successful load of last partial block
+    {
+        const char *fname = "test_sf2_partial.bin";
+        std::ofstream ofs(fname, std::ios::binary);
+        // Total 1500 samples: block 0 has 1024 samples, block 1 has 476 samples (952 bytes)
+        int16_t samples[1500];
+        for (int i = 0; i < 1500; ++i) {
+            samples[i] = static_cast<int16_t>(i + 500);
+        }
+        ofs.write(reinterpret_cast<const char *>(samples), sizeof(samples));
+        ofs.close();
+
+        SF2Cache_CloseFile();
+        CHECK(SF2Cache_OpenFile(fname) == true);
+        SF2Cache_SetSmplFileOffset(0, 1500);
+        fake_tsf_layout.smpl_sample_count = 1500;
+
+        SF2Cache_RequestBlock(1);
+        SF2Cache_ProcessRequests();
+
+        CHECK(SF2Cache_GetSample(fake_tsf, 1024, nullptr) == 1524);
+        CHECK(SF2Cache_GetSample(fake_tsf, 1499, nullptr) == 1999);
+
+        SF2Cache_CloseFile();
+        std::remove(fname);
+    }
+
+    // 3. Seek error handling & slot reusability
+    {
+        const char *fname = "test_sf2_seek_err.bin";
+        std::ofstream ofs(fname, std::ios::binary);
+        int16_t valid_samples[1024];
+        for (int i = 0; i < 1024; ++i) {
+            valid_samples[i] = static_cast<int16_t>(i + 2000);
+        }
+        ofs.write(reinterpret_cast<const char *>(valid_samples), sizeof(valid_samples));
+        ofs.close();
+
+        SF2Cache_CloseFile();
+        CHECK(SF2Cache_OpenFile(fname) == true);
+        // Set invalid file offset (0xFFFFFFFFU) to trigger fseek error safely
+        SF2Cache_SetSmplFileOffset(0xFFFFFFFFU, 1024);
+        fake_tsf_layout.smpl_sample_count = 1024;
+
+        SF2Cache_RequestBlock(0);
+        SF2Cache_ProcessRequests();
+
+        // Failed seek must not publish partial/garbage data as ready block
+        CHECK(SF2Cache_GetSample(fake_tsf, 0, nullptr) == 0);
+
+        // Restore valid file offset and verify slot remains reusable
+        SF2Cache_SetSmplFileOffset(0, 1024);
+        SF2Cache_ProcessRequests();
+
+        CHECK(SF2Cache_GetSample(fake_tsf, 0, nullptr) == 2000);
+
+        SF2Cache_CloseFile();
+        std::remove(fname);
+    }
+
+    // 4. Short read error handling
+    {
+        const char *fname = "test_sf2_short_read.bin";
+        std::ofstream ofs(fname, std::ios::binary);
+        char dummy[500] = {0}; // Expecting 2048 bytes for 1024 samples
+        ofs.write(dummy, sizeof(dummy));
+        ofs.close();
+
+        SF2Cache_CloseFile();
+        CHECK(SF2Cache_OpenFile(fname) == true);
+        SF2Cache_SetSmplFileOffset(0, 1024);
+        fake_tsf_layout.smpl_sample_count = 1024;
+
+        SF2Cache_RequestBlock(0);
+        SF2Cache_ProcessRequests();
+
+        // Short read must not publish partial data
+        CHECK(SF2Cache_GetSample(fake_tsf, 0, nullptr) == 0);
+
+        SF2Cache_CloseFile();
+        std::remove(fname);
+    }
+
+    // 5. Read error handling
+    {
+        const char *fname = "test_sf2_read_err.bin";
+        std::ofstream ofs(fname, std::ios::binary);
+        char dummy[100] = {0};
+        ofs.write(dummy, sizeof(dummy));
+        ofs.close();
+
+        SF2Cache_CloseFile();
+        CHECK(SF2Cache_OpenFile(fname) == true);
+        SF2Cache_SetSmplFileOffset(0, 1024);
+        fake_tsf_layout.smpl_sample_count = 1024;
+
+        SF2Cache_RequestBlock(0);
+        SF2Cache_ProcessRequests();
+
+        CHECK(SF2Cache_GetSample(fake_tsf, 0, nullptr) == 0);
+
+        SF2Cache_CloseFile();
+        std::remove(fname);
+    }
+
+    // 6. Retry logic and single-pass non-infinite processing
+    {
+        const char *fname = "test_sf2_retry.bin";
+        {
+            std::ofstream ofs(fname, std::ios::binary);
+            ofs.write("short", 5);
+        }
+
+        SF2Cache_CloseFile();
+        CHECK(SF2Cache_OpenFile(fname) == true);
+        SF2Cache_SetSmplFileOffset(0, 1024);
+        fake_tsf_layout.smpl_sample_count = 1024;
+
+        SF2Cache_RequestBlock(0);
+
+        // ProcessRequests must process queued request, encounter failure, re-queue,
+        // and return without infinite loop within the single call.
+        auto start_tp = std::chrono::steady_clock::now();
+        SF2Cache_ProcessRequests();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_tp);
+
+        CHECK(elapsed.count() < 1000); // Must return quickly without infinite loop
+        CHECK(SF2Cache_GetSample(fake_tsf, 0, nullptr) == 0);
+
+        // Now fix the file on disk with complete valid data
+        {
+            std::ofstream ofs(fname, std::ios::binary);
+            int16_t samples[1024];
+            for (int i = 0; i < 1024; ++i) {
+                samples[i] = static_cast<int16_t>(i + 888);
+            }
+            ofs.write(reinterpret_cast<const char *>(samples), sizeof(samples));
+        }
+
+        // Second call processes the re-queued block request
+        SF2Cache_ProcessRequests();
+
+        CHECK(SF2Cache_GetSample(fake_tsf, 0, nullptr) == 888);
+        CHECK(SF2Cache_GetSample(fake_tsf, 1023, nullptr) == 1911);
+
+        SF2Cache_CloseFile();
+        std::remove(fname);
+    }
+}
+
 int main() {
     test_engine_registration_and_pc();
     test_sf2_loading_and_cache_streaming();
     test_missing_or_corrupt_file_handling();
     test_cache_block_requests_and_hits();
     test_sf2_cache_reader_protection();
+
+    test_sf2_cache_load_error_handling();
 
     if (g_failures != 0) {
         std::cerr << "test_soundfont_host: " << g_failures << " check(s) failed" << std::endl;
