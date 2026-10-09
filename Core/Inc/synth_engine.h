@@ -11,10 +11,11 @@
  *
  *     Program | Синтезатор
  *     --------+--------------------------------------------------------
- *        0    | E-Piano  — полифоническое FM-электропиано (по умолчанию)
- *        1    | Pluck    — Карплус-Стронг, DaisySP Pluck
- *        2    | Sine     — одноголосая синусоида (проверка тракта)
- *        3    | Organ    — орган Хаммонда (bfreeOrgan2)
+ *        0    | E-Piano   — полифоническое FM-электропиано (по умолчанию)
+ *        1    | Pluck     — Карплус-Стронг, DaisySP Pluck
+ *        2    | Sine      — одноголосая синусоида (проверка тракта)
+ *        3    | Organ     — орган Хаммонда (bfreeOrgan2)
+ *        4    | SoundFont — синтезатор SF2 на базе TinySoundFont
  *
  * Номера программ вне диапазона заворачиваются по модулю SYNTH_ENGINE_COUNT
  * (program % SYNTH_ENGINE_COUNT), поэтому кнопки «+/−» на любой клавиатуре всегда выбирают
@@ -41,10 +42,11 @@ extern "C" {
 
 /* Порядок элементов = номер MIDI-программы (Program Change). */
 typedef enum {
-    SYNTH_ENGINE_EPIANO = 0,
-    SYNTH_ENGINE_PLUCK  = 1,
-    SYNTH_ENGINE_SINE   = 2,
-    SYNTH_ENGINE_ORGAN  = 3,
+    SYNTH_ENGINE_EPIANO    = 0,
+    SYNTH_ENGINE_PLUCK     = 1,
+    SYNTH_ENGINE_SINE      = 2,
+    SYNTH_ENGINE_ORGAN     = 3,
+    SYNTH_ENGINE_SOUNDFONT = 4,
     SYNTH_ENGINE_COUNT
 } SynthEngineId;
 
@@ -73,7 +75,7 @@ int SynthEngine_Select(SynthEngineId id);
 /** Текущий активный синтезатор. */
 SynthEngineId SynthEngine_GetCurrent(void);
 
-/** Имя синтезатора: "epiano" / "pluck" / "sine" (для логов). Для неверного id — "?". */
+/** Имя синтезатора: "epiano" / "pluck" / "sine" / "organ" / "soundfont" (для логов). Для неверного id — "?". */
 const char *SynthEngine_GetEngineName(SynthEngineId id);
 
 /** Имя активного синтезатора. */

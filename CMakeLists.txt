@@ -109,6 +109,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/organ_synth.cpp
     Core/Src/pluck_synth.cpp
     Core/Src/sine_synth.c
+    Core/Src/soundfont_synth.cpp
+    Core/Src/sf2_cache.cpp
+    Core/Src/tinysoundfont_impl.cpp
     Core/Src/synth.c
 
     Third_Party/bfreeOrgan2/synth_organ.cpp
@@ -144,6 +147,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Platform/midi_usb
     Third_Party/bfreeOrgan2
     Third_Party/bfreeOrgan2/components
+    Middlewares/Third_Party/TinySoundFont
 
     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735
 )

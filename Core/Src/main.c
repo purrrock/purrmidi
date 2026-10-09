@@ -39,6 +39,7 @@
 #include "usb_port_recover.h"
 #include "usbh_midi.h"
 #include "midi_dispatch.h"
+#include "soundfont_synth.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -229,6 +230,7 @@ int main(void)
     /* USER CODE BEGIN 3 */
     USB_PortLostRecover(&hUsbHostFS);   /* port silently disabled by HW -> re-enumerate */
     MIDI_USB_Process();
+    SoundFontSynth_Process();
 
     if (MIDI_USB_HasStateChanged())
     {

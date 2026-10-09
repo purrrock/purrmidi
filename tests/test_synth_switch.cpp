@@ -77,28 +77,36 @@ static void test_program_change_selects_engine() {
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
     CHECK(std::strcmp(SynthEngine_GetName(), "organ") == 0);
 
+    send_pc(4);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
+    CHECK(std::strcmp(SynthEngine_GetName(), "soundfont") == 0);
+
     send_pc(0);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
 
     // Канал сообщения не важен (omni)
     send_pc(3, 9);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
+    send_pc(4, 12);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
     send_pc(1, 15);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
 }
 
 static void test_program_wraps_modulo() {
     SynthEngine_Init();
-    send_pc(4);     // 4 % 4 == 0
+    send_pc(5);     // 5 % 5 == 0 -> E-Piano
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
-    send_pc(5);     // 5 % 4 == 1
+    send_pc(6);     // 6 % 5 == 1 -> Pluck
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
-    send_pc(6);     // 6 % 4 == 2
+    send_pc(7);     // 7 % 5 == 2 -> Sine
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SINE);
-    send_pc(7);     // 7 % 4 == 3
+    send_pc(8);     // 8 % 5 == 3 -> Organ
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
-    send_pc(127);   // 127 % 4 == 3
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
+    send_pc(9);     // 9 % 5 == 4 -> SoundFont
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
+    send_pc(127);   // 127 % 5 == 2 -> Sine
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SINE);
 }
 
 static void test_every_engine_makes_sound() {
@@ -108,7 +116,12 @@ static void test_every_engine_makes_sound() {
         CHECK(static_cast<int>(SynthEngine_GetCurrent()) == prog);
         CHECK(render_peak(512) == 0);            // сразу после смены — тишина
         send_note_on(64, 110);
-        CHECK(render_peak(4800) > 0);            // нота звучит
+        // Примечание: SoundFont без SF2/кэша выдает тишину без ошибок
+        if (prog != SYNTH_ENGINE_SOUNDFONT) {
+            CHECK(render_peak(4800) > 0);        // нота звучит
+        } else {
+            render_peak(4800);
+        }
         send_note_off(64);
         render_peak(48000 * 2);                  // даём затухнуть
     }
@@ -146,6 +159,7 @@ static void test_select_api() {
     CHECK(SynthEngine_Select(SYNTH_ENGINE_COUNT) == 0);   // вне диапазона
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SINE); // не изменился
     CHECK(std::strcmp(SynthEngine_GetEngineName(SYNTH_ENGINE_EPIANO), "epiano") == 0);
+    CHECK(std::strcmp(SynthEngine_GetEngineName(SYNTH_ENGINE_SOUNDFONT), "soundfont") == 0);
     CHECK(std::strcmp(SynthEngine_GetEngineName(SYNTH_ENGINE_COUNT), "?") == 0);
 
     SynthEngine_Init();                                    // Init возвращает E-Piano

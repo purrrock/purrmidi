@@ -8,8 +8,8 @@ endif()
 
 option(PURRMIDI_BUILD_TESTS "Build host unit tests" ON)
 
-# Все синтезаторы (epiano / pluck / sine) входят в сборку; активный выбирается
-# во время работы сообщением MIDI Program Change (см. Core/Inc/synth_engine.h).
+# Все синтезаторы (epiano / pluck / sine / organ / soundfont) входят в сборку; активный
+# выбирается во время работы сообщением MIDI Program Change (см. Core/Inc/synth_engine.h).
 set(DAISYSP_DIR "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/DaisySP")
 if(NOT EXISTS "${DAISYSP_DIR}/Source")
     message(FATAL_ERROR
@@ -68,7 +68,19 @@ target_include_directories(purrmidi_synth_pluck PUBLIC
 target_compile_definitions(purrmidi_synth_pluck PUBLIC USE_DAISYSP_LGPL)
 target_compile_features(purrmidi_synth_pluck PUBLIC cxx_std_17)
 
-foreach(_synth sine pluck epiano organ)
+# soundfont: синтезатор SF2 на базе TinySoundFont и SF2Cache
+add_library(purrmidi_synth_soundfont STATIC
+    "${CMAKE_SOURCE_DIR}/Core/Src/soundfont_synth.cpp"
+    "${CMAKE_SOURCE_DIR}/Core/Src/sf2_cache.cpp"
+    "${CMAKE_SOURCE_DIR}/Core/Src/tinysoundfont_impl.cpp"
+)
+target_include_directories(purrmidi_synth_soundfont PUBLIC
+    "${CMAKE_SOURCE_DIR}/Core/Inc"
+    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/TinySoundFont"
+)
+target_compile_features(purrmidi_synth_soundfont PUBLIC cxx_std_17)
+
+foreach(_synth sine pluck epiano organ soundfont)
     if(MSVC)
         target_compile_options(purrmidi_synth_${_synth} PRIVATE /utf-8 /W4)
     else()
@@ -99,6 +111,7 @@ target_link_libraries(purrmidi_core PUBLIC
     purrmidi_synth_organ
     purrmidi_synth_pluck
     purrmidi_synth_sine
+    purrmidi_synth_soundfont
 )
 target_compile_features(purrmidi_core PUBLIC c_std_11 cxx_std_17)
 
