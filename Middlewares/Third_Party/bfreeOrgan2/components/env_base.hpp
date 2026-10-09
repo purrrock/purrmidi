@@ -75,6 +75,11 @@ namespace synth
 				{
 				return _is_running;
 				}
+			/** True while the envelope is running its release stage (note already released). */
+			inline bool is_releasing()
+				{
+				return _is_running && state == env_feature_t::RELEASE;
+				}
 			inline void reset()
 				{
 				_is_running = false;

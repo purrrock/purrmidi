@@ -52,6 +52,12 @@ namespace synth
 			void reset();
 			bool is_active() override;
 
+			/** True if the voice is sounding but its note was already released. */
+			bool is_releasing();
+
+			/** Current envelope level (0..127) without advancing the envelope. Used for voice stealing. */
+			uint8_t peek_level();
+
 			/** @details Each voice sample is 9*(21bits tonewheel WORD)*(7bit envelope WORD) =
 			*   4 + 21 + 7 = 32 bits wide.
 			*/

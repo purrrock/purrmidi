@@ -74,9 +74,12 @@ void process_event(const Event& ev)
             break;
 
         case EV_CC:
-            if (ev.a == 120 || ev.a == 123) {
-                // All Sound Off / All Notes Off
+            if (ev.a == 120) {
+                // All Sound Off: immediate silence
                 g_organ.reset_all();
+            } else if (ev.a == 123) {
+                // All Notes Off: notes go through their normal release (no click)
+                g_organ.deactivate_all();
             } else {
                 cmd.status = midi::status_t::CONTROLLER_CHANGE;
                 cmd.data   = ev.a;
@@ -93,10 +96,16 @@ void process_event(const Event& ev)
 void process_events()
 {
     if (g_overflow_occurred.exchange(false, std::memory_order_acquire)) {
-        // Queue overflow: flush stale FIFO events and reset all voices immediately
-        Event dummy;
-        while (fifo_pop(dummy)) {}
+        // Queue overflow: note events may have been lost, so silence all voices to avoid
+        // stuck notes. Stale NOTE events are discarded, but queued controller changes
+        // (drawbars, chorus, envelope) are still applied so the panel state is not lost.
         g_organ.reset_all();
+        Event stale;
+        for (uint32_t i = 0; i < ORGAN_EVENT_FIFO_SIZE && fifo_pop(stale); ++i) {
+            if (stale.type == EV_CC) {
+                process_event(stale);
+            }
+        }
         return;
     }
 

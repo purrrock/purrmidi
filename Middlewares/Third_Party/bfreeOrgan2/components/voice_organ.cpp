@@ -76,6 +76,20 @@ namespace synth
 			return _is_active;
 			}
 
+		bool voice_organ::is_releasing()
+			{
+			return _is_active && envelope.is_releasing();
+			}
+
+		uint8_t voice_organ::peek_level()
+			{
+			#ifdef CLICK_TEST
+			return 0xFF;
+			#else
+			return envelope.peek_level();
+			#endif
+			}
+
 		void voice_organ::set_attack(uint32_t value)
 			{
 			envelope.set_speed(env::env_feature_t::ATTACK,value);

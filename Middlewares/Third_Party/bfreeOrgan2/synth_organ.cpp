@@ -48,6 +48,8 @@ namespace synth
 			{
 			oscillators = other.oscillators;
 			phase_table = other.phase_table;
+			voice_stamp = other.voice_stamp;
+			stamp_counter = other.stamp_counter;
 			fx = other.fx;
 			cc_drawbars = other.cc_drawbars;
 			voice::voice_organ::init(static_cast<const cc::value_t*>(cc_drawbars.data()),
@@ -64,6 +66,8 @@ namespace synth
 		std::for_each(phase_table.begin(),
 					phase_table.end(),
 					[](uint32_t &phase){phase = 0;});
+		voice_stamp.fill(0);
+		stamp_counter = 0;
 		reset_all();
 		for (auto &osc : oscillators)
 			{
@@ -118,6 +122,7 @@ namespace synth
 			if (existing != oscillators.end())
 				{
 				existing->activate(osc_note);
+				voice_stamp[existing - oscillators.begin()] = ++stamp_counter;
 				return;
 				}
 
@@ -128,12 +133,15 @@ namespace synth
 			if (inactive != oscillators.end())
 				{
 				inactive->activate(osc_note);
+				voice_stamp[inactive - oscillators.begin()] = ++stamp_counter;
 				return;
 				}
 
-			// 3. Voice stealing if all 12 voices are active: steal first voice
-			oscillators[0].deactivate();
-			oscillators[0].activate(osc_note);
+			// 3. Voice stealing if all voices are busy (see pick_voice_to_steal()).
+			// activate() continues from the current envelope level, so no level drop/click.
+			const size_t victim = pick_voice_to_steal();
+			oscillators[victim].activate(osc_note);
+			voice_stamp[victim] = ++stamp_counter;
 			return;
 			}
 		if(cmd.status == midi::status_t::NOTE_OFF)
@@ -202,6 +210,40 @@ namespace synth
 			return;
 			}
 		}
+	size_t synth_organ::pick_voice_to_steal()
+		{
+		// 1. Quietest voice among those already in release.
+		size_t best = FEAT_POLIPHONY;
+		uint8_t best_level = 0xFF;
+		for (size_t i = 0; i < FEAT_POLIPHONY; ++i)
+			{
+			if (oscillators[i].is_releasing())
+				{
+				const uint8_t level = oscillators[i].peek_level();
+				if (best == FEAT_POLIPHONY || level < best_level)
+					{
+					best = i;
+					best_level = level;
+					}
+				}
+			}
+		if (best != FEAT_POLIPHONY)
+			{
+			return best;
+			}
+
+		// 2. Oldest triggered voice (wrap-safe comparison of stamps).
+		best = 0;
+		for (size_t i = 1; i < FEAT_POLIPHONY; ++i)
+			{
+			if (static_cast<int32_t>(voice_stamp[i] - voice_stamp[best]) < 0)
+				{
+				best = i;
+				}
+			}
+		return best;
+		}
+
 	void synth_organ::push_pb_cmd(const pushbutton::command_t &cmd)
 		{
 		(void)cmd;
@@ -243,7 +285,7 @@ namespace synth
 
 	inline synth::sample_t synth_organ::to_external_sample(synth::internal_sample_t sample)
 			{
-			int64_t s = sample >> 20;
+			int64_t s = sample >> OUTPUT_SHIFT;
 			if (s > 32767) s = 32767;
 			if (s < -32768) s = -32768;
 			return static_cast<synth::sample_t>(s);

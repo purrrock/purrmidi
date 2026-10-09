@@ -45,6 +45,8 @@ namespace synth
 			* @details Evelope is 7 bits wide.
 			*/
 			uint8_t get_level() override;
+			/** Returns the current level (0..127) WITHOUT advancing the envelope. */
+			uint8_t peek_level() const;
 			void attack();
 			void release();
 			void reset();

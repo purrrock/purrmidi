@@ -51,7 +51,15 @@ namespace synth
 			{
 			_is_running = true;
 			state = env_feature_t::ATTACK;
-			current_register = 0ul;
+			/* PurrMidi: do NOT zero current_register here. Re-triggering a voice that is still
+			   in its release stage (or being stolen) must continue from the current level,
+			   otherwise the level drops to 0 and produces a dip/click. A voice that is free
+			   already has current_register == 0 (reset() / end of release). */
+			}
+
+		uint8_t env_ar::peek_level() const
+			{
+			return _is_running ? static_cast<uint8_t>(current_register >> 13) : 0;
 			}
 
 		inline void env_ar::release()
@@ -101,6 +109,12 @@ namespace synth
 
 		env_ar::env_ar()
 			{
+			current_register = 0ul;
+			state = env_feature_t::RELEASE;
+			for(auto &speed : feat_speed)
+				{
+				speed = 0ul;
+				}
 			}
 
 		}

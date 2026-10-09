@@ -23,6 +23,7 @@ SPDX-License-Identifier: Apache-2.0
 	@author Franco Caspe
 	@date Documented - 20 Mar 2019.
 */
+#include <cstddef>
 #include "flexynth_base.hpp"
 #include "tables.hpp"
 #include "midi_base.hpp"
@@ -61,6 +62,14 @@ namespace synth
 	/** MIDI CC ID of Voice Envelope Release */
 	constexpr uint8_t CC_ID_ENV_RELEASE = 78;
 
+	/** Output scaling: internal 64-bit sample is shifted right by this amount to get int16.
+	*
+	* @details Upstream used 20, which peaks at only about -33 dBFS for a single note and about
+	* -18 dBFS for 12 notes with all drawbars out. 18 gives +12 dB; the hard clamp in
+	* to_external_sample() still protects against overflow.
+	*/
+	constexpr int OUTPUT_SHIFT = 18;
+
 	/** @brief The bfreeorgan2 Synthesizer Architecture.
 	*
 	*	This implements is a synchronous with click and chorus effect.
@@ -98,6 +107,11 @@ namespace synth
 		void reset_all();
 		private:
 		/**
+		* Chooses the voice to steal when all voices are busy: the quietest voice that is
+		* already releasing, otherwise the voice that was triggered longest ago.
+		*/
+		size_t pick_voice_to_steal();
+		/**
 		* Updates the global phase table.
 		* @details For this Synthesizer Architecture, the phase table is independent of the Voice Components, as this is a synchronous organ.
 		*/
@@ -111,6 +125,11 @@ namespace synth
 		* The Organ Voices.
 		*/
 		std::array<voice::voice_organ,FEAT_POLIPHONY> oscillators;
+		/**
+		* Trigger stamp of each voice (for oldest-voice stealing).
+		*/
+		std::array<uint32_t,FEAT_POLIPHONY> voice_stamp;
+		uint32_t stamp_counter;
 		/**
 		* The Phase Table.
 		*/

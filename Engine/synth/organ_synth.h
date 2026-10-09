@@ -28,7 +28,8 @@ extern "C" {
  *   CC72 - Chorus Depth
  *   CC77 - Attack Rate
  *   CC78 - Release Rate
- *   CC120 / CC123 - All Sound Off / All Notes Off
+ *   CC120 - All Sound Off (immediate cut)
+ *   CC123 - All Notes Off (voices go through their release)
  */
 
 void OrganSynth_Init(void);
