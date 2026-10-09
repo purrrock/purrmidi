@@ -74,6 +74,8 @@ namespace synth
 			_is_active = false;
 			my_note = INVALID_NOTE;
 			envelope.reset();
+			envelope.set_speed(env::env_feature_t::ATTACK, clean_cut_value);
+			envelope.set_speed(env::env_feature_t::RELEASE, clean_cut_value);
 			}
 
 		inline bool voice_organ::is_active()

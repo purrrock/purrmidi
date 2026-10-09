@@ -122,14 +122,25 @@ static void test_queue_overflow_recovery() {
 static void test_init_clears_active_notes_immediately() {
     OrganSynth_Init();
 
+    // Modify envelope attack/release via CC 77/78
+    OrganSynth_ControlChange(77, 1);
+    OrganSynth_ControlChange(78, 1);
+
     // Play active notes
     OrganSynth_NoteOn(60, 100);
     OrganSynth_NoteOn(64, 100);
     CHECK(render_peak(256) > 0);
 
-    // Calling OrganSynth_Init must reset all voices immediately without release tails
+    // Calling OrganSynth_Init must reset all voices and envelope parameters immediately
     OrganSynth_Init();
     CHECK(render_peak(256) == 0);
+
+    // Verify envelope speeds are restored to defaults on subsequent note on
+    OrganSynth_NoteOn(60, 100);
+    CHECK(render_peak(256) > 0);
+    OrganSynth_NoteOff(60);
+    render_peak(2048);
+    CHECK(render_peak(1024) == 0);
 }
 
 static void test_max_drawbars_full_polyphony() {
