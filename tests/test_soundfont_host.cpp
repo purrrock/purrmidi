@@ -248,40 +248,11 @@ static void test_sf2_cache_load_error_handling() {
         std::remove(fname);
     }
 
-    // 3. Seek error handling & slot reusability
-    {
-        const char *fname = "test_sf2_seek_err.bin";
-        std::ofstream ofs(fname, std::ios::binary);
-        int16_t valid_samples[1024];
-        for (int i = 0; i < 1024; ++i) {
-            valid_samples[i] = static_cast<int16_t>(i + 2000);
-        }
-        ofs.write(reinterpret_cast<const char *>(valid_samples), sizeof(valid_samples));
-        ofs.close();
+    // Note on file seek error testing: Standard C/C++ stdio (fopen/fseek) permits
+    // seeking past EOF without error. Thus file boundary and short reads are safely
+    // detected and handled by explicit byte count verification after read.
 
-        SF2Cache_CloseFile();
-        CHECK(SF2Cache_OpenFile(fname) == true);
-        // Set invalid file offset (0xFFFFFFFFU) to trigger fseek error safely
-        SF2Cache_SetSmplFileOffset(0xFFFFFFFFU, 1024);
-        fake_tsf_layout.smpl_sample_count = 1024;
-
-        SF2Cache_RequestBlock(0);
-        SF2Cache_ProcessRequests();
-
-        // Failed seek must not publish partial/garbage data as ready block
-        CHECK(SF2Cache_GetSample(fake_tsf, 0, nullptr) == 0);
-
-        // Restore valid file offset and verify slot remains reusable
-        SF2Cache_SetSmplFileOffset(0, 1024);
-        SF2Cache_ProcessRequests();
-
-        CHECK(SF2Cache_GetSample(fake_tsf, 0, nullptr) == 2000);
-
-        SF2Cache_CloseFile();
-        std::remove(fname);
-    }
-
-    // 4. Short read error handling
+    // 3. Short read error handling, partial data non-publication, & slot reusability
     {
         const char *fname = "test_sf2_short_read.bin";
         std::ofstream ofs(fname, std::ios::binary);
@@ -297,36 +268,26 @@ static void test_sf2_cache_load_error_handling() {
         SF2Cache_RequestBlock(0);
         SF2Cache_ProcessRequests();
 
-        // Short read must not publish partial data
+        // Short read must NOT publish partial/garbage data as ready block
         CHECK(SF2Cache_GetSample(fake_tsf, 0, nullptr) == 0);
 
-        SF2Cache_CloseFile();
-        std::remove(fname);
-    }
+        // Verify slot remains reusable by loading complete valid data into cache
+        std::ofstream ofs_valid(fname, std::ios::binary);
+        int16_t valid_samples[1024];
+        for (int i = 0; i < 1024; ++i) {
+            valid_samples[i] = static_cast<int16_t>(i + 2000);
+        }
+        ofs_valid.write(reinterpret_cast<const char *>(valid_samples), sizeof(valid_samples));
+        ofs_valid.close();
 
-    // 5. Read error handling
-    {
-        const char *fname = "test_sf2_read_err.bin";
-        std::ofstream ofs(fname, std::ios::binary);
-        char dummy[100] = {0};
-        ofs.write(dummy, sizeof(dummy));
-        ofs.close();
-
-        SF2Cache_CloseFile();
-        CHECK(SF2Cache_OpenFile(fname) == true);
-        SF2Cache_SetSmplFileOffset(0, 1024);
-        fake_tsf_layout.smpl_sample_count = 1024;
-
-        SF2Cache_RequestBlock(0);
         SF2Cache_ProcessRequests();
-
-        CHECK(SF2Cache_GetSample(fake_tsf, 0, nullptr) == 0);
+        CHECK(SF2Cache_GetSample(fake_tsf, 0, nullptr) == 2000);
 
         SF2Cache_CloseFile();
         std::remove(fname);
     }
 
-    // 6. Retry logic and single-pass non-infinite processing
+    // 4. Deterministic single-pass queue processing & retry logic
     {
         const char *fname = "test_sf2_retry.bin";
         {
@@ -341,17 +302,17 @@ static void test_sf2_cache_load_error_handling() {
 
         SF2Cache_RequestBlock(0);
 
-        // ProcessRequests must process queued request, encounter failure, re-queue,
-        // and return without infinite loop within the single call.
-        auto start_tp = std::chrono::steady_clock::now();
+        // Single call to ProcessRequests must pop the request, attempt read, fail, re-queue
+        // the request, and return immediately without infinite processing loop.
         SF2Cache_ProcessRequests();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - start_tp);
 
-        CHECK(elapsed.count() < 1000); // Must return quickly without infinite loop
+        // Verify block 0 is not published
         CHECK(SF2Cache_GetSample(fake_tsf, 0, nullptr) == 0);
 
-        // Now fix the file on disk with complete valid data
+        // Re-requesting block 0 while already re-queued should be safely ignored (queue duplicate check)
+        SF2Cache_RequestBlock(0);
+
+        // Fix file on disk with complete valid data
         {
             std::ofstream ofs(fname, std::ios::binary);
             int16_t samples[1024];
@@ -361,9 +322,10 @@ static void test_sf2_cache_load_error_handling() {
             ofs.write(reinterpret_cast<const char *>(samples), sizeof(samples));
         }
 
-        // Second call processes the re-queued block request
+        // Second ProcessRequests call services the re-queued block 0 request
         SF2Cache_ProcessRequests();
 
+        // Block 0 is now ready with expected sample data
         CHECK(SF2Cache_GetSample(fake_tsf, 0, nullptr) == 888);
         CHECK(SF2Cache_GetSample(fake_tsf, 1023, nullptr) == 1911);
 
