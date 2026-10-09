@@ -6,23 +6,23 @@
 
 0. E-Piano — FM-синтез
 
-[epiano_synth.cpp](https://github.com/purrrock/purrmidi/blob/main/Core/Src/epiano_synth.cpp)
+[epiano_synth.cpp](https://github.com/purrrock/purrmidi/blob/main/Engine/synth/epiano_synth.cpp)
 
 Полифонический синтез электропиано с модуляцией частоты, затухающими составляющими тембра и стереопанорамированием. До 8 голосов по умолчанию. Подходит для Rhodes-подобных тембров.
 
 1. Pluck — физическое моделирование струны
 
-[pluck_synth.cpp](https://github.com/purrrock/purrmidi/blob/main/Core/Src/pluck_synth.cpp)
+[pluck_synth.cpp](https://github.com/purrrock/purrmidi/blob/main/Engine/synth/pluck_synth.cpp)
 
 Модель Karplus–Strong через `daisysp::Pluck`. Имитирует возбуждение струны и её затухание. Подходит для щипковых тембров, но в первую очередь ориентирована на одну активную струну.
 
 2. Sine — синусоидальный генератор
 
-[sine_synth.c](https://github.com/purrrock/purrmidi/blob/main/Core/Src/sine_synth.c)
+[sine_synth.c](https://github.com/purrrock/purrmidi/blob/main/Engine/synth/sine_synth.c)
 
 Одноголосный генератор с огибающей, громкостью и поддержкой sustain. Сейчас это скорее диагностический инструмент, чем полноценный музыкальный тембр.
 
-Источники: [диспетчер движков](https://github.com/purrrock/purrmidi/blob/main/Core/Src/synth_engine.cpp), [общий интерфейс](https://github.com/purrrock/purrmidi/blob/main/Core/Inc/synth_engine.h).
+Источники: [диспетчер движков](https://github.com/purrrock/purrmidi/blob/main/Engine/synth/synth_engine.cpp), [общий интерфейс](https://github.com/purrrock/purrmidi/blob/main/Engine/synth/synth_engine.h).
 
 Уже имеющиеся алгоритмы дают три разных отправных точки: FM, физическое моделирование струны и базовый осциллятор. Поэтому я бы выбирал следующие алгоритмы по двум критериям: насколько новый тембр отличается от существующих и насколько разумно его реализовать на микроконтроллере.
 
@@ -159,7 +159,7 @@ PCM я бы оставил на следующий этап: до его раз�
 
 ## 5. Как встроить новые алгоритмы в текущую архитектуру
 
-Сейчас в [synth_engine.cpp](https://github.com/purrrock/purrmidi/blob/main/Core/Src/synth_engine.cpp) используется статическая таблица из трёх движков. Она связывает имя инструмента с функциями `Init`, `NoteOn`, `NoteOff`, `ControlChange` и `FillStereoBuffer`. Общий контракт уже позволяет добавлять новые алгоритмы без изменения MIDI-тракта.
+Сейчас в [synth_engine.cpp](https://github.com/purrrock/purrmidi/blob/main/Engine/synth/synth_engine.cpp) используется статическая таблица из трёх движков. Она связывает имя инструмента с функциями `Init`, `NoteOn`, `NoteOff`, `ControlChange` и `FillStereoBuffer`. Общий контракт уже позволяет добавлять новые алгоритмы без изменения MIDI-тракта.
 
 Для каждого нового движка потребуется:
 

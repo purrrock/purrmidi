@@ -26,42 +26,50 @@ endif()
 
 # sine: одноголосая синусоида
 add_library(purrmidi_synth_sine STATIC
-    "${CMAKE_SOURCE_DIR}/Core/Src/synth.c"
-    "${CMAKE_SOURCE_DIR}/Core/Src/sine_synth.c"
+    "${CMAKE_SOURCE_DIR}/Engine/synth/synth.c"
+    "${CMAKE_SOURCE_DIR}/Engine/synth/sine_synth.c"
 )
-target_include_directories(purrmidi_synth_sine PUBLIC "${CMAKE_SOURCE_DIR}/Core/Inc")
+target_include_directories(purrmidi_synth_sine PUBLIC
+    "${CMAKE_SOURCE_DIR}/Core/Inc"
+    "${CMAKE_SOURCE_DIR}/Engine/synth"
+)
 target_compile_features(purrmidi_synth_sine PUBLIC c_std_11)
 
 # epiano: полифоническое FM-электропиано (без внешних зависимостей)
 add_library(purrmidi_synth_epiano STATIC
-    "${CMAKE_SOURCE_DIR}/Core/Src/epiano_synth.cpp"
+    "${CMAKE_SOURCE_DIR}/Engine/synth/epiano_synth.cpp"
 )
-target_include_directories(purrmidi_synth_epiano PUBLIC "${CMAKE_SOURCE_DIR}/Core/Inc")
+target_include_directories(purrmidi_synth_epiano PUBLIC
+    "${CMAKE_SOURCE_DIR}/Core/Inc"
+    "${CMAKE_SOURCE_DIR}/Engine/synth"
+)
 target_compile_features(purrmidi_synth_epiano PUBLIC cxx_std_17)
 
 # organ: тонколесный орган (bfreeOrgan2)
 add_library(purrmidi_synth_organ STATIC
-    "${CMAKE_SOURCE_DIR}/Core/Src/organ_synth.cpp"
-    "${CMAKE_SOURCE_DIR}/Third_Party/bfreeOrgan2/synth_organ.cpp"
-    "${CMAKE_SOURCE_DIR}/Third_Party/bfreeOrgan2/components/voice_organ.cpp"
-    "${CMAKE_SOURCE_DIR}/Third_Party/bfreeOrgan2/components/efx_chorus.cpp"
-    "${CMAKE_SOURCE_DIR}/Third_Party/bfreeOrgan2/components/env_ar.cpp"
-    "${CMAKE_SOURCE_DIR}/Third_Party/bfreeOrgan2/components/env_click.cpp"
+    "${CMAKE_SOURCE_DIR}/Engine/synth/organ_synth.cpp"
+    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp"
+    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp"
+    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/bfreeOrgan2/components/efx_chorus.cpp"
+    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/bfreeOrgan2/components/env_ar.cpp"
+    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/bfreeOrgan2/components/env_click.cpp"
 )
 target_include_directories(purrmidi_synth_organ PUBLIC
     "${CMAKE_SOURCE_DIR}/Core/Inc"
-    "${CMAKE_SOURCE_DIR}/Third_Party/bfreeOrgan2"
-    "${CMAKE_SOURCE_DIR}/Third_Party/bfreeOrgan2/components"
+    "${CMAKE_SOURCE_DIR}/Engine/synth"
+    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/bfreeOrgan2"
+    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/bfreeOrgan2/components"
 )
 target_compile_features(purrmidi_synth_organ PUBLIC cxx_std_17)
 
 # pluck: Карплус-Стронг на DaisySP Pluck
 add_library(purrmidi_synth_pluck STATIC
-    "${CMAKE_SOURCE_DIR}/Core/Src/pluck_synth.cpp"
+    "${CMAKE_SOURCE_DIR}/Engine/synth/pluck_synth.cpp"
     "${DAISYSP_DIR}/DaisySP-LGPL/Source/PhysicalModeling/pluck.cpp"
 )
 target_include_directories(purrmidi_synth_pluck PUBLIC
     "${CMAKE_SOURCE_DIR}/Core/Inc"
+    "${CMAKE_SOURCE_DIR}/Engine/synth"
     "${DAISYSP_DIR}/Source"
     "${DAISYSP_DIR}/DaisySP-LGPL/Source"
 )
@@ -70,12 +78,13 @@ target_compile_features(purrmidi_synth_pluck PUBLIC cxx_std_17)
 
 # soundfont: синтезатор SF2 на базе TinySoundFont и SF2Cache
 add_library(purrmidi_synth_soundfont STATIC
-    "${CMAKE_SOURCE_DIR}/Core/Src/soundfont_synth.cpp"
-    "${CMAKE_SOURCE_DIR}/Core/Src/sf2_cache.cpp"
-    "${CMAKE_SOURCE_DIR}/Core/Src/tinysoundfont_impl.cpp"
+    "${CMAKE_SOURCE_DIR}/Engine/synth/soundfont_synth.cpp"
+    "${CMAKE_SOURCE_DIR}/Engine/synth/sf2_cache.cpp"
+    "${CMAKE_SOURCE_DIR}/Engine/synth/tinysoundfont_impl.cpp"
 )
 target_include_directories(purrmidi_synth_soundfont PUBLIC
     "${CMAKE_SOURCE_DIR}/Core/Inc"
+    "${CMAKE_SOURCE_DIR}/Engine/synth"
     "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/TinySoundFont"
 )
 target_compile_features(purrmidi_synth_soundfont PUBLIC cxx_std_17)
@@ -95,7 +104,7 @@ endforeach()
 # purrmidi_core: MIDI-очередь + диспетчер + рантайм-переключатель синтезаторов
 # ---------------------------------------------------------------------------
 add_library(purrmidi_core STATIC
-    "${CMAKE_SOURCE_DIR}/Core/Src/synth_engine.cpp"
+    "${CMAKE_SOURCE_DIR}/Engine/synth/synth_engine.cpp"
     "${CMAKE_SOURCE_DIR}/Core/Src/chord_detector.c"
     "${CMAKE_SOURCE_DIR}/Engine/midi/midi_queue.c"
     "${CMAKE_SOURCE_DIR}/Engine/midi/midi_dispatch.c"
@@ -104,6 +113,7 @@ add_library(purrmidi_core STATIC
 target_include_directories(purrmidi_core PUBLIC
     "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/midi"
+    "${CMAKE_SOURCE_DIR}/Engine/synth"
 )
 
 target_link_libraries(purrmidi_core PUBLIC
