@@ -19,7 +19,9 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "dma.h"
+#include "fatfs.h"
 #include "sai.h"
+#include "sdmmc.h"
 #include "spi.h"
 #include "usart.h"
 #include "usb_host.h"
@@ -181,6 +183,8 @@ int main(void)
   MX_SAI1_Init();
   MX_USB_HOST_Init();
   MX_SPI4_Init();
+  MX_SDMMC1_SD_Init();
+  MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
   Display_Init();
   MIDI_Queue_Init();

@@ -29,12 +29,12 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
-#include "synth.h"        // отладочный синусоидальный тон
-#include "pluck_synth.h" // Karplus-Strong
+#include "synth_engine.h" // выбранный при компиляции синтезатор: sine / pluck / epiano (см. PURRMIDI_SYNTH в CMake)
 #include "display.h"
 #include "midi_event.h"
 #include "midi_queue.h"
 #include "midi_usb.h"
+#include "usb_port_recover.h"
 #include "usbh_midi.h"
 #include "midi_dispatch.h"
 /* USER CODE END Includes */
@@ -64,9 +64,10 @@ static volatile uint32_t note_on_count = 0;
 static volatile uint32_t note_off_count = 0;
 
 static uint8_t active_notes[128];
+static uint8_t active_note_stack[128];
 static uint16_t active_note_count = 0;
 
-/* 1 = print [USBDIAG1..3] to UART (debug only), 0 = silent */
+/* 1 = print [STATS] and [USBDIAG1..3] to UART (debug only), 0 = silent */
 #define USB_DIAG_UART 0
 
 /* Audio: 48 kHz, stereo, 16 bit. Circular DMA ring split into two halves.
@@ -184,8 +185,8 @@ int main(void)
   Display_Init();
   MIDI_Queue_Init();
   MIDI_USB_Init();
-  Synth_Init();      // Инициализация простого синтезатора
-  PluckSynth_Init(); // Инициализация синтезатора струны
+  SynthEngine_Init(); // Инициализация синтезатора, выбранного на этапе компиляции
+  printf("Synth engine: %s\r\n", SYNTH_ENGINE_NAME);
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
   memset(audio_buffer, 0, sizeof(audio_buffer));  /* .dma_buffer is not zeroed by startup */
   if (HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer, AUDIO_BUFFER_SIZE) != HAL_OK)
@@ -204,7 +205,9 @@ int main(void)
   uint32_t max_loop_dt = 0;
   static bool silent_episode_reported = false;
 #endif
+#if USB_DIAG_UART
   static uint32_t last_report = 0;
+#endif
 
   while (1)
   {
@@ -223,6 +226,7 @@ int main(void)
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
+    USB_PortLostRecover(&hUsbHostFS);   /* port silently disabled by HW -> re-enumerate */
     MIDI_USB_Process();
 
     if (MIDI_USB_HasStateChanged())
@@ -237,7 +241,7 @@ int main(void)
         // printf("[MIDI] %02X %02X %02X\r\n",
         //        event.status, event.data1, event.data2);
 
-        MIDI_Dispatch(&event);   /* Note On/Off, CC -> PluckSynth (lock-free FIFO to the audio ISR) */
+        MIDI_Dispatch(&event);   /* Note On/Off, CC -> выбранный синтезатор (lock-free FIFO в аудио-ISR) */
 
         uint8_t command = event.status & MIDI_STATUS_MASK;
         uint8_t note = event.data1;
@@ -249,6 +253,7 @@ int main(void)
             if (note < 128 && active_notes[note] == 0)
             {
                 active_notes[note] = 1;
+                active_note_stack[active_note_count] = note;
                 active_note_count++;
             }
 
@@ -258,7 +263,8 @@ int main(void)
                 GPIO_PIN_SET
             );
 
-            Display_SetLastNote(note);
+            uint8_t last_active_note = (active_note_count > 0) ? active_note_stack[active_note_count - 1] : 0;
+            Display_SetNoteState(active_notes, active_note_count, last_active_note);
         }
         else if (command == MIDI_STATUS_NOTE_OFF ||
                  (command == MIDI_STATUS_NOTE_ON && event.data2 == 0))
@@ -269,11 +275,27 @@ int main(void)
             {
                 active_notes[note] = 0;
 
+                /* Удаляем ноту из active_note_stack */
+                for (uint16_t i = 0; i < active_note_count; i++)
+                {
+                    if (active_note_stack[i] == note)
+                    {
+                        for (uint16_t j = i; j < active_note_count - 1; j++)
+                        {
+                            active_note_stack[j] = active_note_stack[j + 1];
+                        }
+                        break;
+                    }
+                }
+
                 if (active_note_count > 0)
                 {
                     active_note_count--;
                 }
             }
+
+            uint8_t last_active_note = (active_note_count > 0) ? active_note_stack[active_note_count - 1] : 0;
+            Display_SetNoteState(active_notes, active_note_count, last_active_note);
 
             if (active_note_count == 0)
             {
@@ -286,9 +308,8 @@ int main(void)
         }
     }
 
-    uint32_t now = HAL_GetTick();
-
 #if USB_DIAG_UART
+    uint32_t now = HAL_GetTick();
     uint32_t silence_ms = now - MIDI_USB_GetLastPacketTick();
 
     if (!MIDI_USB_IsConnected() || silence_ms <= 3000)
@@ -303,6 +324,7 @@ int main(void)
     }
 #endif
 
+#if USB_DIAG_UART
     if (now - last_report >= 10000)
     {
         last_report = now;
@@ -313,12 +335,11 @@ int main(void)
                note_off_count,
                MIDI_Queue_GetOverrunCount(),
                MIDI_USB_GetReceiveErrorsCount());
-#if USB_DIAG_UART
         Print_USB_Diag(max_loop_dt);
         max_loop_dt = 0;
         prev_loop_tick = HAL_GetTick();
-#endif
     }
+#endif
   }
 
   /* USER CODE END 3 */
@@ -389,14 +410,14 @@ void SystemClock_Config(void)
 void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai)
 {
     if (hsai->Instance == SAI1_Block_A) {
-        PluckSynth_FillStereoBuffer(&audio_buffer[0], AUDIO_BUFFER_FRAMES / 2);
+        SynthEngine_FillStereoBuffer(&audio_buffer[0], AUDIO_BUFFER_FRAMES / 2);
     }
 }
 
 void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai)
 {
     if (hsai->Instance == SAI1_Block_A) {
-        PluckSynth_FillStereoBuffer(&audio_buffer[AUDIO_BUFFER_SIZE / 2], AUDIO_BUFFER_FRAMES / 2);
+        SynthEngine_FillStereoBuffer(&audio_buffer[AUDIO_BUFFER_SIZE / 2], AUDIO_BUFFER_FRAMES / 2);
     }
 }
 
