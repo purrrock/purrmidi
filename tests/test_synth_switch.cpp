@@ -105,8 +105,38 @@ static void test_program_wraps_modulo() {
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
     send_pc(9);     // 9 % 5 == 4 -> SoundFont
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
-    send_pc(127);   // 127 % 5 == 2 -> Sine
+}
+
+static void test_program_change_127_cycles_engines() {
+    SynthEngine_Init();
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
+
+    // Program Change 127 переключает на следующий инструмент по циклу:
+    // E-Piano -> Pluck -> Sine -> Organ -> SoundFont -> E-Piano
+    send_pc(127);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
+
+    send_pc(127);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SINE);
+
+    send_pc(127);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
+
+    send_pc(127);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
+
+    send_pc(127);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
+
+    // Обычные Program Change 0-4 выбирают инструменты напрямую
+    send_pc(3);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
+
+    send_pc(127);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
+
+    send_pc(0);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
 }
 
 static void test_every_engine_makes_sound() {
@@ -201,6 +231,7 @@ int main() {
     test_default_is_epiano();
     test_program_change_selects_engine();
     test_program_wraps_modulo();
+    test_program_change_127_cycles_engines();
     test_every_engine_makes_sound();
     test_same_program_does_not_cut_note();
     test_switch_silences_old_engine();
