@@ -1,5 +1,5 @@
 /*
- * Рантайм-диспетчер звуковых движков: sine / pluck / epiano.
+ * Рантайм-диспетчер звуковых движков: sine / pluck / epiano / organ / soundfont.
  * Выбор движка делается MIDI-сообщением Program Change (см. synth_engine.h).
  *
  * Потоковая модель
@@ -22,6 +22,7 @@
 #include "organ_synth.h"
 #include "pluck_synth.h"
 #include "sine_synth.h"
+#include "soundfont_synth.h"
 
 #include <atomic>
 #include <cstring>
@@ -51,6 +52,9 @@ const Engine kEngines[SYNTH_ENGINE_COUNT] = {
     /* SYNTH_ENGINE_ORGAN */
     { "organ", OrganSynth_Init, OrganSynth_NoteOn, OrganSynth_NoteOff,
       OrganSynth_ControlChange, OrganSynth_FillStereoBuffer },
+    /* SYNTH_ENGINE_SOUNDFONT */
+    { "soundfont", SoundFontSynth_Init, SoundFontSynth_NoteOn, SoundFontSynth_NoteOff,
+      SoundFontSynth_ControlChange, SoundFontSynth_FillStereoBuffer },
 };
 
 std::atomic<const Engine *> g_active{nullptr};   /* nullptr до первого SynthEngine_Init() */
