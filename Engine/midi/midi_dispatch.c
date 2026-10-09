@@ -27,8 +27,14 @@ void MIDI_Dispatch(const MIDI_Event_t *e)
             break;
 
         case MIDI_STATUS_PROGRAM_CHANGE:
-            /* data1 = номер программы -> выбор синтезатора (epiano / pluck / sine) */
-            SynthEngine_ProgramChange(e->data1);
+            /* data1 = номер программы -> выбор синтезатора */
+            if (e->data1 == 127) {
+                SynthEngineId cur = SynthEngine_GetCurrent();
+                SynthEngineId next = (SynthEngineId)(((uint32_t)cur + 1U) % SYNTH_ENGINE_COUNT);
+                SynthEngine_Select(next);
+            } else {
+                SynthEngine_ProgramChange(e->data1);
+            }
             break;
 
         default:
