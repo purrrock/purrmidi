@@ -64,7 +64,7 @@ namespace synth
 		std::for_each(phase_table.begin(),
 					phase_table.end(),
 					[](uint32_t &phase){phase = 0;});
-		deactivate_all();
+		reset_all();
 		voice::voice_organ::init(static_cast<const cc::value_t*>(cc_drawbars.data()),
 								static_cast<const uint32_t*>(phase_table.data()));
 		fx = efx::efx_chorus();
@@ -78,6 +78,14 @@ namespace synth
 		for (auto &osc : oscillators)
 			{
 			osc.deactivate();
+			}
+		}
+
+	void synth_organ::reset_all()
+		{
+		for (auto &osc : oscillators)
+			{
+			osc.reset();
 			}
 		}
 

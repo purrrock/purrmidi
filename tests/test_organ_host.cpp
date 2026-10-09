@@ -115,9 +115,21 @@ static void test_queue_overflow_recovery() {
     }
     CHECK(OrganSynth_GetDroppedEventCount() > 0);
 
-    // Process buffer: overflow panic triggers deactivate_all()
-    render_peak(2048);
+    // Process buffer: overflow panic triggers reset_all()
     CHECK(render_peak(1024) == 0);
+}
+
+static void test_init_clears_active_notes_immediately() {
+    OrganSynth_Init();
+
+    // Play active notes
+    OrganSynth_NoteOn(60, 100);
+    OrganSynth_NoteOn(64, 100);
+    CHECK(render_peak(256) > 0);
+
+    // Calling OrganSynth_Init must reset all voices immediately without release tails
+    OrganSynth_Init();
+    CHECK(render_peak(256) == 0);
 }
 
 static void test_max_drawbars_full_polyphony() {
@@ -159,6 +171,7 @@ int main() {
     test_out_of_bounds_notes();
     test_all_notes_off();
     test_queue_overflow_recovery();
+    test_init_clears_active_notes_immediately();
     test_max_drawbars_full_polyphony();
 
     if (g_failures != 0) {

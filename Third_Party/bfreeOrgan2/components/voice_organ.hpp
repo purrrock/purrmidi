@@ -44,6 +44,7 @@ namespace synth
 			static void init(const cc::value_t *drawbar_vector,const uint32_t *phase_table);
 			void activate(uint8_t note) override;
 			void deactivate() override;
+			void reset();
 			bool is_active() override;
 
 			/** @details Each voice sample is 9*(21bits tonewheel WORD)*(7bit envelope WORD) =

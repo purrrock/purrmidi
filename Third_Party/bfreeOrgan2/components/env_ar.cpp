@@ -59,6 +59,13 @@ namespace synth
 			state = env_feature_t::RELEASE;
 			}
 
+		void env_ar::reset()
+			{
+			_is_running = false;
+			current_register = 0ul;
+			state = env_feature_t::RELEASE;
+			}
+
 		inline void env_ar::update_registers()
 			{
 			if(state == env_feature_t::SUSTAIN)

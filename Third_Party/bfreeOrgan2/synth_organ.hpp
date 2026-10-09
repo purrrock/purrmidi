@@ -88,9 +88,14 @@ namespace synth
 		void init();
 
 		/**
-		* Deactivates all active voices immediately.
+		* Deactivates all active voices immediately (release phase).
 		*/
 		void deactivate_all();
+
+		/**
+		* Resets all voices immediately to silence without release tail.
+		*/
+		void reset_all();
 		private:
 		/**
 		* Updates the global phase table.

@@ -75,6 +75,11 @@ namespace synth
 				{
 				return _is_running;
 				}
+			inline void reset()
+				{
+				_is_running = false;
+				current_register = 0ul;
+				}
 			protected:
 			env_base()
 				{

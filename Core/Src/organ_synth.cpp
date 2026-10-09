@@ -76,7 +76,7 @@ void process_event(const Event& ev)
         case EV_CC:
             if (ev.a == 120 || ev.a == 123) {
                 // All Sound Off / All Notes Off
-                g_organ.deactivate_all();
+                g_organ.reset_all();
             } else {
                 cmd.status = midi::status_t::CONTROLLER_CHANGE;
                 cmd.data   = ev.a;
@@ -93,10 +93,10 @@ void process_event(const Event& ev)
 void process_events()
 {
     if (g_overflow_occurred.exchange(false, std::memory_order_acquire)) {
-        // Queue overflow: flush stale FIFO events and deactivate all voices
+        // Queue overflow: flush stale FIFO events and reset all voices immediately
         Event dummy;
         while (fifo_pop(dummy)) {}
-        g_organ.deactivate_all();
+        g_organ.reset_all();
         return;
     }
 

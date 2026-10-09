@@ -69,6 +69,13 @@ namespace synth
 			envelope.release();
 			}
 
+		void voice_organ::reset()
+			{
+			_is_active = false;
+			my_note = INVALID_NOTE;
+			envelope.reset();
+			}
+
 		inline bool voice_organ::is_active()
 			{
 			return _is_active;

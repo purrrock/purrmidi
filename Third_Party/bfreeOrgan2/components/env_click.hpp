@@ -81,6 +81,7 @@ namespace synth
 			uint8_t get_level() override;
 			void attack();
 			void release();
+			void reset();
 			env_click();
 			private:
 			/** Index of the click wave */

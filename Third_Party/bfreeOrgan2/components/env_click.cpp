@@ -61,6 +61,14 @@ namespace synth
 			state = env_feature_t::RELEASE;
 			}
 
+		void env_click::reset()
+			{
+			_is_running = false;
+			current_register = 0ul;
+			click_wave_idx = 0;
+			state = env_feature_t::RELEASE;
+			}
+
 		inline void env_click::update_registers()
 			{
 			if(state == env_feature_t::SUSTAIN)
