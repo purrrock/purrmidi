@@ -19,6 +19,7 @@
 
 #include "synth_engine.h"
 #include "epiano_synth.h"
+#include "organ_synth.h"
 #include "pluck_synth.h"
 #include "sine_synth.h"
 
@@ -47,6 +48,9 @@ const Engine kEngines[SYNTH_ENGINE_COUNT] = {
     /* SYNTH_ENGINE_SINE */
     { "sine", SineSynth_Init, SineSynth_NoteOn, SineSynth_NoteOff,
       SineSynth_ControlChange, SineSynth_FillStereoBuffer },
+    /* SYNTH_ENGINE_ORGAN */
+    { "organ", OrganSynth_Init, OrganSynth_NoteOn, OrganSynth_NoteOff,
+      OrganSynth_ControlChange, OrganSynth_FillStereoBuffer },
 };
 
 std::atomic<const Engine *> g_active{nullptr};   /* nullptr до первого SynthEngine_Init() */

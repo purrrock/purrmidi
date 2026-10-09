@@ -39,6 +39,22 @@ add_library(purrmidi_synth_epiano STATIC
 target_include_directories(purrmidi_synth_epiano PUBLIC "${CMAKE_SOURCE_DIR}/Core/Inc")
 target_compile_features(purrmidi_synth_epiano PUBLIC cxx_std_17)
 
+# organ: тонколесный орган (bfreeOrgan2)
+add_library(purrmidi_synth_organ STATIC
+    "${CMAKE_SOURCE_DIR}/Core/Src/organ_synth.cpp"
+    "${CMAKE_SOURCE_DIR}/Third_Party/bfreeOrgan2/synth_organ.cpp"
+    "${CMAKE_SOURCE_DIR}/Third_Party/bfreeOrgan2/components/voice_organ.cpp"
+    "${CMAKE_SOURCE_DIR}/Third_Party/bfreeOrgan2/components/efx_chorus.cpp"
+    "${CMAKE_SOURCE_DIR}/Third_Party/bfreeOrgan2/components/env_ar.cpp"
+    "${CMAKE_SOURCE_DIR}/Third_Party/bfreeOrgan2/components/env_click.cpp"
+)
+target_include_directories(purrmidi_synth_organ PUBLIC
+    "${CMAKE_SOURCE_DIR}/Core/Inc"
+    "${CMAKE_SOURCE_DIR}/Third_Party/bfreeOrgan2"
+    "${CMAKE_SOURCE_DIR}/Third_Party/bfreeOrgan2/components"
+)
+target_compile_features(purrmidi_synth_organ PUBLIC cxx_std_17)
+
 # pluck: Карплус-Стронг на DaisySP Pluck
 add_library(purrmidi_synth_pluck STATIC
     "${CMAKE_SOURCE_DIR}/Core/Src/pluck_synth.cpp"
@@ -52,7 +68,7 @@ target_include_directories(purrmidi_synth_pluck PUBLIC
 target_compile_definitions(purrmidi_synth_pluck PUBLIC USE_DAISYSP_LGPL)
 target_compile_features(purrmidi_synth_pluck PUBLIC cxx_std_17)
 
-foreach(_synth sine pluck epiano)
+foreach(_synth sine pluck epiano organ)
     if(MSVC)
         target_compile_options(purrmidi_synth_${_synth} PRIVATE /utf-8 /W4)
     else()
@@ -80,6 +96,7 @@ target_include_directories(purrmidi_core PUBLIC
 
 target_link_libraries(purrmidi_core PUBLIC
     purrmidi_synth_epiano
+    purrmidi_synth_organ
     purrmidi_synth_pluck
     purrmidi_synth_sine
 )

@@ -106,9 +106,16 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Звуковые движки (все входят в прошивку, выбор — по MIDI Program Change)
     Core/Src/synth_engine.cpp
     Core/Src/epiano_synth.cpp
+    Core/Src/organ_synth.cpp
     Core/Src/pluck_synth.cpp
     Core/Src/sine_synth.c
     Core/Src/synth.c
+
+    Third_Party/bfreeOrgan2/synth_organ.cpp
+    Third_Party/bfreeOrgan2/components/voice_organ.cpp
+    Third_Party/bfreeOrgan2/components/efx_chorus.cpp
+    Third_Party/bfreeOrgan2/components/env_ar.cpp
+    Third_Party/bfreeOrgan2/components/env_click.cpp
 
     Core/Src/usbh_midi.c
     Core/Src/display.c
@@ -126,6 +133,8 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Inc
     Engine/midi
     Platform/midi_usb
+    Third_Party/bfreeOrgan2
+    Third_Party/bfreeOrgan2/components
 
     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735
 )

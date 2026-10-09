@@ -32,6 +32,13 @@ target_link_libraries(test_epiano_host PRIVATE purrmidi_synth_epiano)
 target_compile_features(test_epiano_host PRIVATE cxx_std_17)
 add_test(NAME test_epiano_host COMMAND test_epiano_host)
 
+add_executable(test_organ_host
+    test_organ_host.cpp
+)
+target_link_libraries(test_organ_host PRIVATE purrmidi_synth_organ)
+target_compile_features(test_organ_host PRIVATE cxx_std_17)
+add_test(NAME test_organ_host COMMAND test_organ_host)
+
 add_executable(test_queue_dispatch
     test_queue_dispatch.cpp
 )

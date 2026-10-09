@@ -73,26 +73,32 @@ static void test_program_change_selects_engine() {
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SINE);
     CHECK(std::strcmp(SynthEngine_GetName(), "sine") == 0);
 
+    send_pc(3);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
+    CHECK(std::strcmp(SynthEngine_GetName(), "organ") == 0);
+
     send_pc(0);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
 
     // Канал сообщения не важен (omni)
-    send_pc(2, 9);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SINE);
+    send_pc(3, 9);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
     send_pc(1, 15);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
 }
 
 static void test_program_wraps_modulo() {
     SynthEngine_Init();
-    send_pc(3);
+    send_pc(4);     // 4 % 4 == 0
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
-    send_pc(4);
+    send_pc(5);     // 5 % 4 == 1
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
-    send_pc(5);
+    send_pc(6);     // 6 % 4 == 2
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SINE);
-    send_pc(127);   // 127 % 3 == 1
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
+    send_pc(7);     // 7 % 4 == 3
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
+    send_pc(127);   // 127 % 4 == 3
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
 }
 
 static void test_every_engine_makes_sound() {
