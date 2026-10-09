@@ -21,7 +21,6 @@
 #include "dma.h"
 #include "fatfs.h"
 #include "sai.h"
-#include "sdmmc.h"
 #include "spi.h"
 #include "usart.h"
 #include "usb_host.h"
@@ -183,12 +182,11 @@ int main(void)
   MX_SAI1_Init();
   MX_USB_HOST_Init();
   MX_SPI4_Init();
-  MX_SDMMC1_SD_Init();
-  MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
   Display_Init();
   MIDI_Queue_Init();
   MIDI_USB_Init();
+  // SDStorage_Mount()
   SynthEngine_Init(); // Включает синтезатор по умолчанию (E-Piano); дальше выбор — по Program Change
   printf("Synth engine: %s\r\n", SynthEngine_GetName());
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
