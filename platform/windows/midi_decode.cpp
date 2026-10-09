@@ -27,7 +27,7 @@ std::string GetCCName(uint8_t cc) {
         case 64:
             return "Sustain";
         default:
-            return "не используется pluck_synth";
+            return "Not used";
     }
 }
 

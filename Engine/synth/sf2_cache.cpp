@@ -104,6 +104,10 @@ bool SF2Cache_OpenFile(const char *filepath)
         if (!g_host_file) {
             g_host_file = std::fopen("SNDFNT.SF2", "rb");
         }
+        if (!g_host_file) {
+            std::fprintf(stderr, "[SF2] Cannot open '%s', 'tests/SNDFNT.SF2', or 'SNDFNT.SF2'.\n", filepath);
+            std::fprintf(stderr, "[SF2] Host paths are relative to the process working directory.\n");
+        }
     }
     return g_host_file != nullptr;
 #else

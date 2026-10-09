@@ -7,6 +7,7 @@
 #include "tsf.h"
 
 #include <cstring>
+#include <cstdio>
 
 namespace {
 
@@ -26,6 +27,7 @@ bool SoundFontSynth_InitSF2(void)
     g_loaded = false;
 
     if (!SF2Cache_OpenFile("0:/SNDFNT.SF2")) {
+        std::fprintf(stderr, "[SF2] Failed to open SoundFont file; see the attempted host paths above.\n");
         return false;
     }
 
@@ -34,9 +36,12 @@ bool SoundFontSynth_InitSF2(void)
 
     g_tsf = tsf_load(&stream);
     if (!g_tsf) {
+        std::fprintf(stderr, "[SF2] tsf_load() failed. The file may be invalid, truncated, unsupported, or unreadable.\n");
         SF2Cache_CloseFile();
         return false;
     }
+
+    std::fprintf(stderr, "[SF2] SoundFont metadata loaded successfully.\n");
 
     tsf_set_output(g_tsf, TSF_STEREO_INTERLEAVED, 48000, 0.0f);
     tsf_set_max_voices(g_tsf, 32);

@@ -18,6 +18,8 @@
 #include "wav_recorder.h"
 #include "synth_engine.h"
 #include "midi_dispatch.h"
+#include "soundfont_synth.h"
+#include "sf2_cache.h"
 
 extern "C" {
 #include "midi_queue.h"
@@ -216,6 +218,16 @@ int main(int argc, char* argv[]) {
     SynthEngine_Init();
     MIDI_Queue_Init();
 
+    if (config.verbose) {
+        std::cout << "[SF2] Host file lookup uses tests/SNDFNT.SF2, then "
+                     "SNDFNT.SF2 relative to the current working directory.\n"
+                  << "[SF2] Startup engine: " << SynthEngine_GetName()
+                  << "; SoundFont loaded: "
+                  << (SoundFontSynth_IsLoaded() ? "yes" : "no (loaded on engine selection)")
+                  << "; SF2 file open: " << (SF2Cache_IsFileOpen() ? "yes" : "no")
+                  << "\n";
+    }
+
     MidiInput midi_in;
     auto start_time = std::chrono::steady_clock::now();
 
@@ -283,13 +295,36 @@ int main(int argc, char* argv[]) {
     while (g_running.load()) {
         MIDI_Event_t event;
         while (MIDI_Queue_Pop(&event)) {
+            if (config.verbose) {
+                std::lock_guard<std::mutex> lock(g_console_mutex);
+                std::cout << "[MIDI] status=0x" << std::hex
+                          << static_cast<int>(event.status)
+                          << std::dec
+                          << " data1=" << static_cast<int>(event.data1)
+                          << " data2=" << static_cast<int>(event.data2) << "\n";
+            }
+
             MIDI_Dispatch(&event);
             if ((event.status & MIDI_STATUS_MASK) == MIDI_STATUS_PROGRAM_CHANGE) {
                 std::lock_guard<std::mutex> lock(g_console_mutex);
                 std::cout << "[PC] program " << static_cast<int>(event.data1)
-                          << " -> synth engine: " << SynthEngine_GetName() << "\n";
+                          << " -> synth engine: " << SynthEngine_GetName();
+                if (config.verbose) {
+                    std::cout << "; SoundFont loaded: "
+                              << (SoundFontSynth_IsLoaded() ? "yes" : "no")
+                              << "; SF2 file open: "
+                              << (SF2Cache_IsFileOpen() ? "yes" : "no");
+                }
+                std::cout << "\n";
             }
         }
+
+        // SF2Cache performs file I/O, so service queued PCM reads from the
+        // main thread, never from the real-time audio callback.
+        if (config.mode == AppConfig::Mode::Play) {
+            SoundFontSynth_Process();
+        }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
