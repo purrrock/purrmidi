@@ -1,5 +1,5 @@
 #include "midi_dispatch.h"
-#include "pluck_synth.h"
+#include "synth_engine.h"
 
 void MIDI_Dispatch(const MIDI_Event_t *e)
 {
@@ -12,18 +12,18 @@ void MIDI_Dispatch(const MIDI_Event_t *e)
     switch (cmd) {
         case MIDI_STATUS_NOTE_ON:
             if (e->data2 > 0) {
-                PluckSynth_NoteOn(e->data1, e->data2);
+                SynthEngine_NoteOn(e->data1, e->data2);
             } else {
-                PluckSynth_NoteOff(e->data1);
+                SynthEngine_NoteOff(e->data1);
             }
             break;
 
         case MIDI_STATUS_NOTE_OFF:
-            PluckSynth_NoteOff(e->data1);
+            SynthEngine_NoteOff(e->data1);
             break;
 
         case MIDI_STATUS_CONTROL_CHANGE:
-            PluckSynth_ControlChange(e->data1, e->data2);
+            SynthEngine_ControlChange(e->data1, e->data2);
             break;
 
         default:

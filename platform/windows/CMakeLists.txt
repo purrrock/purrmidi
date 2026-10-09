@@ -8,33 +8,90 @@ endif()
 
 option(PURRMIDI_BUILD_TESTS "Build host unit tests" ON)
 
-# Check DaisySP submodule
+# Выбор синтезатора на этапе компиляции: -DPURRMIDI_SYNTH=sine|pluck|epiano
+include("${CMAKE_SOURCE_DIR}/cmake/purrmidi_synth.cmake")
+
+# Библиотека pluck собирается, если она выбрана или нужна тестам
+set(PURRMIDI_BUILD_PLUCK OFF)
+if(PURRMIDI_SYNTH_NEEDS_DAISYSP OR PURRMIDI_BUILD_TESTS)
+    set(PURRMIDI_BUILD_PLUCK ON)
+endif()
+
 set(DAISYSP_DIR "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/DaisySP")
-if(NOT EXISTS "${DAISYSP_DIR}/Source")
+if(PURRMIDI_BUILD_PLUCK AND NOT EXISTS "${DAISYSP_DIR}/Source")
     message(FATAL_ERROR
         "Исходники DaisySP не найдены: ${DAISYSP_DIR}/Source\n"
         "Выполните команду для инициализации подмодулей:\n"
-        "git submodule update --init --recursive"
+        "git submodule update --init --recursive\n"
+        "(DaisySP нужна только синтезатору pluck; для сборки без неё: "
+        "-DPURRMIDI_SYNTH=epiano -DPURRMIDI_BUILD_TESTS=OFF)"
     )
 endif()
 
-# purrmidi_core static library
+# ---------------------------------------------------------------------------
+# Синтезаторы: каждый — отдельная статическая библиотека со своим API
+# ---------------------------------------------------------------------------
+
+# sine: одноголосая синусоида
+add_library(purrmidi_synth_sine STATIC
+    "${CMAKE_SOURCE_DIR}/Core/Src/synth.c"
+    "${CMAKE_SOURCE_DIR}/Core/Src/sine_synth.c"
+)
+target_include_directories(purrmidi_synth_sine PUBLIC "${CMAKE_SOURCE_DIR}/Core/Inc")
+target_compile_features(purrmidi_synth_sine PUBLIC c_std_11)
+
+# epiano: полифоническое FM-электропиано (без внешних зависимостей)
+add_library(purrmidi_synth_epiano STATIC
+    "${CMAKE_SOURCE_DIR}/Core/Src/epiano_synth.cpp"
+)
+target_include_directories(purrmidi_synth_epiano PUBLIC "${CMAKE_SOURCE_DIR}/Core/Inc")
+target_compile_features(purrmidi_synth_epiano PUBLIC cxx_std_17)
+
+# pluck: Карплус-Стронг на DaisySP Pluck
+if(PURRMIDI_BUILD_PLUCK)
+    add_library(purrmidi_synth_pluck STATIC
+        "${CMAKE_SOURCE_DIR}/Core/Src/pluck_synth.cpp"
+        "${DAISYSP_DIR}/DaisySP-LGPL/Source/PhysicalModeling/pluck.cpp"
+    )
+    target_include_directories(purrmidi_synth_pluck PUBLIC
+        "${CMAKE_SOURCE_DIR}/Core/Inc"
+        "${DAISYSP_DIR}/Source"
+        "${DAISYSP_DIR}/DaisySP-LGPL/Source"
+    )
+    target_compile_definitions(purrmidi_synth_pluck PUBLIC USE_DAISYSP_LGPL)
+    target_compile_features(purrmidi_synth_pluck PUBLIC cxx_std_17)
+endif()
+
+foreach(_synth sine pluck epiano)
+    if(TARGET purrmidi_synth_${_synth})
+        if(MSVC)
+            target_compile_options(purrmidi_synth_${_synth} PRIVATE /utf-8 /W4)
+        else()
+            target_compile_options(purrmidi_synth_${_synth} PRIVATE -Wall -Wextra)
+        endif()
+        if(UNIX)
+            target_link_libraries(purrmidi_synth_${_synth} PUBLIC m)
+        endif()
+    endif()
+endforeach()
+
+# ---------------------------------------------------------------------------
+# purrmidi_core: MIDI-очередь + диспетчер + ВЫБРАННЫЙ синтезатор
+# ---------------------------------------------------------------------------
 add_library(purrmidi_core STATIC
-    "${CMAKE_SOURCE_DIR}/Core/Src/pluck_synth.cpp"
     "${CMAKE_SOURCE_DIR}/Core/Src/chord_detector.c"
     "${CMAKE_SOURCE_DIR}/Engine/midi/midi_queue.c"
     "${CMAKE_SOURCE_DIR}/Engine/midi/midi_dispatch.c"
-    "${DAISYSP_DIR}/DaisySP-LGPL/Source/PhysicalModeling/pluck.cpp"
 )
 
 target_include_directories(purrmidi_core PUBLIC
     "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/midi"
-    "${DAISYSP_DIR}/Source"
-    "${DAISYSP_DIR}/DaisySP-LGPL/Source"
 )
 
-target_compile_definitions(purrmidi_core PUBLIC USE_DAISYSP_LGPL)
+# Макрос PURRMIDI_SYNTH_* виден и приложению, и тестам (для synth_engine.h)
+target_compile_definitions(purrmidi_core PUBLIC ${PURRMIDI_SYNTH_DEFINE})
+target_link_libraries(purrmidi_core PUBLIC purrmidi_synth_${PURRMIDI_SYNTH_NAME})
 target_compile_features(purrmidi_core PUBLIC c_std_11 cxx_std_17)
 
 if(MSVC)

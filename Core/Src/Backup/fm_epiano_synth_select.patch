@@ -1,0 +1,2091 @@
+diff --git a/.github/workflows/host-ci.yml b/.github/workflows/host-ci.yml
+index cbe0000..80a8142 100644
+--- a/.github/workflows/host-ci.yml
++++ b/.github/workflows/host-ci.yml
+@@ -9,6 +9,10 @@ on:
+ jobs:
+   host-tests-linux:
+     runs-on: ubuntu-latest
++    strategy:
++      fail-fast: false
++      matrix:
++        synth: [sine, pluck, epiano]
+     steps:
+       - name: Checkout repository
+         uses: actions/checkout@v4
+@@ -20,8 +24,8 @@ jobs:
+           sudo apt-get update
+           sudo apt-get install -y cmake ninja-build libasound2-dev libjack-jackd2-dev
+ 
+-      - name: Configure CMake host tests
+-        run: cmake --preset host-tests
++      - name: Configure CMake host tests (synth=${{ matrix.synth }})
++        run: cmake --preset host-tests -DPURRMIDI_SYNTH=${{ matrix.synth }}
+ 
+       - name: Build host tests
+         run: cmake --build --preset host-tests
+@@ -31,6 +35,10 @@ jobs:
+ 
+   host-build-windows:
+     runs-on: windows-latest
++    strategy:
++      fail-fast: false
++      matrix:
++        synth: [sine, pluck, epiano]
+     steps:
+       - name: Checkout repository
+         uses: actions/checkout@v4
+@@ -40,8 +48,8 @@ jobs:
+       - name: Setup Ninja
+         uses: llvm/actions/install-ninja@main
+ 
+-      - name: Configure MSVC Release build
+-        run: cmake --preset win-msvc-release
++      - name: Configure MSVC Release build (synth=${{ matrix.synth }})
++        run: cmake --preset win-msvc-release -DPURRMIDI_SYNTH=${{ matrix.synth }}
+ 
+       - name: Build purrmidi_win.exe
+         run: cmake --build --preset win-msvc-release
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index d7a879e..7b41601 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -10,6 +10,9 @@ endif()
+ 
+ set(CMAKE_PROJECT_NAME purrmidi)
+ 
++# Выбор синтезатора на этапе компиляции: -DPURRMIDI_SYNTH=sine|pluck|epiano
++include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/purrmidi_synth.cmake)
++
+ if(NOT CMAKE_BUILD_TYPE)
+     set(CMAKE_BUILD_TYPE Debug)
+ endif()
+@@ -35,77 +38,78 @@ add_executable(${CMAKE_PROJECT_NAME})
+ add_subdirectory(cmake/stm32cubemx)
+ 
+ # ---------------------------------------------------------------------------
+-# DaisySP
++# DaisySP (нужна только синтезатору pluck)
+ # ---------------------------------------------------------------------------
+ 
+-set(DAISYSP_DIR
+-    "${CMAKE_CURRENT_SOURCE_DIR}/Middlewares/Third_Party/DaisySP"
+-)
++if(PURRMIDI_SYNTH_NEEDS_DAISYSP)
++    set(DAISYSP_DIR
++        "${CMAKE_CURRENT_SOURCE_DIR}/Middlewares/Third_Party/DaisySP"
++    )
+ 
+-if(NOT EXISTS "${DAISYSP_DIR}/Source")
+-    message(FATAL_ERROR
+-        "DaisySP source directory not found: ${DAISYSP_DIR}/Source\n"
+-        "Initialize the DaisySP git submodule:\n"
+-        "git submodule update --init --recursive"
++    if(NOT EXISTS "${DAISYSP_DIR}/Source")
++        message(FATAL_ERROR
++            "DaisySP source directory not found: ${DAISYSP_DIR}/Source\n"
++            "Initialize the DaisySP git submodule:\n"
++            "git submodule update --init --recursive"
++        )
++    endif()
++
++    # Compile DaisySP C++ sources directly into a static library.
++    file(GLOB_RECURSE DAISYSP_SOURCES CONFIGURE_DEPENDS
++        "${DAISYSP_DIR}/Source/*.cpp"
++        "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.cpp"
+     )
+-endif()
+ 
+-# Compile DaisySP C++ sources directly into a static library.
+-file(GLOB_RECURSE DAISYSP_SOURCES CONFIGURE_DEPENDS
+-    "${DAISYSP_DIR}/Source/*.cpp"
+-    "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.cpp"
+-)
++    if(NOT DAISYSP_SOURCES)
++        message(FATAL_ERROR
++            "No DaisySP C++ source files found in ${DAISYSP_DIR}/Source"
++        )
++    endif()
+ 
+-if(NOT DAISYSP_SOURCES)
+-    message(FATAL_ERROR
+-        "No DaisySP C++ source files found in ${DAISYSP_DIR}/Source"
++    add_library(DaisySP STATIC
++        ${DAISYSP_SOURCES}
+     )
+-endif()
+-
+-add_library(DaisySP STATIC
+-    ${DAISYSP_SOURCES}
+-)
+ 
+-# Передаем аппаратные флаги микроконтроллера (-mcpu, -mthumb) из CubeMX в DaisySP
+-target_link_libraries(DaisySP PRIVATE stm32cubemx)
++    # Передаем аппаратные флаги микроконтроллера (-mcpu, -mthumb) из CubeMX в DaisySP
++    target_link_libraries(DaisySP PRIVATE stm32cubemx)
+ 
+-# Add the DaisySP source directory and all its subdirectories
+-# to the include search path.
+-file(GLOB_RECURSE DAISYSP_HEADERS CONFIGURE_DEPENDS
+-    "${DAISYSP_DIR}/Source/*.h"
+-    "${DAISYSP_DIR}/Source/*.hpp"
+-    "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.h"
+-    "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.hpp"
+-)
++    # Add the DaisySP source directory and all its subdirectories
++    # to the include search path.
++    file(GLOB_RECURSE DAISYSP_HEADERS CONFIGURE_DEPENDS
++        "${DAISYSP_DIR}/Source/*.h"
++        "${DAISYSP_DIR}/Source/*.hpp"
++        "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.h"
++        "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.hpp"
++    )
+ 
+-set(DAISYSP_INCLUDE_DIRS
+-    "${DAISYSP_DIR}/Source"
+-    "${DAISYSP_DIR}/DaisySP-LGPL/Source"
+-)
++    set(DAISYSP_INCLUDE_DIRS
++        "${DAISYSP_DIR}/Source"
++        "${DAISYSP_DIR}/DaisySP-LGPL/Source"
++    )
+ 
+-foreach(HEADER ${DAISYSP_HEADERS})
+-    get_filename_component(HEADER_DIR "${HEADER}" DIRECTORY)
+-    list(APPEND DAISYSP_INCLUDE_DIRS "${HEADER_DIR}")
+-endforeach()
++    foreach(HEADER ${DAISYSP_HEADERS})
++        get_filename_component(HEADER_DIR "${HEADER}" DIRECTORY)
++        list(APPEND DAISYSP_INCLUDE_DIRS "${HEADER_DIR}")
++    endforeach()
+ 
+-list(REMOVE_DUPLICATES DAISYSP_INCLUDE_DIRS)
++    list(REMOVE_DUPLICATES DAISYSP_INCLUDE_DIRS)
+ 
+-target_include_directories(DaisySP PUBLIC
+-    ${DAISYSP_INCLUDE_DIRS}
+-)
++    target_include_directories(DaisySP PUBLIC
++        ${DAISYSP_INCLUDE_DIRS}
++    )
+ 
+-target_compile_definitions(DaisySP PUBLIC USE_DAISYSP_LGPL)
++    target_compile_definitions(DaisySP PUBLIC USE_DAISYSP_LGPL)
+ 
+-target_compile_features(DaisySP PUBLIC cxx_std_17)
++    target_compile_features(DaisySP PUBLIC cxx_std_17)
++endif()
+ 
+ # ---------------------------------------------------------------------------
+ # Application sources
+ # ---------------------------------------------------------------------------
+ 
+ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+-    Core/Src/synth.c
++    ${PURRMIDI_SYNTH_SOURCES}
+     Core/Src/usbh_midi.c
+-    Core/Src/pluck_synth.cpp
+     Core/Src/display.c
+     Core/Src/chord_detector.c
+     Engine/midi/midi_queue.c
+@@ -116,6 +120,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/st7735_reg.c
+ )
+ 
++# Макрос выбранного синтезатора (PURRMIDI_SYNTH_SINE / _PLUCK / _EPIANO) для synth_engine.h
++target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE ${PURRMIDI_SYNTH_DEFINE})
++
+ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+     Core/Inc
+     Engine/midi
+@@ -130,5 +137,8 @@ list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
+ # Простой синтаксис (без PRIVATE) для совместимости со скриптом CubeMX
+ target_link_libraries(${CMAKE_PROJECT_NAME}
+     stm32cubemx
+-    DaisySP
+ )
++
++if(PURRMIDI_SYNTH_NEEDS_DAISYSP)
++    target_link_libraries(${CMAKE_PROJECT_NAME} DaisySP)
++endif()
+diff --git a/CMakePresets.json b/CMakePresets.json
+index 0aed59e..43a202d 100644
+--- a/CMakePresets.json
++++ b/CMakePresets.json
+@@ -7,8 +7,7 @@
+             "generator": "Ninja",
+             "binaryDir": "${sourceDir}/build/${presetName}",
+             "toolchainFile": "${sourceDir}/cmake/gcc-arm-none-eabi.cmake",
+-            "cacheVariables": {
+-            }
++            "cacheVariables": {}
+         },
+         {
+             "name": "Debug",
+@@ -81,6 +80,62 @@
+                 "PURRMIDI_BUILD_APP": "OFF",
+                 "PURRMIDI_BUILD_TESTS": "ON"
+             }
++        },
++        {
++            "name": "Debug-epiano",
++            "inherits": "Debug",
++            "cacheVariables": {
++                "PURRMIDI_SYNTH": "epiano"
++            }
++        },
++        {
++            "name": "Release-epiano",
++            "inherits": "Release",
++            "cacheVariables": {
++                "PURRMIDI_SYNTH": "epiano"
++            }
++        },
++        {
++            "name": "Debug-sine",
++            "inherits": "Debug",
++            "cacheVariables": {
++                "PURRMIDI_SYNTH": "sine"
++            }
++        },
++        {
++            "name": "Release-sine",
++            "inherits": "Release",
++            "cacheVariables": {
++                "PURRMIDI_SYNTH": "sine"
++            }
++        },
++        {
++            "name": "win-msvc-release-epiano",
++            "inherits": "win-msvc-release",
++            "cacheVariables": {
++                "PURRMIDI_SYNTH": "epiano"
++            }
++        },
++        {
++            "name": "win-msvc-release-sine",
++            "inherits": "win-msvc-release",
++            "cacheVariables": {
++                "PURRMIDI_SYNTH": "sine"
++            }
++        },
++        {
++            "name": "win-mingw-release-epiano",
++            "inherits": "win-mingw-release",
++            "cacheVariables": {
++                "PURRMIDI_SYNTH": "epiano"
++            }
++        },
++        {
++            "name": "win-mingw-release-sine",
++            "inherits": "win-mingw-release",
++            "cacheVariables": {
++                "PURRMIDI_SYNTH": "sine"
++            }
+         }
+     ],
+     "buildPresets": [
+@@ -107,6 +162,38 @@
+         {
+             "name": "host-tests",
+             "configurePreset": "host-tests"
++        },
++        {
++            "name": "Debug-epiano",
++            "configurePreset": "Debug-epiano"
++        },
++        {
++            "name": "Release-epiano",
++            "configurePreset": "Release-epiano"
++        },
++        {
++            "name": "Debug-sine",
++            "configurePreset": "Debug-sine"
++        },
++        {
++            "name": "Release-sine",
++            "configurePreset": "Release-sine"
++        },
++        {
++            "name": "win-msvc-release-epiano",
++            "configurePreset": "win-msvc-release-epiano"
++        },
++        {
++            "name": "win-msvc-release-sine",
++            "configurePreset": "win-msvc-release-sine"
++        },
++        {
++            "name": "win-mingw-release-epiano",
++            "configurePreset": "win-mingw-release-epiano"
++        },
++        {
++            "name": "win-mingw-release-sine",
++            "configurePreset": "win-mingw-release-sine"
+         }
+     ],
+     "testPresets": [
+diff --git a/Core/Inc/epiano_synth.h b/Core/Inc/epiano_synth.h
+new file mode 100644
+index 0000000..b0a3da4
+--- /dev/null
++++ b/Core/Inc/epiano_synth.h
+@@ -0,0 +1,62 @@
++#ifndef EPIANO_SYNTH_H
++#define EPIANO_SYNTH_H
++
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++ * Полифоническое FM-электропиано (в духе Rhodes / DX7 "E.PIANO 1").
++ *
++ * Архитектура голоса (две пары "модулятор -> несущая", все операторы — синусы):
++ *
++ *     BODY  (корпус звука): модулятор 1:1 -> несущая 1:1.
++ *           Индекс модуляции зависит от velocity и затухает ("bark" —
++ *           хриплый, яркий звук при сильном ударе, который смягчается).
++ *     TINE  (язычок/молоточек): модулятор 14:1 -> несущая 1:1.
++ *           Короткий высокочастотный "звон" атаки, быстро затухает.
++ *
++ *     voice = amp_env * velocity * (BODY + tine_level * TINE)
++ *
++ * Прочее: 8 голосов (EPIANO_NUM_VOICES), динамика по velocity, затухание
++ * зависит от высоты ноты (басы звучат дольше), демпфер при отпускании клавиши,
++ * педаль сустейна, лёгкая стереопанорама по положению клавиши, мягкий лимитер.
++ *
++ * Все вычисления — float, без динамической памяти, без блокировок: события
++ * из основного цикла передаются в аудиопоток через lock-free SPSC FIFO и
++ * применяются в начале каждого вызова EPianoSynth_FillStereoBuffer().
++ *
++ * Поддерживаемые MIDI CC:
++ *     CC1, CC71, CC74  яркость (индекс FM-модуляции), 64 = штатная
++ *     CC7              громкость
++ *     CC64             педаль сустейна
++ *     CC72             время релиза (демпфера)
++ *     CC120, CC123     All Sound Off / All Notes Off
++ */
++
++void EPianoSynth_Init(void);
++
++/** velocity 0 трактуется как NoteOff */
++void EPianoSynth_NoteOn(uint8_t midi_note, uint8_t velocity);
++void EPianoSynth_NoteOff(uint8_t midi_note);
++void EPianoSynth_ControlChange(uint8_t control, uint8_t value);
++
++/**
++ * Блочное заполнение стереобуфера (L, R, L, R...), 48 кГц, int16.
++ * Вызывается из прерывания DMA (STM32) или аудио-потока (ПК).
++ */
++void EPianoSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames);
++
++/** Количество MIDI-событий, потерянных из-за переполнения FIFO (для отладки). */
++uint32_t EPianoSynth_GetDroppedEventCount(void);
++
++/** Количество голосов, звучащих в данный момент (для отладки/индикации). */
++uint32_t EPianoSynth_GetActiveVoiceCount(void);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* EPIANO_SYNTH_H */
+diff --git a/Core/Inc/sine_synth.h b/Core/Inc/sine_synth.h
+new file mode 100644
+index 0000000..8f7cdd5
+--- /dev/null
++++ b/Core/Inc/sine_synth.h
+@@ -0,0 +1,29 @@
++#ifndef SINE_SYNTH_H
++#define SINE_SYNTH_H
++
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++ * Одноголосая синусоида с MIDI-интерфейсом (тонкая обёртка над synth.c).
++ * Предназначена для проверки аудиотракта и MIDI-цепочки.
++ *
++ * Монофонический режим, приоритет последней ноты: NoteOff действует только
++ * на ту ноту, которая сейчас звучит. Есть короткие линейные атака/релиз
++ * (защита от щелчков), педаль сустейна (CC64) и громкость (CC7).
++ */
++
++void SineSynth_Init(void);
++void SineSynth_NoteOn(uint8_t midi_note, uint8_t velocity);
++void SineSynth_NoteOff(uint8_t midi_note);
++void SineSynth_ControlChange(uint8_t control, uint8_t value);
++void SineSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* SINE_SYNTH_H */
+diff --git a/Core/Inc/synth_engine.h b/Core/Inc/synth_engine.h
+new file mode 100644
+index 0000000..3f6eb7e
+--- /dev/null
++++ b/Core/Inc/synth_engine.h
+@@ -0,0 +1,73 @@
++#ifndef SYNTH_ENGINE_H
++#define SYNTH_ENGINE_H
++
++/*
++ * Единый интерфейс звукового движка PurrMidi.
++ *
++ * Конкретный синтезатор выбирается на ЭТАПЕ КОМПИЛЯЦИИ (прошивка STM32 и
++ * Windows-версия используют один и тот же механизм):
++ *
++ *     cmake ... -DPURRMIDI_SYNTH=sine     (одноголосая синусоида)
++ *     cmake ... -DPURRMIDI_SYNTH=pluck    (Карплус-Стронг, DaisySP Pluck) — по умолчанию
++ *     cmake ... -DPURRMIDI_SYNTH=epiano   (полифоническое FM-электропиано)
++ *
++ * CMake определяет ровно один из макросов PURRMIDI_SYNTH_SINE / _PLUCK / _EPIANO.
++ * Если не определён ни один (например, файл собирается вне CMake), используется
++ * pluck — как и было до появления выбора синтезатора.
++ *
++ * Все функции — простые макро-алиасы на функции выбранного движка, т.е.
++ * накладных расходов нет, а остальной код (MIDI-диспетчер, main.c, Windows-приложение)
++ * не зависит от конкретной реализации.
++ *
++ * Формат аудио: 48 кГц, signed 16 бит, стерео с чередованием (L, R, L, R...).
++ */
++
++#if !defined(PURRMIDI_SYNTH_SINE) && !defined(PURRMIDI_SYNTH_PLUCK) && !defined(PURRMIDI_SYNTH_EPIANO)
++#define PURRMIDI_SYNTH_PLUCK 1
++#endif
++
++#if (defined(PURRMIDI_SYNTH_SINE) + defined(PURRMIDI_SYNTH_PLUCK) + defined(PURRMIDI_SYNTH_EPIANO)) != 1
++#error "Нужно определить ровно один из PURRMIDI_SYNTH_SINE / PURRMIDI_SYNTH_PLUCK / PURRMIDI_SYNTH_EPIANO"
++#endif
++
++#if defined(PURRMIDI_SYNTH_SINE)
++    #include "sine_synth.h"
++    #define SYNTH_ENGINE_NAME                   "sine"
++    #define SynthEngine_Init                    SineSynth_Init
++    #define SynthEngine_NoteOn                  SineSynth_NoteOn
++    #define SynthEngine_NoteOff                 SineSynth_NoteOff
++    #define SynthEngine_ControlChange           SineSynth_ControlChange
++    #define SynthEngine_FillStereoBuffer        SineSynth_FillStereoBuffer
++#elif defined(PURRMIDI_SYNTH_PLUCK)
++    #include "pluck_synth.h"
++    #define SYNTH_ENGINE_NAME                   "pluck"
++    #define SynthEngine_Init                    PluckSynth_Init
++    #define SynthEngine_NoteOn                  PluckSynth_NoteOn
++    #define SynthEngine_NoteOff                 PluckSynth_NoteOff
++    #define SynthEngine_ControlChange           PluckSynth_ControlChange
++    #define SynthEngine_FillStereoBuffer        PluckSynth_FillStereoBuffer
++#else /* PURRMIDI_SYNTH_EPIANO */
++    #include "epiano_synth.h"
++    #define SYNTH_ENGINE_NAME                   "epiano"
++    #define SynthEngine_Init                    EPianoSynth_Init
++    #define SynthEngine_NoteOn                  EPianoSynth_NoteOn
++    #define SynthEngine_NoteOff                 EPianoSynth_NoteOff
++    #define SynthEngine_ControlChange           EPianoSynth_ControlChange
++    #define SynthEngine_FillStereoBuffer        EPianoSynth_FillStereoBuffer
++#endif
++
++/*
++ * Контракт, одинаковый для всех движков:
++ *
++ *   void SynthEngine_Init(void);
++ *   void SynthEngine_NoteOn(uint8_t midi_note, uint8_t velocity);   // velocity 0 == NoteOff
++ *   void SynthEngine_NoteOff(uint8_t midi_note);
++ *   void SynthEngine_ControlChange(uint8_t control, uint8_t value);
++ *   void SynthEngine_FillStereoBuffer(int16_t *buffer, uint32_t num_frames);
++ *
++ * NoteOn/NoteOff/ControlChange вызываются из основного цикла (контекст main / MIDI-потока),
++ * FillStereoBuffer — из аудио-прерывания DMA (или аудио-потока на ПК).
++ * Передача событий между этими контекстами реализована внутри движка без блокировок.
++ */
++
++#endif /* SYNTH_ENGINE_H */
+diff --git a/Core/Src/epiano_synth.cpp b/Core/Src/epiano_synth.cpp
+new file mode 100644
+index 0000000..a06c255
+--- /dev/null
++++ b/Core/Src/epiano_synth.cpp
+@@ -0,0 +1,520 @@
++#include "epiano_synth.h"
++#include <atomic>
++#include <cmath>
++#include <cstring>
++
++/* ------------------------------------------------------------------------- */
++/*  Настройки (можно переопределить через -D при компиляции)                 */
++/* ------------------------------------------------------------------------- */
++
++#ifndef EPIANO_NUM_VOICES
++#define EPIANO_NUM_VOICES       8       /* полифония */
++#endif
++
++#ifndef EPIANO_STEREO_SPREAD
++#define EPIANO_STEREO_SPREAD    0.30f   /* ширина панорамы по клавиатуре, 0 = моно */
++#endif
++
++#define EPIANO_SAMPLE_RATE      48000.0f
++#define EPIANO_TABLE_SIZE       2048                    /* степень двойки */
++#define EPIANO_TABLE_MASK       (EPIANO_TABLE_SIZE - 1)
++#define EPIANO_EVENT_FIFO_SIZE  64                      /* степень двойки */
++#define EPIANO_BLOCK            64                      /* размер внутреннего блока рендера */
++
++#define EPIANO_MASTER_GAIN      0.40f   /* общий уровень; запас под аккорды */
++#define EPIANO_TINE_RATIO       14.0f   /* частота модулятора "язычка" относительно ноты */
++
++#define EPIANO_ATTACK_SEC       0.002f  /* антищелчковая атака */
++#define EPIANO_BARK_T60_SEC     1.10f   /* затухание яркости корпуса */
++#define EPIANO_TINE_T60_SEC     0.30f   /* затухание "звона" */
++#define EPIANO_DEFAULT_REL_SEC  0.25f   /* T60 релиза (демпфер) по умолчанию */
++#define EPIANO_SILENCE          1.0e-4f /* порог отключения голоса (-80 дБ) */
++
++#define EPIANO_TWO_PI           6.28318530717958647692f
++#define EPIANO_LN_1000          6.90775527898213705205f /* ln(10^3) = -60 дБ */
++
++/* ------------------------------------------------------------------------- */
++/*  Состояние                                                                */
++/* ------------------------------------------------------------------------- */
++
++namespace {
++
++enum EventType : uint8_t { EV_NOTE_ON = 0, EV_NOTE_OFF = 1, EV_CC = 2 };
++
++struct Event {
++    uint8_t type;
++    uint8_t a;      /* note / controller */
++    uint8_t b;      /* velocity / value  */
++};
++
++struct Voice {
++    bool     active;
++    bool     gate;          /* клавиша удерживается */
++    bool     kill;          /* All Sound Off: быстрое затухание независимо от клавиши/педали */
++    uint8_t  note;
++    uint32_t age;           /* порядковый номер запуска (для voice stealing) */
++
++    float phase;            /* общая фаза несущей и модулятора BODY (оба 1:1) */
++    float phase_tine_mod;   /* фаза модулятора TINE (14:1) */
++    float inc;              /* приращение фазы за сэмпл (f / fs) */
++
++    float level;            /* общая огибающая амплитуды */
++    bool  attacking;
++    float attack_inc;
++    float decay_coeff;      /* множитель за сэмпл, пока клавиша/педаль держат ноту */
++
++    float bark;             /* огибающая индекса BODY, 1 -> 0 */
++    float bark_coeff;
++    float tine_env;         /* огибающая индекса TINE, 1 -> 0 */
++    float tine_coeff;
++
++    float body_idx_floor;   /* индекс BODY в "циклах" (рад / 2pi), постоянная часть */
++    float body_idx_peak;    /* добавка, затухающая вместе с bark */
++    float tine_idx;         /* индекс TINE в "циклах" */
++    float tine_level;       /* уровень TINE в миксе */
++
++    float vel_gain;
++    float gain_l;
++    float gain_r;
++};
++
++float          g_sine_table[EPIANO_TABLE_SIZE];
++bool           g_table_ready = false;
++
++Voice          g_voices[EPIANO_NUM_VOICES];
++uint32_t       g_age_counter = 0;
++
++/* Состояние контроллеров — принадлежит аудиоконтексту */
++bool           g_sustain      = false;
++float          g_brightness   = 1.0f;
++float          g_volume       = 1.0f;
++float          g_release_coeff = 0.0f;
++float          g_kill_coeff   = 0.0f;
++float          g_attack_inc   = 0.0f;
++float          g_bark_coeff   = 0.0f;
++float          g_tine_coeff   = 0.0f;
++
++/* Lock-free SPSC FIFO: производитель — main, потребитель — аудио */
++Event                  g_fifo[EPIANO_EVENT_FIFO_SIZE];
++std::atomic<uint32_t>  g_fifo_head{0};
++std::atomic<uint32_t>  g_fifo_tail{0};
++std::atomic<uint32_t>  g_dropped{0};
++
++/* ------------------------------------------------------------------------- */
++/*  Вспомогательные функции                                                  */
++/* ------------------------------------------------------------------------- */
++
++inline float clampf(float v, float lo, float hi)
++{
++    return v < lo ? lo : (v > hi ? hi : v);
++}
++
++/* Коэффициент экспоненциального спада на -60 дБ за t60 секунд */
++inline float t60_to_coeff(float t60_sec)
++{
++    return expf(-EPIANO_LN_1000 / (EPIANO_SAMPLE_RATE * t60_sec));
++}
++
++inline float midi_to_hz(uint8_t note)
++{
++    return 440.0f * exp2f(((float)note - 69.0f) * (1.0f / 12.0f));
++}
++
++/* sin(2*pi*x), x — фаза в циклах, x >= 0. Табличный синус с линейной интерполяцией. */
++inline float sine_cycles(float x)
++{
++    float pos = x * (float)EPIANO_TABLE_SIZE;
++    int32_t i = (int32_t)pos;
++    float frac = pos - (float)i;
++    float s0 = g_sine_table[i & EPIANO_TABLE_MASK];
++    float s1 = g_sine_table[(i + 1) & EPIANO_TABLE_MASK];
++    return s0 + frac * (s1 - s0);
++}
++
++/* Мягкий лимитер: до 0.6 — линейно, выше — плавно к 1.0 (без жёсткого клиппинга) */
++inline float soft_limit(float x)
++{
++    float ax = x < 0.0f ? -x : x;
++    if (ax <= 0.6f) {
++        return x;
++    }
++    float t = (ax - 0.6f) * 2.5f;           /* (ax - 0.6) / 0.4 */
++    float y = 0.6f + 0.4f * (t / (1.0f + t));
++    return x < 0.0f ? -y : y;
++}
++
++bool fifo_push(const Event& ev)
++{
++    uint32_t head = g_fifo_head.load(std::memory_order_relaxed);
++    uint32_t tail = g_fifo_tail.load(std::memory_order_acquire);
++
++    if (head - tail >= EPIANO_EVENT_FIFO_SIZE) {
++        g_dropped.fetch_add(1, std::memory_order_relaxed);
++        return false;
++    }
++    g_fifo[head & (EPIANO_EVENT_FIFO_SIZE - 1)] = ev;
++    g_fifo_head.store(head + 1, std::memory_order_release);
++    return true;
++}
++
++bool fifo_pop(Event& ev)
++{
++    uint32_t tail = g_fifo_tail.load(std::memory_order_relaxed);
++    uint32_t head = g_fifo_head.load(std::memory_order_acquire);
++
++    if (head == tail) {
++        return false;
++    }
++    ev = g_fifo[tail & (EPIANO_EVENT_FIFO_SIZE - 1)];
++    g_fifo_tail.store(tail + 1, std::memory_order_release);
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++/*  Голоса                                                                   */
++/* ------------------------------------------------------------------------- */
++
++/* Выбор голоса: тот же звук -> свободный -> самый тихий отпущенный -> самый старый */
++Voice* allocate_voice(uint8_t note)
++{
++    for (int i = 0; i < EPIANO_NUM_VOICES; i++) {
++        if (g_voices[i].active && g_voices[i].note == note) {
++            return &g_voices[i];
++        }
++    }
++    for (int i = 0; i < EPIANO_NUM_VOICES; i++) {
++        if (!g_voices[i].active) {
++            return &g_voices[i];
++        }
++    }
++
++    Voice* best = nullptr;
++    for (int i = 0; i < EPIANO_NUM_VOICES; i++) {
++        Voice* v = &g_voices[i];
++        if (!v->gate && (!best || v->level < best->level)) {
++            best = v;
++        }
++    }
++    if (best) {
++        return best;
++    }
++
++    best = &g_voices[0];
++    for (int i = 1; i < EPIANO_NUM_VOICES; i++) {
++        if (g_voices[i].age < best->age) {
++            best = &g_voices[i];
++        }
++    }
++    return best;
++}
++
++void start_voice(uint8_t note, uint8_t velocity)
++{
++    Voice* v = allocate_voice(note);
++
++    const bool fresh = !v->active || v->note != note;
++    const float vel  = clampf((float)velocity * (1.0f / 127.0f), 0.0f, 1.0f);
++    const float freq = clampf(midi_to_hz(note), 8.0f, EPIANO_SAMPLE_RATE * 0.45f);
++    const float nf   = (float)note;
++
++    if (fresh) {
++        /* новая нота: фазы с нуля; если голос украден, уровень не обнуляем —
++         * атака поднимается от текущего значения, чтобы избежать щелчка */
++        v->phase          = 0.0f;
++        v->phase_tine_mod = 0.0f;
++        if (!v->active) {
++            v->level = 0.0f;
++        }
++    }
++
++    v->active    = true;
++    v->gate      = true;
++    v->kill      = false;
++    v->note      = note;
++    v->age       = ++g_age_counter;
++    v->inc       = freq / EPIANO_SAMPLE_RATE;
++
++    /* Затухание удерживаемой ноты (T60): 18 с на C2, вдвое быстрее на каждые 2,5 октавы выше
++     * (C4 ~ 10 с, C6 ~ 4,5 с) */
++    const float hold_t60 = clampf(18.0f * exp2f(-(nf - 36.0f) * (1.0f / 30.0f)), 1.0f, 20.0f);
++    v->decay_coeff = t60_to_coeff(hold_t60);
++
++    v->attacking  = true;
++    v->attack_inc = g_attack_inc;
++
++    v->bark       = 1.0f;
++    v->bark_coeff = g_bark_coeff;
++    v->tine_env   = 1.0f;
++    v->tine_coeff = g_tine_coeff;
++
++    /* Индексы модуляции: растут с velocity (квадратично), падают к верхним нотам.
++     * Значения в радианах, переводятся в "циклы" делением на 2*pi. */
++    const float key_scale = clampf(1.15f - (nf - 48.0f) * 0.0125f, 0.20f, 1.20f);
++    const float bright    = g_brightness * key_scale;
++    const float vv        = vel * vel;
++
++    v->body_idx_floor = (0.25f + 0.35f * vv) * bright * (1.0f / EPIANO_TWO_PI);
++    v->body_idx_peak  = (0.35f + 2.40f * vv) * bright * (1.0f / EPIANO_TWO_PI);
++
++    /* "Звон" не должен создавать алиасинг: модулятор на частоте 14*f.
++     * Плавно гасим его, когда 14*f приближается к 18 кГц. */
++    const float tine_alias_fade = clampf((18000.0f - EPIANO_TINE_RATIO * freq) * (1.0f / 8000.0f), 0.0f, 1.0f);
++    v->tine_idx   = (0.10f + 1.30f * vv) * g_brightness * tine_alias_fade * (1.0f / EPIANO_TWO_PI);
++    v->tine_level = (0.18f + 0.22f * vel) * tine_alias_fade;
++
++    /* Динамика: velocity^1.5 с небольшим полом, чтобы pp не пропадали совсем */
++    v->vel_gain = 0.03f + 0.97f * vel * sqrtf(vel);
++
++    /* Панорама по клавиатуре (константная сумма L+R = 1) */
++    const float pan = clampf((nf - 60.0f) * (1.0f / 48.0f), -1.0f, 1.0f) * EPIANO_STEREO_SPREAD;
++    v->gain_l = 0.5f * (1.0f - pan);
++    v->gain_r = 0.5f * (1.0f + pan);
++}
++
++void release_note(uint8_t note)
++{
++    for (int i = 0; i < EPIANO_NUM_VOICES; i++) {
++        if (g_voices[i].active && g_voices[i].gate && g_voices[i].note == note) {
++            g_voices[i].gate = false;
++        }
++    }
++}
++
++void all_notes_off(bool immediate)
++{
++    for (int i = 0; i < EPIANO_NUM_VOICES; i++) {
++        g_voices[i].gate = false;
++        if (immediate) {
++            g_voices[i].kill = true;    /* быстрый (но не щелчковый) спад */
++        }
++    }
++    g_sustain = false;
++}
++
++void apply_cc(uint8_t control, uint8_t value)
++{
++    const float norm = (float)value * (1.0f / 127.0f);
++
++    switch (control) {
++        case 1:
++        case 71:
++        case 74:
++            g_brightness = 0.3f + 1.4f * norm;      /* 64 -> ~1.0 */
++            break;
++        case 7:
++            g_volume = norm;
++            break;
++        case 64:
++            g_sustain = (value >= 64);
++            break;
++        case 72:
++            g_release_coeff = t60_to_coeff(0.08f + 1.6f * norm * norm);
++            break;
++        case 120:
++            all_notes_off(true);
++            break;
++        case 123:
++            all_notes_off(false);
++            break;
++        default:
++            break;
++    }
++}
++
++void process_events()
++{
++    Event ev;
++    while (fifo_pop(ev)) {
++        switch (ev.type) {
++            case EV_NOTE_ON:  start_voice(ev.a, ev.b); break;
++            case EV_NOTE_OFF: release_note(ev.a);      break;
++            case EV_CC:       apply_cc(ev.a, ev.b);    break;
++            default: break;
++        }
++    }
++}
++
++/* Рендер одного голоса в аккумуляторы; при полном затухании голос освобождается */
++void render_voice(Voice& v, float* acc_l, float* acc_r, uint32_t n)
++{
++    const bool holding_base = v.gate || g_sustain;
++    const float amp_coeff   = v.kill ? g_kill_coeff
++                            : (holding_base ? v.decay_coeff : g_release_coeff);
++
++    float phase    = v.phase;
++    float phase_tm = v.phase_tine_mod;
++    const float inc      = v.inc;
++    const float inc_tm   = v.inc * EPIANO_TINE_RATIO;
++    float level  = v.level;
++    float bark   = v.bark;
++    float tine_e = v.tine_env;
++
++    for (uint32_t i = 0; i < n; i++) {
++        /* --- огибающая амплитуды --- */
++        if (v.attacking) {
++            level += v.attack_inc;
++            if (level >= 1.0f) {
++                level = 1.0f;
++                v.attacking = false;
++            }
++        } else {
++            level *= amp_coeff;
++        }
++
++        /* --- BODY: несущая 1:1, модулятор 1:1 (общая фаза) --- */
++        const float body_idx = v.body_idx_floor + v.body_idx_peak * bark;
++        const float body_mod = sine_cycles(phase);
++        const float body     = sine_cycles(phase + body_idx * body_mod + 4.0f);
++
++        /* --- TINE: несущая 1:1, модулятор 14:1 --- */
++        const float tine_mod = sine_cycles(phase_tm);
++        const float tine     = sine_cycles(phase + v.tine_idx * tine_e * tine_mod + 4.0f);
++
++        const float s = (body + v.tine_level * tine) * level * v.vel_gain;
++
++        acc_l[i] += s * v.gain_l;
++        acc_r[i] += s * v.gain_r;
++
++        /* --- продвижение фаз и огибающих индекса --- */
++        phase += inc;
++        if (phase >= 1.0f) phase -= 1.0f;
++        phase_tm += inc_tm;
++        phase_tm -= (float)(int32_t)phase_tm;
++
++        bark   *= v.bark_coeff;
++        tine_e *= v.tine_coeff;
++    }
++
++    v.phase          = phase;
++    v.phase_tine_mod = phase_tm;
++    v.level          = level;
++    v.bark           = bark;
++    v.tine_env       = tine_e;
++
++    if (!v.attacking && level < EPIANO_SILENCE) {
++        v.active = false;
++        v.gate   = false;
++        v.level  = 0.0f;
++    }
++}
++
++} // namespace
++
++/* ------------------------------------------------------------------------- */
++/*  Публичный API                                                            */
++/* ------------------------------------------------------------------------- */
++
++extern "C" {
++
++void EPianoSynth_Init(void)
++{
++    if (!g_table_ready) {
++        for (int i = 0; i < EPIANO_TABLE_SIZE; i++) {
++            g_sine_table[i] = sinf(EPIANO_TWO_PI * (float)i / (float)EPIANO_TABLE_SIZE);
++        }
++        g_table_ready = true;
++    }
++
++    std::memset(g_voices, 0, sizeof(g_voices));
++    g_age_counter = 0;
++
++    g_sustain       = false;
++    g_brightness    = 1.0f;
++    g_volume        = 1.0f;
++    g_release_coeff = t60_to_coeff(EPIANO_DEFAULT_REL_SEC);
++    g_kill_coeff    = t60_to_coeff(0.02f);
++    g_attack_inc    = 1.0f / (EPIANO_SAMPLE_RATE * EPIANO_ATTACK_SEC);
++    g_bark_coeff    = t60_to_coeff(EPIANO_BARK_T60_SEC);
++    g_tine_coeff    = t60_to_coeff(EPIANO_TINE_T60_SEC);
++
++    g_fifo_head.store(0, std::memory_order_relaxed);
++    g_fifo_tail.store(0, std::memory_order_relaxed);
++    g_dropped.store(0, std::memory_order_relaxed);
++}
++
++void EPianoSynth_NoteOn(uint8_t midi_note, uint8_t velocity)
++{
++    if (velocity == 0) {
++        EPianoSynth_NoteOff(midi_note);
++        return;
++    }
++    if (midi_note > 127) {
++        return;
++    }
++    Event ev = { EV_NOTE_ON, midi_note, (uint8_t)(velocity > 127 ? 127 : velocity) };
++    fifo_push(ev);
++}
++
++void EPianoSynth_NoteOff(uint8_t midi_note)
++{
++    if (midi_note > 127) {
++        return;
++    }
++    Event ev = { EV_NOTE_OFF, midi_note, 0 };
++    fifo_push(ev);
++}
++
++void EPianoSynth_ControlChange(uint8_t control, uint8_t value)
++{
++    /* Выбрасываем контроллеры, которые движок не использует, чтобы не занимать FIFO */
++    switch (control) {
++        case 1: case 7: case 64: case 71: case 72: case 74: case 120: case 123:
++            break;
++        default:
++            return;
++    }
++    Event ev = { EV_CC, control, (uint8_t)(value > 127 ? 127 : value) };
++    fifo_push(ev);
++}
++
++void EPianoSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
++{
++    process_events();
++
++    float acc_l[EPIANO_BLOCK];
++    float acc_r[EPIANO_BLOCK];
++
++    const float out_scale = EPIANO_MASTER_GAIN * g_volume;
++
++    uint32_t done = 0;
++    while (done < num_frames) {
++        uint32_t n = num_frames - done;
++        if (n > EPIANO_BLOCK) {
++            n = EPIANO_BLOCK;
++        }
++
++        std::memset(acc_l, 0, n * sizeof(float));
++        std::memset(acc_r, 0, n * sizeof(float));
++
++        for (int i = 0; i < EPIANO_NUM_VOICES; i++) {
++            if (g_voices[i].active) {
++                render_voice(g_voices[i], acc_l, acc_r, n);
++            }
++        }
++
++        for (uint32_t i = 0; i < n; i++) {
++            float l = soft_limit(acc_l[i] * out_scale * 2.0f) * 32767.0f;
++            float r = soft_limit(acc_r[i] * out_scale * 2.0f) * 32767.0f;
++            buffer[(done + i) * 2]     = (int16_t)(l >= 0.0f ? l + 0.5f : l - 0.5f);
++            buffer[(done + i) * 2 + 1] = (int16_t)(r >= 0.0f ? r + 0.5f : r - 0.5f);
++        }
++
++        done += n;
++    }
++}
++
++uint32_t EPianoSynth_GetDroppedEventCount(void)
++{
++    return g_dropped.load(std::memory_order_relaxed);
++}
++
++uint32_t EPianoSynth_GetActiveVoiceCount(void)
++{
++    uint32_t n = 0;
++    for (int i = 0; i < EPIANO_NUM_VOICES; i++) {
++        if (g_voices[i].active) n++;
++    }
++    return n;
++}
++
++} // extern "C"
+diff --git a/Core/Src/main.c b/Core/Src/main.c
+index 5c9680b..7931bf8 100644
+--- a/Core/Src/main.c
++++ b/Core/Src/main.c
+@@ -29,8 +29,7 @@
+ /* USER CODE BEGIN Includes */
+ #include <stdio.h>
+ #include <string.h>
+-// #include "synth.h"        // отладочный синусоидальный тон
+-#include "pluck_synth.h" // Karplus-Strong
++#include "synth_engine.h" // выбранный при компиляции синтезатор: sine / pluck / epiano (см. PURRMIDI_SYNTH в CMake)
+ #include "display.h"
+ #include "midi_event.h"
+ #include "midi_queue.h"
+@@ -185,8 +184,8 @@ int main(void)
+   Display_Init();
+   MIDI_Queue_Init();
+   MIDI_USB_Init();
+-  // Synth_Init();      // Инициализация простого синтезатора
+-  PluckSynth_Init(); // Инициализация синтезатора струны
++  SynthEngine_Init(); // Инициализация синтезатора, выбранного на этапе компиляции
++  printf("Synth engine: %s\r\n", SYNTH_ENGINE_NAME);
+   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
+   memset(audio_buffer, 0, sizeof(audio_buffer));  /* .dma_buffer is not zeroed by startup */
+   if (HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer, AUDIO_BUFFER_SIZE) != HAL_OK)
+@@ -240,7 +239,7 @@ int main(void)
+         // printf("[MIDI] %02X %02X %02X\r\n",
+         //        event.status, event.data1, event.data2);
+ 
+-        MIDI_Dispatch(&event);   /* Note On/Off, CC -> PluckSynth (lock-free FIFO to the audio ISR) */
++        MIDI_Dispatch(&event);   /* Note On/Off, CC -> выбранный синтезатор (lock-free FIFO в аудио-ISR) */
+ 
+         uint8_t command = event.status & MIDI_STATUS_MASK;
+         uint8_t note = event.data1;
+@@ -409,14 +408,14 @@ void SystemClock_Config(void)
+ void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai)
+ {
+     if (hsai->Instance == SAI1_Block_A) {
+-        PluckSynth_FillStereoBuffer(&audio_buffer[0], AUDIO_BUFFER_FRAMES / 2);
++        SynthEngine_FillStereoBuffer(&audio_buffer[0], AUDIO_BUFFER_FRAMES / 2);
+     }
+ }
+ 
+ void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai)
+ {
+     if (hsai->Instance == SAI1_Block_A) {
+-        PluckSynth_FillStereoBuffer(&audio_buffer[AUDIO_BUFFER_SIZE / 2], AUDIO_BUFFER_FRAMES / 2);
++        SynthEngine_FillStereoBuffer(&audio_buffer[AUDIO_BUFFER_SIZE / 2], AUDIO_BUFFER_FRAMES / 2);
+     }
+ }
+ 
+diff --git a/Core/Src/sine_synth.c b/Core/Src/sine_synth.c
+new file mode 100644
+index 0000000..6be8003
+--- /dev/null
++++ b/Core/Src/sine_synth.c
+@@ -0,0 +1,115 @@
++#include "sine_synth.h"
++#include "synth.h"
++#include <stdbool.h>
++
++#define SINE_SAMPLE_RATE      48000.0f
++#define SINE_ATTACK_SEC       0.005f      /* линейная атака  */
++#define SINE_RELEASE_SEC      0.050f      /* линейный релиз  */
++#define SINE_ATTACK_STEP      (1.0f / (SINE_SAMPLE_RATE * SINE_ATTACK_SEC))
++#define SINE_RELEASE_STEP     (1.0f / (SINE_SAMPLE_RATE * SINE_RELEASE_SEC))
++#define SINE_MAX_AMPLITUDE    0.5f        /* запас по громкости */
++
++/* Параметры пишутся из main, читаются в прерывании DMA: все — 32-битные volatile. */
++static volatile int16_t  g_note        = -1;
++static volatile bool     g_gate        = false;
++static volatile bool     g_sustain     = false;
++static volatile float    g_volume      = 1.0f;
++
++/* Состояние только аудиоконтекста */
++static float g_env = 0.0f;
++
++static inline float midi_to_freq(uint8_t note)
++{
++    /* 440 * 2^((n - 69) / 12) без powf: таблица полутонов в пределах октавы + сдвиг по степеням 2 */
++    static const float semitone[12] = {
++        1.0f, 1.059463094f, 1.122462048f, 1.189207115f, 1.259921050f, 1.334839854f,
++        1.414213562f, 1.498307077f, 1.587401052f, 1.681792831f, 1.781797436f, 1.887748625f
++    };
++    int n = (int)note - 60;          /* C4 = 261.6256 Hz */
++    int oct = 0;
++    while (n < 0)  { n += 12; oct--; }
++    while (n >= 12) { n -= 12; oct++; }
++    float f = 261.6255653f * semitone[n];
++    while (oct > 0) { f *= 2.0f; oct--; }
++    while (oct < 0) { f *= 0.5f; oct++; }
++    return f;
++}
++
++void SineSynth_Init(void)
++{
++    Synth_Init();
++    g_note    = -1;
++    g_gate    = false;
++    g_sustain = false;
++    g_volume  = 1.0f;
++    g_env     = 0.0f;
++}
++
++void SineSynth_NoteOn(uint8_t midi_note, uint8_t velocity)
++{
++    if (velocity == 0) {
++        SineSynth_NoteOff(midi_note);
++        return;
++    }
++    if (midi_note > 127) {
++        return;
++    }
++
++    float amp = SINE_MAX_AMPLITUDE * (0.2f + 0.8f * ((float)velocity * (1.0f / 127.0f)));
++
++    Synth_SetFrequency(midi_to_freq(midi_note));
++    Synth_SetAmplitude(amp);
++    Synth_Start();
++
++    g_note = (int16_t)midi_note;
++    g_gate = true;
++}
++
++void SineSynth_NoteOff(uint8_t midi_note)
++{
++    if (g_note == (int16_t)midi_note) {
++        g_gate = false;
++    }
++}
++
++void SineSynth_ControlChange(uint8_t control, uint8_t value)
++{
++    switch (control) {
++        case 7:   /* Channel volume */
++            g_volume = (float)value * (1.0f / 127.0f);
++            break;
++        case 64:  /* Sustain pedal */
++            g_sustain = (value >= 64);
++            break;
++        case 120: /* All sound off */
++        case 123: /* All notes off */
++            g_gate = false;
++            g_sustain = false;
++            break;
++        default:
++            break;
++    }
++}
++
++void SineSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
++{
++    for (uint32_t i = 0; i < num_frames; i++) {
++        bool on = g_gate || g_sustain;
++
++        if (on) {
++            g_env += SINE_ATTACK_STEP;
++            if (g_env > 1.0f) g_env = 1.0f;
++        } else if (g_env > 0.0f) {
++            g_env -= SINE_RELEASE_STEP;
++            if (g_env < 0.0f) g_env = 0.0f;
++        }
++
++        int16_t s = 0;
++        if (g_env > 0.0f) {
++            s = (int16_t)((float)Synth_NextSample() * g_env * g_volume);
++        }
++
++        buffer[i * 2]     = s;
++        buffer[i * 2 + 1] = s;
++    }
++}
+diff --git a/Engine/midi/midi_dispatch.c b/Engine/midi/midi_dispatch.c
+index e889bf5..ef32c4a 100644
+--- a/Engine/midi/midi_dispatch.c
++++ b/Engine/midi/midi_dispatch.c
+@@ -1,5 +1,5 @@
+ #include "midi_dispatch.h"
+-#include "pluck_synth.h"
++#include "synth_engine.h"
+ 
+ void MIDI_Dispatch(const MIDI_Event_t *e)
+ {
+@@ -12,18 +12,18 @@ void MIDI_Dispatch(const MIDI_Event_t *e)
+     switch (cmd) {
+         case MIDI_STATUS_NOTE_ON:
+             if (e->data2 > 0) {
+-                PluckSynth_NoteOn(e->data1, e->data2);
++                SynthEngine_NoteOn(e->data1, e->data2);
+             } else {
+-                PluckSynth_NoteOff(e->data1);
++                SynthEngine_NoteOff(e->data1);
+             }
+             break;
+ 
+         case MIDI_STATUS_NOTE_OFF:
+-            PluckSynth_NoteOff(e->data1);
++            SynthEngine_NoteOff(e->data1);
+             break;
+ 
+         case MIDI_STATUS_CONTROL_CHANGE:
+-            PluckSynth_ControlChange(e->data1, e->data2);
++            SynthEngine_ControlChange(e->data1, e->data2);
+             break;
+ 
+         default:
+diff --git a/README.md b/README.md
+index cece3e4..613ad92 100644
+--- a/README.md
++++ b/README.md
+@@ -45,9 +45,15 @@ PCM5102A
+ * Для ядра Cortex-M7 необходимо учитывать D-cache: буферы должны располагаться в некэшируемой области MPU (или требуется ручное обслуживание кэша), с выравниванием по 32-байтовой границе.
+ 
+ ## Звуковой движок
+-В рамках проекта утверждена следующая концепция звукового генератора:
+-* **Для первоначального тестирования:** используется простая одноголосая монофоническая синусоида. Это позволит проверить базовую работу аудиотракта (корректность передачи данных через I2S/DMA и вывод звука через ЦАП PCM5102A).
+-* **В дальнейшем:** планируется использовать алгоритм Карплуса — Стронга на основе кода открытой библиотеки DaisySP. Эта DSP-библиотека спроектирована специально под микроконтроллеры STM32 (серия H7) и позволяет реализовать физическое моделирование струны (модуль `Pluck`) без опасной аллокации динамической памяти в аудиопотоке.
++В проекте три взаимозаменяемых синтезатора. Какой из них попадёт в прошивку STM32 или в Windows-приложение, определяется **на этапе компиляции** параметром CMake `PURRMIDI_SYNTH`:
++
++| `PURRMIDI_SYNTH` | Синтезатор | Назначение |
++|---|---|---|
++| `sine` | Одноголосая синусоида (`synth.c` + `sine_synth.c`) | Проверка аудиотракта (I2S/DMA/ЦАП) и MIDI-цепочки |
++| `pluck` *(по умолчанию)* | Алгоритм Карплуса — Стронга на основе DaisySP `Pluck` (`pluck_synth.cpp`) | Физическое моделирование струны |
++| `epiano` | Полифоническое FM-электропиано, 8 голосов (`epiano_synth.cpp`) | Звук в духе Rhodes / DX7 «E.PIANO 1», описание — в [docs/EPIANO_SYNTH.md](docs/EPIANO_SYNTH.md) |
++
++Все синтезаторы работают через единый интерфейс `Core/Inc/synth_engine.h` (`SynthEngine_Init / NoteOn / NoteOff / ControlChange / FillStereoBuffer`), поэтому MIDI-диспетчер, `main.c` и Windows-приложение от конкретной реализации не зависят. Лишние синтезаторы в итоговый бинарник не попадают (а DaisySP собирается только для `pluck`).
+ 
+ ## План разработки (TODO)
+ Текущий приоритет — проверка аппаратной части и создание минимально работающего аудиотракта. Встроенный TFT, карты памяти и дополнительные элементы управления подключаются после проверки основной аудиоцепи.
+@@ -92,7 +98,25 @@ git submodule add https://github.com/WeActStudio/MiniSTM32H7xx.git Middlewares/T
+ git submodule update --init --recursive
+ ```
+ 
++### Выбор синтезатора при сборке
++Прошивка STM32:
++```bash
++# Karplus-Strong (по умолчанию)
++cmake --preset Release
++# FM-электропиано
++cmake --preset Release-epiano
++# или для любого пресета: -DPURRMIDI_SYNTH=sine|pluck|epiano
++cmake --preset Release -DPURRMIDI_SYNTH=sine
++cmake --build --preset Release
++```
++Windows-версия (см. [docs/WINDOWS_BUILD.md](docs/WINDOWS_BUILD.md)):
++```bash
++cmake --preset win-msvc-release-epiano
++cmake --build --preset win-msvc-release-epiano
++```
++При смене синтезатора в уже настроенной папке сборки CMake сам пересоберёт нужные файлы; название выбранного движка печатается при конфигурации (`PurrMidi synth engine: ...`), при старте прошивки в UART (`Synth engine: ...`) и в консоли `purrmidi_win`.
++
+ ## Windows-версия (MIDI-монитор + Синтезатор)
+-Для отладки и проверки работы алгоритмов синтезатора без постоянной прошивки микроконтроллера доступно автономное Windows-приложение `purrmidi_win.exe`. Оно использует тот же код синтезатора (`pluck_synth.cpp`, DaisySP Pluck), что и прошивка STM32.
++Для отладки и проверки работы алгоритмов синтезатора без постоянной прошивки микроконтроллера доступно автономное Windows-приложение `purrmidi_win.exe`. Оно использует тот же код синтезатора (sine / pluck / epiano — выбирается при компиляции через `PURRMIDI_SYNTH`), что и прошивка STM32.
+ 
+ Подробные инструкции по сборке и запуску приведены в документе [docs/WINDOWS_BUILD.md](docs/WINDOWS_BUILD.md).
+diff --git a/cmake/purrmidi_synth.cmake b/cmake/purrmidi_synth.cmake
+new file mode 100644
+index 0000000..8e7966a
+--- /dev/null
++++ b/cmake/purrmidi_synth.cmake
+@@ -0,0 +1,39 @@
++# ---------------------------------------------------------------------------
++# Выбор звукового движка на этапе компиляции (общий для прошивки STM32
++# и Windows/host-сборки).
++#
++#   cmake ... -DPURRMIDI_SYNTH=sine      одноголосая синусоида (проверка тракта)
++#   cmake ... -DPURRMIDI_SYNTH=pluck     Карплус-Стронг, DaisySP Pluck (по умолчанию)
++#   cmake ... -DPURRMIDI_SYNTH=epiano    полифоническое FM-электропиано
++#
++# После include() доступны переменные:
++#   PURRMIDI_SYNTH_NAME          нормализованное имя (sine|pluck|epiano)
++#   PURRMIDI_SYNTH_DEFINE        макрос для компилятора (PURRMIDI_SYNTH_SINE и т.д.)
++#   PURRMIDI_SYNTH_SOURCES       исходники выбранного синтезатора (от корня проекта)
++#   PURRMIDI_SYNTH_NEEDS_DAISYSP ON, если выбранному движку нужна библиотека DaisySP
++# ---------------------------------------------------------------------------
++
++set(PURRMIDI_SYNTH "pluck" CACHE STRING "Synth engine: sine, pluck or epiano")
++set_property(CACHE PURRMIDI_SYNTH PROPERTY STRINGS sine pluck epiano)
++
++string(TOLOWER "${PURRMIDI_SYNTH}" PURRMIDI_SYNTH_NAME)
++
++if(PURRMIDI_SYNTH_NAME STREQUAL "sine")
++    set(PURRMIDI_SYNTH_DEFINE PURRMIDI_SYNTH_SINE)
++    set(PURRMIDI_SYNTH_SOURCES Core/Src/synth.c Core/Src/sine_synth.c)
++    set(PURRMIDI_SYNTH_NEEDS_DAISYSP OFF)
++elseif(PURRMIDI_SYNTH_NAME STREQUAL "pluck")
++    set(PURRMIDI_SYNTH_DEFINE PURRMIDI_SYNTH_PLUCK)
++    set(PURRMIDI_SYNTH_SOURCES Core/Src/pluck_synth.cpp)
++    set(PURRMIDI_SYNTH_NEEDS_DAISYSP ON)
++elseif(PURRMIDI_SYNTH_NAME STREQUAL "epiano")
++    set(PURRMIDI_SYNTH_DEFINE PURRMIDI_SYNTH_EPIANO)
++    set(PURRMIDI_SYNTH_SOURCES Core/Src/epiano_synth.cpp)
++    set(PURRMIDI_SYNTH_NEEDS_DAISYSP OFF)
++else()
++    message(FATAL_ERROR
++        "Неизвестный синтезатор PURRMIDI_SYNTH='${PURRMIDI_SYNTH}'. "
++        "Допустимые значения: sine, pluck, epiano")
++endif()
++
++message(STATUS "PurrMidi synth engine: ${PURRMIDI_SYNTH_NAME}")
+diff --git a/docs/EPIANO_SYNTH.md b/docs/EPIANO_SYNTH.md
+new file mode 100644
+index 0000000..434648b
+--- /dev/null
++++ b/docs/EPIANO_SYNTH.md
+@@ -0,0 +1,55 @@
++# FM-электропиано (`PURRMIDI_SYNTH=epiano`)
++
++Полифонический FM-синтезатор в духе Rhodes / Yamaha DX7 «E.PIANO 1». Файлы: `Core/Inc/epiano_synth.h`, `Core/Src/epiano_synth.cpp`. Внешних зависимостей (DaisySP и т.п.) нет.
++
++## Выбор при сборке
++
++```bash
++cmake --preset Release-epiano            # прошивка STM32
++cmake --preset win-msvc-release-epiano   # Windows
++# либо для любого пресета: -DPURRMIDI_SYNTH=epiano
++```
++
++## Структура голоса
++
++Все операторы — синусоиды (таблица 2048 точек + линейная интерполяция), частота ноты `f`:
++
++| Пара | Модулятор → несущая | Роль |
++|---|---|---|
++| BODY | `1·f → 1·f` | тело звука; индекс модуляции растёт с velocity и затухает («лай» при сильном ударе мягчеет) |
++| TINE | `14·f → 1·f` | высокочастотный «звон» молоточка/язычка; быстро затухает (T60 ≈ 0,3 с) |
++
++`voice = amp_env · velocity_gain · (BODY + tine_level · TINE)`
++
++Что учтено:
++* **Динамика:** индексы модуляции пропорциональны `velocity²` — тембр, а не только громкость, зависит от силы удара; громкость ~ `velocity^1,5`.
++* **Высота ноты:** индекс убывает к верхним нотам; «звон» плавно отключается, когда `14·f` приближается к 18 кГц (защита от алиасинга); басы звучат дольше (T60 удерживаемой ноты: ~18 с на C2 → ~4,5 с на C6).
++* **Демпфер:** после отпускания клавиши затухание T60 = 0,25 с (меняется через CC72); при нажатой педали нота продолжает затухать по «удерживаемой» огибающей.
++* **Голоса:** 8 (`EPIANO_NUM_VOICES`). Повторная нота реиспользует свой голос; при нехватке голосов крадётся самый тихий отпущенный, затем самый старый. Атака 2 мс и непрерывный уровень при краже — без щелчков.
++* **Стерео:** лёгкая панорама по положению клавиши (`EPIANO_STEREO_SPREAD`, 0 = моно).
++* **Уровень:** `EPIANO_MASTER_GAIN` + мягкий лимитер (без жёсткого клиппинга на плотных аккордах).
++
++## MIDI
++
++| Сообщение | Действие |
++|---|---|
++| Note On / Off (velocity 0 = Note Off) | запуск / отпускание голоса |
++| CC64 | педаль сустейна |
++| CC1, CC71, CC74 | яркость (индекс FM); 64 ≈ штатная |
++| CC7 | громкость |
++| CC72 | время релиза (0,08–1,7 с) |
++| CC120 / CC123 | All Sound Off / All Notes Off |
++
++Pitch bend, aftertouch и Program Change пока не обрабатываются (диспетчер их не передаёт).
++
++## Потоки и память
++
++События из основного цикла попадают в lock-free SPSC FIFO (64 события) и применяются в начале каждого `EPianoSynth_FillStereoBuffer()`; всё состояние голосов принадлежит аудиоконтексту, блокировок и динамической памяти нет. При переполнении FIFO события отбрасываются и учитываются в `EPianoSynth_GetDroppedEventCount()`. Размер для Cortex-M7: ≈3 КБ кода, ≈9 КБ RAM; нагрузка на CPU — порядка единиц процентов при 8 голосах на 480 МГц (оценка по числу операций, на железе не измерялась).
++
++## Подстройка звука
++
++Основные константы — в начале `epiano_synth.cpp`: `EPIANO_TINE_RATIO`, `EPIANO_BARK_T60_SEC`, `EPIANO_TINE_T60_SEC`, `EPIANO_MASTER_GAIN`; индексы модуляции и уровень «звона» — в `start_voice()`. Быстро послушать результат без железа: `purrmidi_win --play`, запись в WAV — ключ `--wav`.
++
++## Тесты
++
++`tests/test_epiano_host.cpp`: точность высоты (36–81), динамика и тембр по velocity, запас по уровню, релиз до точного нуля, педаль, полифония и кража голосов, независимость от размера блока, панорама, CC, переполнение FIFO.
+diff --git a/docs/WINDOWS_BUILD.md b/docs/WINDOWS_BUILD.md
+index 0f697b7..56ac9d8 100644
+--- a/docs/WINDOWS_BUILD.md
++++ b/docs/WINDOWS_BUILD.md
+@@ -1,6 +1,6 @@
+ # Сборка и запуск PurrMidi на Windows (Host App)
+ 
+-Данный документ описывает процесс сборки и запуска хостового приложения `purrmidi_win.exe` под Windows. Приложение объединяет MIDI-монитор и синтезатор `pluck_synth` (DaisySP Pluck), позволяя отлаживать и настраивать звучание синтезатора на ПК без прошивки микроконтроллера STM32.
++Данный документ описывает процесс сборки и запуска хостового приложения `purrmidi_win.exe` под Windows. Приложение объединяет MIDI-монитор и один из синтезаторов проекта (`sine`, `pluck` на основе DaisySP Pluck или FM-электропиано `epiano`; выбор — на этапе сборки), позволяя отлаживать и настраивать звучание на ПК без прошивки микроконтроллера STM32.
+ 
+ ---
+ 
+@@ -39,7 +39,7 @@ cmake --preset win-msvc-release
+ cmake --build --preset win-msvc-release
+ ```
+ 
+-Исполняемый файл будет сохранен в: `build/win-msvc-release/purrmidi_win.exe`.
++Исполняемый файл будет сохранен в: `build/win-msvc-release/platform/windows/purrmidi_win.exe`.
+ 
+ ### Вариант Б: Кросс-компиляция или сборка с MinGW-w64
+ 
+@@ -48,7 +48,22 @@ cmake --preset win-mingw-release
+ cmake --build --preset win-mingw-release
+ ```
+ 
+-Исполняемый файл будет сохранен в: `build/win-mingw-release/purrmidi_win.exe`.
++Исполняемый файл будет сохранен в: `build/win-mingw-release/platform/windows/purrmidi_win.exe`.
++
++### Выбор синтезатора
++
++Синтезатор в `purrmidi_win.exe` выбирается при сборке параметром `PURRMIDI_SYNTH` (`sine`, `pluck` — по умолчанию, `epiano`):
++
++```cmd
++:: готовые пресеты
++cmake --preset win-msvc-release-epiano
++cmake --build --preset win-msvc-release-epiano
++
++:: или для любого пресета
++cmake --preset win-msvc-release -DPURRMIDI_SYNTH=sine
++```
++
++Доступные пресеты: `win-msvc-release-epiano`, `win-msvc-release-sine`, `win-mingw-release-epiano`, `win-mingw-release-sine`. При запуске в режиме `--play` приложение печатает строку `Synth engine: ...`. Подмодуль DaisySP нужен только для `pluck` и для хостовых тестов (`-DPURRMIDI_BUILD_TESTS=OFF` позволяет собрать `epiano`/`sine` без него).
+ 
+ ### Прогон тестов (Host Tests)
+ 
+@@ -58,6 +73,8 @@ cmake --build --preset host-tests
+ ctest --test-dir build/host-tests --output-on-failure
+ ```
+ 
++Тесты каждого синтезатора (`test_sine_host`, `test_pluck_host`, `test_epiano_host`) выполняются всегда; `test_queue_dispatch` проверяет цепочку «очередь → диспетчер → выбранный синтезатор», поэтому имеет смысл прогнать набор для каждого значения `-DPURRMIDI_SYNTH=...` (так делает CI).
++
+ ---
+ 
+ ## 4. Сборка в VS Code
+@@ -107,7 +124,7 @@ purrmidi_win.exe --monitor --midi-port 0 --show-realtime
+ 
+ ### 3) Запуск синтезатора (`--play`)
+ 
+-Игра на клавиатуре через синтезатор `pluck_synth`:
++Игра на клавиатуре через синтезатор, выбранный при сборке:
+ 
+ ```cmd
+ purrmidi_win.exe --play --midi-port 0
+@@ -132,6 +149,7 @@ purrmidi_win.exe --play --midi-port 0 --buffer-frames 128 --gain 0.9
+ ## 6. Известные ограничения и особенности
+ 
+ 1. **Задержка аудио (Latency):** Аудиовывод под Windows осуществляется через подсистему WASAPI/miniaudio. Задержка зависит от размера буфера (`--buffer-frames`) и аудионастроек ОС, в то время как на STM32 вывод осуществляется напрямую в аппаратный SAI DMA.
+-2. **Одноголосие (Monophonic):** Синтезатор `pluck_synth` на данном этапе реализует одноголосный синтез Карплуса-Стронга.
+-3. **Лицензирование DaisySP-LGPL:** Реализация струны `Pluck` находится в подмодуле `DaisySP-LGPL` под лицензией LGPLv3.
+-4. **Интеграция с прошивкой STM32:** В текущей прошивке STM32 передача событий из `MIDI_Queue` в `PluckSynth` и DMA SAI закомментированы. В дальнейшем диспетчеризация может быть включена одной строчкой `MIDI_Dispatch(&event)` внутри цикла `while (MIDI_Queue_Pop(&event))` в `main.c`.
++2. **Полифония:** `pluck` и `sine` — одноголосные; `epiano` — 8 голосов (`EPIANO_NUM_VOICES`).
++3. **Лицензирование DaisySP-LGPL:** Реализация струны `Pluck` (только для `PURRMIDI_SYNTH=pluck`) находится в подмодуле `DaisySP-LGPL` под лицензией LGPLv3. `epiano` и `sine` от DaisySP не зависят.
++4. **Интеграция с прошивкой STM32:** прошивка и Windows-приложение используют один и тот же интерфейс `synth_engine.h` и один и тот же `MIDI_Dispatch`, поэтому звучание, отлаженное на ПК, совпадает с прошивкой (при том же `PURRMIDI_SYNTH`).
++5. **Названия CC в мониторе:** в режиме `--monitor` подписи контроллеров (`Damp`, `Decay`, `Sustain`) соответствуют синтезатору `pluck`; для `epiano` смысл CC описан в [EPIANO_SYNTH.md](EPIANO_SYNTH.md).
+diff --git a/platform/windows/CMakeLists.txt b/platform/windows/CMakeLists.txt
+index 46a7eb9..87dcf6a 100644
+--- a/platform/windows/CMakeLists.txt
++++ b/platform/windows/CMakeLists.txt
+@@ -8,33 +8,90 @@ endif()
+ 
+ option(PURRMIDI_BUILD_TESTS "Build host unit tests" ON)
+ 
+-# Check DaisySP submodule
++# Выбор синтезатора на этапе компиляции: -DPURRMIDI_SYNTH=sine|pluck|epiano
++include("${CMAKE_SOURCE_DIR}/cmake/purrmidi_synth.cmake")
++
++# Библиотека pluck собирается, если она выбрана или нужна тестам
++set(PURRMIDI_BUILD_PLUCK OFF)
++if(PURRMIDI_SYNTH_NEEDS_DAISYSP OR PURRMIDI_BUILD_TESTS)
++    set(PURRMIDI_BUILD_PLUCK ON)
++endif()
++
+ set(DAISYSP_DIR "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/DaisySP")
+-if(NOT EXISTS "${DAISYSP_DIR}/Source")
++if(PURRMIDI_BUILD_PLUCK AND NOT EXISTS "${DAISYSP_DIR}/Source")
+     message(FATAL_ERROR
+         "Исходники DaisySP не найдены: ${DAISYSP_DIR}/Source\n"
+         "Выполните команду для инициализации подмодулей:\n"
+-        "git submodule update --init --recursive"
++        "git submodule update --init --recursive\n"
++        "(DaisySP нужна только синтезатору pluck; для сборки без неё: "
++        "-DPURRMIDI_SYNTH=epiano -DPURRMIDI_BUILD_TESTS=OFF)"
+     )
+ endif()
+ 
+-# purrmidi_core static library
++# ---------------------------------------------------------------------------
++# Синтезаторы: каждый — отдельная статическая библиотека со своим API
++# ---------------------------------------------------------------------------
++
++# sine: одноголосая синусоида
++add_library(purrmidi_synth_sine STATIC
++    "${CMAKE_SOURCE_DIR}/Core/Src/synth.c"
++    "${CMAKE_SOURCE_DIR}/Core/Src/sine_synth.c"
++)
++target_include_directories(purrmidi_synth_sine PUBLIC "${CMAKE_SOURCE_DIR}/Core/Inc")
++target_compile_features(purrmidi_synth_sine PUBLIC c_std_11)
++
++# epiano: полифоническое FM-электропиано (без внешних зависимостей)
++add_library(purrmidi_synth_epiano STATIC
++    "${CMAKE_SOURCE_DIR}/Core/Src/epiano_synth.cpp"
++)
++target_include_directories(purrmidi_synth_epiano PUBLIC "${CMAKE_SOURCE_DIR}/Core/Inc")
++target_compile_features(purrmidi_synth_epiano PUBLIC cxx_std_17)
++
++# pluck: Карплус-Стронг на DaisySP Pluck
++if(PURRMIDI_BUILD_PLUCK)
++    add_library(purrmidi_synth_pluck STATIC
++        "${CMAKE_SOURCE_DIR}/Core/Src/pluck_synth.cpp"
++        "${DAISYSP_DIR}/DaisySP-LGPL/Source/PhysicalModeling/pluck.cpp"
++    )
++    target_include_directories(purrmidi_synth_pluck PUBLIC
++        "${CMAKE_SOURCE_DIR}/Core/Inc"
++        "${DAISYSP_DIR}/Source"
++        "${DAISYSP_DIR}/DaisySP-LGPL/Source"
++    )
++    target_compile_definitions(purrmidi_synth_pluck PUBLIC USE_DAISYSP_LGPL)
++    target_compile_features(purrmidi_synth_pluck PUBLIC cxx_std_17)
++endif()
++
++foreach(_synth sine pluck epiano)
++    if(TARGET purrmidi_synth_${_synth})
++        if(MSVC)
++            target_compile_options(purrmidi_synth_${_synth} PRIVATE /utf-8 /W4)
++        else()
++            target_compile_options(purrmidi_synth_${_synth} PRIVATE -Wall -Wextra)
++        endif()
++        if(UNIX)
++            target_link_libraries(purrmidi_synth_${_synth} PUBLIC m)
++        endif()
++    endif()
++endforeach()
++
++# ---------------------------------------------------------------------------
++# purrmidi_core: MIDI-очередь + диспетчер + ВЫБРАННЫЙ синтезатор
++# ---------------------------------------------------------------------------
+ add_library(purrmidi_core STATIC
+-    "${CMAKE_SOURCE_DIR}/Core/Src/pluck_synth.cpp"
+     "${CMAKE_SOURCE_DIR}/Core/Src/chord_detector.c"
+     "${CMAKE_SOURCE_DIR}/Engine/midi/midi_queue.c"
+     "${CMAKE_SOURCE_DIR}/Engine/midi/midi_dispatch.c"
+-    "${DAISYSP_DIR}/DaisySP-LGPL/Source/PhysicalModeling/pluck.cpp"
+ )
+ 
+ target_include_directories(purrmidi_core PUBLIC
+     "${CMAKE_SOURCE_DIR}/Core/Inc"
+     "${CMAKE_SOURCE_DIR}/Engine/midi"
+-    "${DAISYSP_DIR}/Source"
+-    "${DAISYSP_DIR}/DaisySP-LGPL/Source"
+ )
+ 
+-target_compile_definitions(purrmidi_core PUBLIC USE_DAISYSP_LGPL)
++# Макрос PURRMIDI_SYNTH_* виден и приложению, и тестам (для synth_engine.h)
++target_compile_definitions(purrmidi_core PUBLIC ${PURRMIDI_SYNTH_DEFINE})
++target_link_libraries(purrmidi_core PUBLIC purrmidi_synth_${PURRMIDI_SYNTH_NAME})
+ target_compile_features(purrmidi_core PUBLIC c_std_11 cxx_std_17)
+ 
+ if(MSVC)
+diff --git a/platform/windows/audio_out.cpp b/platform/windows/audio_out.cpp
+index 263ab7a..c128615 100644
+--- a/platform/windows/audio_out.cpp
++++ b/platform/windows/audio_out.cpp
+@@ -1,7 +1,7 @@
+ #define MINIAUDIO_IMPLEMENTATION
+ #include "miniaudio.h"
+ #include "audio_out.h"
+-#include "pluck_synth.h"
++#include "synth_engine.h"
+ #include <iostream>
+ #include <algorithm>
+ #include <cmath>
+@@ -26,8 +26,8 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput,
+     AudioCallbackData* cb_data = static_cast<AudioCallbackData*>(pDevice->pUserData);
+     int16_t* out = static_cast<int16_t*>(pOutput);
+ 
+-    // Render directly using PluckSynth_FillStereoBuffer
+-    PluckSynth_FillStereoBuffer(out, frameCount);
++    // Рендер через выбранный при компиляции синтезатор (sine / pluck / epiano)
++    SynthEngine_FillStereoBuffer(out, frameCount);
+ 
+     // Apply gain if not 1.0f
+     float gain = cb_data ? cb_data->gain : 1.0f;
+diff --git a/platform/windows/main_win.cpp b/platform/windows/main_win.cpp
+index f57c895..70c06b0 100644
+--- a/platform/windows/main_win.cpp
++++ b/platform/windows/main_win.cpp
+@@ -16,7 +16,7 @@
+ #include "midi_decode.h"
+ #include "audio_out.h"
+ #include "wav_recorder.h"
+-#include "pluck_synth.h"
++#include "synth_engine.h"
+ #include "midi_dispatch.h"
+ 
+ extern "C" {
+@@ -213,7 +213,7 @@ int main(int argc, char* argv[]) {
+         return 1;
+     }
+ 
+-    PluckSynth_Init();
++    SynthEngine_Init();
+     MIDI_Queue_Init();
+ 
+     MidiInput midi_in;
+@@ -269,6 +269,7 @@ int main(int argc, char* argv[]) {
+             std::cerr << "Failed to start audio output." << std::endl;
+             return 1;
+         }
++        std::cout << "Synth engine: " << SYNTH_ENGINE_NAME << "\n";
+         std::cout << "Synth player running. Press ENTER or Ctrl+C to stop...\n";
+     } else {
+         std::cout << "MIDI Monitor running. Press ENTER or Ctrl+C to stop...\n";
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index 5799505..e1130d6 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -10,12 +10,30 @@ target_include_directories(test_midi_decode PRIVATE
+ target_compile_features(test_midi_decode PRIVATE cxx_std_17)
+ add_test(NAME test_midi_decode COMMAND test_midi_decode)
+ 
+-add_executable(test_pluck_host
+-    test_pluck_host.cpp
++# Тесты отдельных синтезаторов линкуются с их собственными библиотеками,
++# поэтому выполняются независимо от выбранного PURRMIDI_SYNTH.
++if(TARGET purrmidi_synth_pluck)
++    add_executable(test_pluck_host
++        test_pluck_host.cpp
++    )
++    target_link_libraries(test_pluck_host PRIVATE purrmidi_synth_pluck)
++    target_compile_features(test_pluck_host PRIVATE cxx_std_17)
++    add_test(NAME test_pluck_host COMMAND test_pluck_host)
++endif()
++
++add_executable(test_sine_host
++    test_sine_host.cpp
++)
++target_link_libraries(test_sine_host PRIVATE purrmidi_synth_sine)
++target_compile_features(test_sine_host PRIVATE cxx_std_17)
++add_test(NAME test_sine_host COMMAND test_sine_host)
++
++add_executable(test_epiano_host
++    test_epiano_host.cpp
+ )
+-target_link_libraries(test_pluck_host PRIVATE purrmidi_core)
+-target_compile_features(test_pluck_host PRIVATE cxx_std_17)
+-add_test(NAME test_pluck_host COMMAND test_pluck_host)
++target_link_libraries(test_epiano_host PRIVATE purrmidi_synth_epiano)
++target_compile_features(test_epiano_host PRIVATE cxx_std_17)
++add_test(NAME test_epiano_host COMMAND test_epiano_host)
+ 
+ add_executable(test_queue_dispatch
+     test_queue_dispatch.cpp
+diff --git a/tests/test_epiano_host.cpp b/tests/test_epiano_host.cpp
+new file mode 100644
+index 0000000..7e8cf4d
+--- /dev/null
++++ b/tests/test_epiano_host.cpp
+@@ -0,0 +1,279 @@
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <iostream>
++#include <vector>
++#include "epiano_synth.h"
++
++#define CHECK(cond) do { if (!(cond)) { \
++    std::fprintf(stderr, "CHECK failed: %s (%s:%d)\n", #cond, __FILE__, __LINE__); std::abort(); } } while (0)
++
++static const uint32_t SR = 48000;
++
++static std::vector<int16_t> render(uint32_t frames) {
++    std::vector<int16_t> buf((size_t)frames * 2, 0);
++    EPianoSynth_FillStereoBuffer(buf.data(), frames);
++    return buf;
++}
++
++// Основная частота по автокорреляции левого канала (лаги в диапазоне периодов f0 +-30 %)
++static double estimate_f0(const std::vector<int16_t>& b, size_t start, size_t window, double f_expected) {
++    size_t lag_min = (size_t)(SR / (f_expected * 1.3));
++    size_t lag_max = (size_t)(SR / (f_expected * 0.7));
++    double best_r = -1e30;
++    size_t best_lag = lag_min;
++    for (size_t lag = lag_min; lag <= lag_max; ++lag) {
++        double r = 0.0;
++        for (size_t i = 0; i < window; ++i) {
++            r += (double)b[(start + i) * 2] * (double)b[(start + i + lag) * 2];
++        }
++        if (r > best_r) { best_r = r; best_lag = lag; }
++    }
++    // параболическая интерполяция пика для точности
++    auto corr = [&](size_t lag) {
++        double r = 0.0;
++        for (size_t i = 0; i < window; ++i) r += (double)b[(start + i) * 2] * (double)b[(start + i + lag) * 2];
++        return r;
++    };
++    double y0 = corr(best_lag - 1), y1 = best_r, y2 = corr(best_lag + 1);
++    double denom = (y0 - 2 * y1 + y2);
++    double shift = denom != 0.0 ? 0.5 * (y0 - y2) / denom : 0.0;
++    return SR / ((double)best_lag + shift);
++}
++
++static int peak_of(const std::vector<int16_t>& b, size_t from, size_t to) {
++    int p = 0;
++    for (size_t i = from * 2; i < to * 2; ++i) p = std::max(p, std::abs((int)b[i]));
++    return p;
++}
++
++static double rms_of(const std::vector<int16_t>& b, size_t from, size_t to, int ch = -1) {
++    double acc = 0.0; size_t n = 0;
++    for (size_t i = from; i < to; ++i) {
++        for (int c = 0; c < 2; ++c) {
++            if (ch >= 0 && c != ch) continue;
++            double s = b[i * 2 + c]; acc += s * s; n++;
++        }
++    }
++    return std::sqrt(acc / (double)n);
++}
++
++static bool all_zero(const std::vector<int16_t>& b, size_t from, size_t to) {
++    for (size_t i = from * 2; i < to * 2; ++i) if (b[i] != 0) return false;
++    return true;
++}
++
++// Доля энергии в высоких частотах: энергия первой разности / энергия сигнала
++static double brightness_ratio(const std::vector<int16_t>& b, size_t from, size_t to) {
++    double e = 0.0, d = 0.0;
++    for (size_t i = from + 1; i < to; ++i) {
++        double s = b[i * 2], p = b[(i - 1) * 2];
++        e += s * s; d += (s - p) * (s - p);
++    }
++    return e > 0.0 ? d / e : 0.0;
++}
++
++static void test_pitch_accuracy() {
++    const uint8_t notes[] = {36, 48, 60, 69, 72, 81};
++    for (uint8_t n : notes) {
++        EPianoSynth_Init();
++        EPianoSynth_NoteOn(n, 100);
++        auto b = render(SR / 2);
++        double expected = 440.0 * std::pow(2.0, (n - 69) / 12.0);
++        double f = estimate_f0(b, 4800, 4096, expected);
++        std::cout << "epiano note " << (int)n << ": " << f << " Hz (expected " << expected << ")\n";
++        CHECK(std::fabs(f - expected) / expected < 0.01);
++        CHECK(peak_of(b, 0, SR / 2) > 1500);
++    }
++}
++
++static void test_dynamics_and_headroom() {
++    EPianoSynth_Init();
++    EPianoSynth_NoteOn(60, 25);
++    auto soft = render(SR / 2);
++    EPianoSynth_Init();
++    EPianoSynth_NoteOn(60, 120);
++    auto loud = render(SR / 2);
++
++    double r_soft = rms_of(soft, 2400, SR / 2), r_loud = rms_of(loud, 2400, SR / 2);
++    std::cout << "rms soft=" << r_soft << " loud=" << r_loud << "\n";
++    CHECK(r_loud > 2.5 * r_soft);
++    CHECK(r_soft > 50.0);
++
++    // Тембр: сильный удар ярче слабого (в начале ноты)
++    CHECK(brightness_ratio(loud, 200, 6000) > brightness_ratio(soft, 200, 6000));
++
++    // Одна нота ff не доходит до клиппинга
++    int p = peak_of(loud, 0, SR / 2);
++    std::cout << "peak single ff = " << p << "\n";
++    CHECK(p < 28000);
++
++    // Плотный аккорд ff: лимитер держит в пределах int16 без переполнения
++    EPianoSynth_Init();
++    for (int n = 48; n < 56; ++n) EPianoSynth_NoteOn((uint8_t)n, 127);
++    auto chord = render(SR);
++    int pc = peak_of(chord, 0, SR);
++    std::cout << "peak 8-note ff chord = " << pc << "\n";
++    CHECK(pc <= 32767);
++    CHECK(pc > 5000);
++    // нет скачков, характерных для wrap-around переполнения
++    for (size_t i = 1; i < SR; ++i) {
++        CHECK(std::abs((int)chord[i * 2] - (int)chord[(i - 1) * 2]) < 20000);
++    }
++}
++
++static void test_release_and_sustain_pedal() {
++    // Релиз: после NoteOff голос затухает до точного нуля
++    EPianoSynth_Init();
++    EPianoSynth_NoteOn(64, 100);
++    render(SR / 4);
++    EPianoSynth_NoteOff(64);
++    auto tail = render(SR * 3);
++    CHECK(all_zero(tail, (size_t)(SR * 2.8), SR * 3));
++    CHECK(EPianoSynth_GetActiveVoiceCount() == 0);
++
++    // NoteOn с velocity 0 == NoteOff
++    EPianoSynth_Init();
++    EPianoSynth_NoteOn(64, 100);
++    render(SR / 4);
++    EPianoSynth_NoteOn(64, 0);
++    tail = render(SR * 3);
++    CHECK(all_zero(tail, (size_t)(SR * 2.8), SR * 3));
++
++    // Педаль сустейна: звук живёт после NoteOff, после отпускания педали — затихает
++    EPianoSynth_Init();
++    EPianoSynth_ControlChange(64, 127);
++    EPianoSynth_NoteOn(64, 100);
++    render(SR / 4);
++    EPianoSynth_NoteOff(64);
++    auto held = render(SR);
++    CHECK(rms_of(held, (size_t)(SR * 0.8), SR) > 100.0);
++    EPianoSynth_ControlChange(64, 0);
++    tail = render(SR * 3);
++    CHECK(all_zero(tail, (size_t)(SR * 2.8), SR * 3));
++
++    // Удерживаемая нота спадает (электропиано не органно): к 4 с тише, чем в начале
++    EPianoSynth_Init();
++    EPianoSynth_NoteOn(72, 100);
++    auto d = render(SR * 5);
++    double r0 = rms_of(d, 2400, 12000), r1 = rms_of(d, SR * 4, SR * 4 + 9600);
++    std::cout << "held decay: rms early=" << r0 << " late=" << r1 << "\n";
++    CHECK(r1 < 0.6 * r0);
++}
++
++static void test_polyphony_and_voice_management() {
++    EPianoSynth_Init();
++    for (int n = 48; n < 60; ++n) EPianoSynth_NoteOn((uint8_t)n, 100);   // 12 нот
++    auto b = render(SR / 4);
++    CHECK(EPianoSynth_GetActiveVoiceCount() <= 8);
++    CHECK(EPianoSynth_GetActiveVoiceCount() >= 8);
++    CHECK(peak_of(b, 0, SR / 4) > 1000);
++
++    // Повторное нажатие той же ноты не занимает второй голос
++    EPianoSynth_Init();
++    EPianoSynth_NoteOn(60, 100);
++    render(2400);
++    EPianoSynth_NoteOn(60, 100);
++    render(2400);
++    CHECK(EPianoSynth_GetActiveVoiceCount() == 1);
++
++    // Две разные ноты — два голоса
++    EPianoSynth_NoteOn(64, 100);
++    render(2400);
++    CHECK(EPianoSynth_GetActiveVoiceCount() == 2);
++
++    // All Sound Off гасит всё быстро, даже при зажатой педали
++    EPianoSynth_ControlChange(64, 127);
++    EPianoSynth_ControlChange(120, 0);
++    auto k = render(SR / 4);
++    CHECK(all_zero(k, SR / 10, SR / 4));
++    CHECK(EPianoSynth_GetActiveVoiceCount() == 0);
++
++    // All Notes Off отпускает ноты (они затухают по релизу)
++    EPianoSynth_Init();
++    EPianoSynth_NoteOn(60, 100);
++    EPianoSynth_NoteOn(67, 100);
++    render(2400);
++    EPianoSynth_ControlChange(123, 0);
++    auto t = render(SR * 3);
++    CHECK(all_zero(t, (size_t)(SR * 2.8), SR * 3));
++}
++
++static void test_block_size_independence() {
++    // Результат не должен зависеть от того, как поток разбит на блоки (DMA half/full)
++    auto run = [](uint32_t block) {
++        EPianoSynth_Init();
++        EPianoSynth_NoteOn(60, 90);
++        EPianoSynth_NoteOn(64, 70);
++        EPianoSynth_NoteOn(67, 110);
++        std::vector<int16_t> out((size_t)SR * 2);
++        uint32_t done = 0;
++        while (done < SR) {
++            uint32_t n = std::min(block, SR - done);
++            EPianoSynth_FillStereoBuffer(&out[(size_t)done * 2], n);
++            done += n;
++        }
++        return out;
++    };
++    auto a = run(SR);
++    auto b = run(128);
++    auto c = run(37);
++    CHECK(a == b);
++    CHECK(a == c);
++}
++
++static void test_stereo_spread_and_brightness() {
++    // Низкая нота смещена влево, высокая — вправо
++    EPianoSynth_Init();
++    EPianoSynth_NoteOn(36, 100);
++    auto lo = render(SR / 2);
++    CHECK(rms_of(lo, 2400, SR / 2, 0) > rms_of(lo, 2400, SR / 2, 1));
++    EPianoSynth_Init();
++    EPianoSynth_NoteOn(84, 100);
++    auto hi = render(SR / 2);
++    CHECK(rms_of(hi, 2400, SR / 2, 1) > rms_of(hi, 2400, SR / 2, 0));
++
++    // CC74: больше яркость -> больше высоких гармоник
++    EPianoSynth_Init();
++    EPianoSynth_ControlChange(74, 5);
++    EPianoSynth_NoteOn(60, 100);
++    auto dark = render(SR / 2);
++    EPianoSynth_Init();
++    EPianoSynth_ControlChange(74, 127);
++    EPianoSynth_NoteOn(60, 100);
++    auto bright = render(SR / 2);
++    double rd = brightness_ratio(dark, 200, 12000), rb = brightness_ratio(bright, 200, 12000);
++    std::cout << "brightness dark=" << rd << " bright=" << rb << "\n";
++    CHECK(rb > 1.3 * rd);
++
++    // CC7 = 0 -> тишина
++    EPianoSynth_Init();
++    EPianoSynth_ControlChange(7, 0);
++    EPianoSynth_NoteOn(60, 100);
++    CHECK(all_zero(render(SR / 4), 0, SR / 4));
++}
++
++static void test_event_fifo_overflow() {
++    EPianoSynth_Init();
++    for (int i = 0; i < 300; ++i) EPianoSynth_NoteOn((uint8_t)(40 + (i % 40)), 100);
++    CHECK(EPianoSynth_GetDroppedEventCount() > 0);
++    auto b = render(SR / 10);                       // не падает, звук есть
++    CHECK(peak_of(b, 0, SR / 10) > 0);
++    EPianoSynth_NoteOn(200, 100);                   // некорректная нота игнорируется
++    EPianoSynth_ControlChange(1, 200);              // значение зажимается
++    render(256);
++}
++
++int main() {
++    test_pitch_accuracy();
++    test_dynamics_and_headroom();
++    test_release_and_sustain_pedal();
++    test_polyphony_and_voice_management();
++    test_block_size_independence();
++    test_stereo_spread_and_brightness();
++    test_event_fifo_overflow();
++    std::cout << "test_epiano_host passed successfully." << std::endl;
++    return 0;
++}
+diff --git a/tests/test_queue_dispatch.cpp b/tests/test_queue_dispatch.cpp
+index dbb4a9b..ffb604a 100644
+--- a/tests/test_queue_dispatch.cpp
++++ b/tests/test_queue_dispatch.cpp
+@@ -5,11 +5,11 @@ extern "C" {
+ #include "midi_queue.h"
+ }
+ #include "midi_dispatch.h"
+-#include "pluck_synth.h"
++#include "synth_engine.h"
+ 
+ void test_queue_and_dispatch() {
+     MIDI_Queue_Init();
+-    PluckSynth_Init();
++    SynthEngine_Init();
+ 
+     assert(MIDI_Queue_GetOverrunCount() == 0);
+ 
+@@ -27,7 +27,7 @@ void test_queue_and_dispatch() {
+     MIDI_Dispatch(&popped_ev);
+ 
+     std::vector<int16_t> buf(4800 * 2, 0);
+-    PluckSynth_FillStereoBuffer(buf.data(), 4800);
++    SynthEngine_FillStereoBuffer(buf.data(), 4800);
+ 
+     bool non_zero = false;
+     for (int16_t s : buf) {
+@@ -59,6 +59,6 @@ void test_queue_overrun() {
+ int main() {
+     test_queue_and_dispatch();
+     test_queue_overrun();
+-    std::cout << "test_queue_dispatch passed successfully." << std::endl;
++    std::cout << "test_queue_dispatch passed successfully (synth: " << SYNTH_ENGINE_NAME << ")." << std::endl;
+     return 0;
+ }
+diff --git a/tests/test_sine_host.cpp b/tests/test_sine_host.cpp
+new file mode 100644
+index 0000000..a842d88
+--- /dev/null
++++ b/tests/test_sine_host.cpp
+@@ -0,0 +1,97 @@
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <iostream>
++#include <vector>
++#include "sine_synth.h"
++
++#define CHECK(cond) do { if (!(cond)) { \
++    std::fprintf(stderr, "CHECK failed: %s (%s:%d)\n", #cond, __FILE__, __LINE__); std::abort(); } } while (0)
++
++static std::vector<int16_t> render(uint32_t frames) {
++    std::vector<int16_t> buf(frames * 2, 0);
++    SineSynth_FillStereoBuffer(buf.data(), frames);
++    return buf;
++}
++
++// Частота по числу переходов через ноль снизу вверх на отрезке [from, to) кадров
++static double zero_cross_freq(const std::vector<int16_t>& b, size_t from, size_t to) {
++    int crossings = 0;
++    for (size_t i = from + 1; i < to; ++i) {
++        if (b[(i - 1) * 2] < 0 && b[i * 2] >= 0) crossings++;
++    }
++    return crossings / ((to - from) / 48000.0);
++}
++
++static bool all_zero(const std::vector<int16_t>& b, size_t from, size_t to) {
++    for (size_t i = from; i < to; ++i) {
++        if (b[i * 2] != 0 || b[i * 2 + 1] != 0) return false;
++    }
++    return true;
++}
++
++static void test_pitch_and_stereo() {
++    SineSynth_Init();
++    CHECK(all_zero(render(480), 0, 480));          // до NoteOn — тишина
++
++    SineSynth_NoteOn(69, 100);                      // A4 = 440 Гц
++    auto b = render(48000);
++    double f = zero_cross_freq(b, 4800, 48000);
++    std::cout << "sine A4: " << f << " Hz\n";
++    CHECK(std::fabs(f - 440.0) < 2.0);
++
++    int peak = 0;
++    for (size_t i = 0; i < 48000; ++i) {
++        CHECK(b[i * 2] == b[i * 2 + 1]);
++        peak = std::max(peak, std::abs((int)b[i * 2]));
++    }
++    CHECK(peak > 3000);
++
++    SineSynth_NoteOn(57, 100);                      // A3 = 220 Гц (последняя нота)
++    b = render(48000);
++    f = zero_cross_freq(b, 4800, 48000);
++    CHECK(std::fabs(f - 220.0) < 2.0);
++}
++
++static void test_release_and_sustain() {
++    SineSynth_Init();
++    SineSynth_NoteOn(60, 100);
++    render(4800);
++
++    SineSynth_NoteOff(61);                          // чужая нота — игнорируется
++    auto b = render(4800);
++    CHECK(!all_zero(b, 0, 4800));
++
++    SineSynth_NoteOff(60);
++    b = render(4800);                               // 100 мс > релиз 50 мс
++    CHECK(all_zero(b, 3000, 4800));
++
++    // Велосити 0 == NoteOff
++    SineSynth_NoteOn(60, 100);
++    render(2400);
++    SineSynth_NoteOn(60, 0);
++    CHECK(all_zero(render(4800), 3000, 4800));
++
++    // Педаль сустейна удерживает звук после NoteOff
++    SineSynth_ControlChange(64, 127);
++    SineSynth_NoteOn(60, 100);
++    render(2400);
++    SineSynth_NoteOff(60);
++    CHECK(!all_zero(render(24000), 20000, 24000));
++    SineSynth_ControlChange(64, 0);
++    CHECK(all_zero(render(4800), 3000, 4800));
++
++    // CC7 = 0 -> тишина
++    SineSynth_NoteOn(60, 100);
++    SineSynth_ControlChange(7, 0);
++    CHECK(all_zero(render(4800), 0, 4800));
++}
++
++int main() {
++    test_pitch_and_stereo();
++    test_release_and_sustain();
++    std::cout << "test_sine_host passed successfully." << std::endl;
++    return 0;
++}

@@ -16,7 +16,7 @@
 #include "midi_decode.h"
 #include "audio_out.h"
 #include "wav_recorder.h"
-#include "pluck_synth.h"
+#include "synth_engine.h"
 #include "midi_dispatch.h"
 
 extern "C" {
@@ -213,7 +213,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    PluckSynth_Init();
+    SynthEngine_Init();
     MIDI_Queue_Init();
 
     MidiInput midi_in;
@@ -269,6 +269,7 @@ int main(int argc, char* argv[]) {
             std::cerr << "Failed to start audio output." << std::endl;
             return 1;
         }
+        std::cout << "Synth engine: " << SYNTH_ENGINE_NAME << "\n";
         std::cout << "Synth player running. Press ENTER or Ctrl+C to stop...\n";
     } else {
         std::cout << "MIDI Monitor running. Press ENTER or Ctrl+C to stop...\n";

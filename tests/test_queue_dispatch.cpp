@@ -5,11 +5,11 @@ extern "C" {
 #include "midi_queue.h"
 }
 #include "midi_dispatch.h"
-#include "pluck_synth.h"
+#include "synth_engine.h"
 
 void test_queue_and_dispatch() {
     MIDI_Queue_Init();
-    PluckSynth_Init();
+    SynthEngine_Init();
 
     assert(MIDI_Queue_GetOverrunCount() == 0);
 
@@ -27,7 +27,7 @@ void test_queue_and_dispatch() {
     MIDI_Dispatch(&popped_ev);
 
     std::vector<int16_t> buf(4800 * 2, 0);
-    PluckSynth_FillStereoBuffer(buf.data(), 4800);
+    SynthEngine_FillStereoBuffer(buf.data(), 4800);
 
     bool non_zero = false;
     for (int16_t s : buf) {
@@ -59,6 +59,6 @@ void test_queue_overrun() {
 int main() {
     test_queue_and_dispatch();
     test_queue_overrun();
-    std::cout << "test_queue_dispatch passed successfully." << std::endl;
+    std::cout << "test_queue_dispatch passed successfully (synth: " << SYNTH_ENGINE_NAME << ")." << std::endl;
     return 0;
 }

@@ -1,6 +1,6 @@
 # Сборка и запуск PurrMidi на Windows (Host App)
 
-Данный документ описывает процесс сборки и запуска хостового приложения `purrmidi_win.exe` под Windows. Приложение объединяет MIDI-монитор и синтезатор `pluck_synth` (DaisySP Pluck), позволяя отлаживать и настраивать звучание синтезатора на ПК без прошивки микроконтроллера STM32.
+Данный документ описывает процесс сборки и запуска хостового приложения `purrmidi_win.exe` под Windows. Приложение объединяет MIDI-монитор и один из синтезаторов проекта (`sine`, `pluck` на основе DaisySP Pluck или FM-электропиано `epiano`; выбор — на этапе сборки), позволяя отлаживать и настраивать звучание на ПК без прошивки микроконтроллера STM32.
 
 ---
 
@@ -39,7 +39,7 @@ cmake --preset win-msvc-release
 cmake --build --preset win-msvc-release
 ```
 
-Исполняемый файл будет сохранен в: `build/win-msvc-release/purrmidi_win.exe`.
+Исполняемый файл будет сохранен в: `build/win-msvc-release/platform/windows/purrmidi_win.exe`.
 
 ### Вариант Б: Кросс-компиляция или сборка с MinGW-w64
 
@@ -48,7 +48,22 @@ cmake --preset win-mingw-release
 cmake --build --preset win-mingw-release
 ```
 
-Исполняемый файл будет сохранен в: `build/win-mingw-release/purrmidi_win.exe`.
+Исполняемый файл будет сохранен в: `build/win-mingw-release/platform/windows/purrmidi_win.exe`.
+
+### Выбор синтезатора
+
+Синтезатор в `purrmidi_win.exe` выбирается при сборке параметром `PURRMIDI_SYNTH` (`sine`, `pluck` — по умолчанию, `epiano`):
+
+```cmd
+:: готовые пресеты
+cmake --preset win-msvc-release-epiano
+cmake --build --preset win-msvc-release-epiano
+
+:: или для любого пресета
+cmake --preset win-msvc-release -DPURRMIDI_SYNTH=sine
+```
+
+Доступные пресеты: `win-msvc-release-epiano`, `win-msvc-release-sine`, `win-mingw-release-epiano`, `win-mingw-release-sine`. При запуске в режиме `--play` приложение печатает строку `Synth engine: ...`. Подмодуль DaisySP нужен только для `pluck` и для хостовых тестов (`-DPURRMIDI_BUILD_TESTS=OFF` позволяет собрать `epiano`/`sine` без него).
 
 ### Прогон тестов (Host Tests)
 
@@ -57,6 +72,8 @@ cmake --preset host-tests
 cmake --build --preset host-tests
 ctest --test-dir build/host-tests --output-on-failure
 ```
+
+Тесты каждого синтезатора (`test_sine_host`, `test_pluck_host`, `test_epiano_host`) выполняются всегда; `test_queue_dispatch` проверяет цепочку «очередь → диспетчер → выбранный синтезатор», поэтому имеет смысл прогнать набор для каждого значения `-DPURRMIDI_SYNTH=...` (так делает CI).
 
 ---
 
@@ -107,7 +124,7 @@ purrmidi_win.exe --monitor --midi-port 0 --show-realtime
 
 ### 3) Запуск синтезатора (`--play`)
 
-Игра на клавиатуре через синтезатор `pluck_synth`:
+Игра на клавиатуре через синтезатор, выбранный при сборке:
 
 ```cmd
 purrmidi_win.exe --play --midi-port 0
@@ -132,6 +149,7 @@ purrmidi_win.exe --play --midi-port 0 --buffer-frames 128 --gain 0.9
 ## 6. Известные ограничения и особенности
 
 1. **Задержка аудио (Latency):** Аудиовывод под Windows осуществляется через подсистему WASAPI/miniaudio. Задержка зависит от размера буфера (`--buffer-frames`) и аудионастроек ОС, в то время как на STM32 вывод осуществляется напрямую в аппаратный SAI DMA.
-2. **Одноголосие (Monophonic):** Синтезатор `pluck_synth` на данном этапе реализует одноголосный синтез Карплуса-Стронга.
-3. **Лицензирование DaisySP-LGPL:** Реализация струны `Pluck` находится в подмодуле `DaisySP-LGPL` под лицензией LGPLv3.
-4. **Интеграция с прошивкой STM32:** В текущей прошивке STM32 передача событий из `MIDI_Queue` в `PluckSynth` и DMA SAI закомментированы. В дальнейшем диспетчеризация может быть включена одной строчкой `MIDI_Dispatch(&event)` внутри цикла `while (MIDI_Queue_Pop(&event))` в `main.c`.
+2. **Полифония:** `pluck` и `sine` — одноголосные; `epiano` — 8 голосов (`EPIANO_NUM_VOICES`).
+3. **Лицензирование DaisySP-LGPL:** Реализация струны `Pluck` (только для `PURRMIDI_SYNTH=pluck`) находится в подмодуле `DaisySP-LGPL` под лицензией LGPLv3. `epiano` и `sine` от DaisySP не зависят.
+4. **Интеграция с прошивкой STM32:** прошивка и Windows-приложение используют один и тот же интерфейс `synth_engine.h` и один и тот же `MIDI_Dispatch`, поэтому звучание, отлаженное на ПК, совпадает с прошивкой (при том же `PURRMIDI_SYNTH`).
+5. **Названия CC в мониторе:** в режиме `--monitor` подписи контроллеров (`Damp`, `Decay`, `Sustain`) соответствуют синтезатору `pluck`; для `epiano` смысл CC описан в [EPIANO_SYNTH.md](EPIANO_SYNTH.md).

@@ -1,7 +1,7 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 #include "audio_out.h"
-#include "pluck_synth.h"
+#include "synth_engine.h"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -26,8 +26,8 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput,
     AudioCallbackData* cb_data = static_cast<AudioCallbackData*>(pDevice->pUserData);
     int16_t* out = static_cast<int16_t*>(pOutput);
 
-    // Render directly using PluckSynth_FillStereoBuffer
-    PluckSynth_FillStereoBuffer(out, frameCount);
+    // Рендер через выбранный при компиляции синтезатор (sine / pluck / epiano)
+    SynthEngine_FillStereoBuffer(out, frameCount);
 
     // Apply gain if not 1.0f
     float gain = cb_data ? cb_data->gain : 1.0f;

@@ -1,0 +1,133 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index d7a879e..bc18431 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -111,6 +111,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+     Engine/midi/midi_queue.c
+     Engine/midi/midi_dispatch.c
+     Platform/midi_usb/midi_usb.c
++    Platform/midi_usb/usb_port_recover.c
+ 
+     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/st7735.c
+     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/st7735_reg.c
+diff --git a/Core/Src/main.c b/Core/Src/main.c
+index 5c9680b..9ed305f 100644
+--- a/Core/Src/main.c
++++ b/Core/Src/main.c
+@@ -35,6 +35,7 @@
+ #include "midi_event.h"
+ #include "midi_queue.h"
+ #include "midi_usb.h"
++#include "usb_port_recover.h"
+ #include "usbh_midi.h"
+ #include "midi_dispatch.h"
+ /* USER CODE END Includes */
+@@ -226,6 +227,7 @@ int main(void)
+     MX_USB_HOST_Process();
+ 
+     /* USER CODE BEGIN 3 */
++    USB_PortLostRecover(&hUsbHostFS);   /* port silently disabled by HW -> re-enumerate */
+     MIDI_USB_Process();
+ 
+     if (MIDI_USB_HasStateChanged())
+diff --git a/Platform/midi_usb/usb_port_recover.c b/Platform/midi_usb/usb_port_recover.c
+new file mode 100644
+index 0000000..145090e
+--- /dev/null
++++ b/Platform/midi_usb/usb_port_recover.c
+@@ -0,0 +1,61 @@
++#include "usb_port_recover.h"
++#include "usbh_conf.h"
++
++static uint32_t s_recover_cnt = 0U;
++
++uint32_t USB_PortLostRecoverCount(void)
++{
++  return s_recover_cnt;
++}
++
++/*
++ * Problem: some devices drop and re-assert their D+ pull-up shortly after the host
++ * port reset. The OTG core sees DISCINT + PCDET and clears HPRT0.PENA - the port is
++ * dead (no SOF, no SETUP). The stock event logic misses it (the Connect callback
++ * overwrites is_disconnected, or the Disconnect callback is skipped because PCSTS is
++ * already 1 again), so the first control request waits forever without any error.
++ *
++ * Detection: stack believes a device is connected and is past the reset phase, but
++ * HPRT0.PENA is 0.
++ *
++ * Recovery: use the stock "disconnect + re-enumerate" path of USBH_Process():
++ * is_disconnected -> HOST_DEV_DISCONNECTED (class DeInit, DeInitStateMachine, user
++ * callback HOST_USER_DISCONNECTION) and is_ReEnumerated -> USBH_Start() instead of a
++ * plain LL start. is_connected is left untouched, so HOST_IDLE runs the normal
++ * "connected -> port reset -> enumeration" sequence again.
++ *
++ * Only public fields/functions of the host library are used.
++ */
++void USB_PortLostRecover(USBH_HandleTypeDef *phost)
++{
++  const HCD_HandleTypeDef *hhcd = (const HCD_HandleTypeDef *)phost->pData;
++  uint32_t hprt0;
++
++  if ((hhcd == NULL) ||
++      (phost->device.is_connected == 0U) ||
++      (phost->device.is_disconnected != 0U) ||
++      (phost->device.is_ReEnumerated != 0U) ||
++      (phost->gState < HOST_ENUMERATION) ||
++      (phost->gState > HOST_CLASS))
++  {
++    return;
++  }
++
++  hprt0 = *(__IO uint32_t *)((uint32_t)hhcd->Instance + USB_OTG_HOST_PORT_BASE);
++  if ((hprt0 & USB_OTG_HPRT_PENA) != 0U)
++  {
++    return;
++  }
++
++  s_recover_cnt++;
++  USBH_UsrLog("USB port disabled by HW (HPRT0=0x%08lX) in state %u, restarting (#%lu)",
++              (unsigned long)hprt0, (unsigned int)phost->gState,
++              (unsigned long)s_recover_cnt);
++
++  phost->device.is_ReEnumerated = 1U;
++  phost->device.is_disconnected = 1U;
++  (void)USBH_Stop(phost);   /* stop HCD, halt stuck channels, free control pipes */
++
++  /* give the device time to finish its own re-attach before the next port reset */
++  HAL_Delay(300U);
++}
+diff --git a/Platform/midi_usb/usb_port_recover.h b/Platform/midi_usb/usb_port_recover.h
+new file mode 100644
+index 0000000..efb39db
+--- /dev/null
++++ b/Platform/midi_usb/usb_port_recover.h
+@@ -0,0 +1,28 @@
++#ifndef USB_PORT_RECOVER_H
++#define USB_PORT_RECOVER_H
++
++#include <stdint.h>
++#include "usbh_core.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * Recover from a USB host port that was disabled by hardware while the device
++ * is still attached (e.g. SMK25Mini drops D+ right after the port reset).
++ *
++ * Call it periodically from the main loop (after MX_USB_HOST_Process()).
++ * Lives outside Middlewares/ on purpose: CubeMX overwrites usbh_core.c on every
++ * code generation, application code is kept.
++ */
++void USB_PortLostRecover(USBH_HandleTypeDef *phost);
++
++/** Number of recoveries performed since reset (for diagnostics). */
++uint32_t USB_PortLostRecoverCount(void);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* USB_PORT_RECOVER_H */

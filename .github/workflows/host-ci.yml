@@ -9,6 +9,10 @@ on:
 jobs:
   host-tests-linux:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        synth: [sine, pluck, epiano]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,8 +24,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libasound2-dev libjack-jackd2-dev
 
-      - name: Configure CMake host tests
-        run: cmake --preset host-tests
+      - name: Configure CMake host tests (synth=${{ matrix.synth }})
+        run: cmake --preset host-tests -DPURRMIDI_SYNTH=${{ matrix.synth }}
 
       - name: Build host tests
         run: cmake --build --preset host-tests
@@ -31,6 +35,10 @@ jobs:
 
   host-build-windows:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        synth: [sine, pluck, epiano]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -40,8 +48,8 @@ jobs:
       - name: Setup Ninja
         uses: llvm/actions/install-ninja@main
 
-      - name: Configure MSVC Release build
-        run: cmake --preset win-msvc-release
+      - name: Configure MSVC Release build (synth=${{ matrix.synth }})
+        run: cmake --preset win-msvc-release -DPURRMIDI_SYNTH=${{ matrix.synth }}
 
       - name: Build purrmidi_win.exe
         run: cmake --build --preset win-msvc-release

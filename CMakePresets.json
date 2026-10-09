@@ -7,8 +7,7 @@
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/${presetName}",
             "toolchainFile": "${sourceDir}/cmake/gcc-arm-none-eabi.cmake",
-            "cacheVariables": {
-            }
+            "cacheVariables": {}
         },
         {
             "name": "Debug",
@@ -81,6 +80,62 @@
                 "PURRMIDI_BUILD_APP": "OFF",
                 "PURRMIDI_BUILD_TESTS": "ON"
             }
+        },
+        {
+            "name": "Debug-epiano",
+            "inherits": "Debug",
+            "cacheVariables": {
+                "PURRMIDI_SYNTH": "epiano"
+            }
+        },
+        {
+            "name": "Release-epiano",
+            "inherits": "Release",
+            "cacheVariables": {
+                "PURRMIDI_SYNTH": "epiano"
+            }
+        },
+        {
+            "name": "Debug-sine",
+            "inherits": "Debug",
+            "cacheVariables": {
+                "PURRMIDI_SYNTH": "sine"
+            }
+        },
+        {
+            "name": "Release-sine",
+            "inherits": "Release",
+            "cacheVariables": {
+                "PURRMIDI_SYNTH": "sine"
+            }
+        },
+        {
+            "name": "win-msvc-release-epiano",
+            "inherits": "win-msvc-release",
+            "cacheVariables": {
+                "PURRMIDI_SYNTH": "epiano"
+            }
+        },
+        {
+            "name": "win-msvc-release-sine",
+            "inherits": "win-msvc-release",
+            "cacheVariables": {
+                "PURRMIDI_SYNTH": "sine"
+            }
+        },
+        {
+            "name": "win-mingw-release-epiano",
+            "inherits": "win-mingw-release",
+            "cacheVariables": {
+                "PURRMIDI_SYNTH": "epiano"
+            }
+        },
+        {
+            "name": "win-mingw-release-sine",
+            "inherits": "win-mingw-release",
+            "cacheVariables": {
+                "PURRMIDI_SYNTH": "sine"
+            }
         }
     ],
     "buildPresets": [
@@ -107,6 +162,38 @@
         {
             "name": "host-tests",
             "configurePreset": "host-tests"
+        },
+        {
+            "name": "Debug-epiano",
+            "configurePreset": "Debug-epiano"
+        },
+        {
+            "name": "Release-epiano",
+            "configurePreset": "Release-epiano"
+        },
+        {
+            "name": "Debug-sine",
+            "configurePreset": "Debug-sine"
+        },
+        {
+            "name": "Release-sine",
+            "configurePreset": "Release-sine"
+        },
+        {
+            "name": "win-msvc-release-epiano",
+            "configurePreset": "win-msvc-release-epiano"
+        },
+        {
+            "name": "win-msvc-release-sine",
+            "configurePreset": "win-msvc-release-sine"
+        },
+        {
+            "name": "win-mingw-release-epiano",
+            "configurePreset": "win-mingw-release-epiano"
+        },
+        {
+            "name": "win-mingw-release-sine",
+            "configurePreset": "win-mingw-release-sine"
         }
     ],
     "testPresets": [
