@@ -246,6 +246,15 @@ SECTIONS
 
 
 
+  /* Large SF2 PCM cache: D2 SRAM is accessible to the CPU and avoids consuming DTCM. */
+  .ram_d2 (NOLOAD) : ALIGN(32)
+  {
+    . = ALIGN(32);
+    *(.ram_d2)
+    *(.ram_d2*)
+    . = ALIGN(32);
+  } >RAM_D2
+
   /* DMA buffers: DMA1/DMA2 cannot access DTCM (.data/.bss live there),
      so audio ring buffer goes to AXI SRAM. Not zeroed by startup -> clear it in code. */
   .dma_buffer (NOLOAD) : ALIGN(32)

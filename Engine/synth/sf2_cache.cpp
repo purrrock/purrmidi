@@ -24,6 +24,13 @@ struct CacheBlock {
     int16_t samples[SF2_BLOCK_SAMPLES];
 };
 
+#if !SF2_HOST_MODE
+/* Keep the large PCM cache in DMA-accessible SRAM_D2, not the limited DTCM. */
+#define SF2_CACHE_SECTION __attribute__((section(".ram_d2"), aligned(32)))
+#else
+#define SF2_CACHE_SECTION
+#endif
+
 #define REQ_QUEUE_SIZE 64U
 struct ReqQueue {
     std::atomic<uint32_t> head{0};
@@ -31,7 +38,7 @@ struct ReqQueue {
     uint32_t items[REQ_QUEUE_SIZE];
 };
 
-CacheBlock g_cache[SF2_CACHE_BLOCKS];
+SF2_CACHE_SECTION CacheBlock g_cache[SF2_CACHE_BLOCKS];
 ReqQueue   g_req_queue;
 
 std::atomic<uint32_t> g_lru_clock{0};
