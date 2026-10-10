@@ -1,0 +1,159 @@
+diff --git a/Middlewares/Third_Party/bfreeOrgan2/components/tables.hpp b/Middlewares/Third_Party/bfreeOrgan2/components/tables.hpp
+index 55d76e7..7fea4ec 100644
+--- a/Middlewares/Third_Party/bfreeOrgan2/components/tables.hpp
++++ b/Middlewares/Third_Party/bfreeOrgan2/components/tables.hpp
+@@ -51,7 +51,9 @@ namespace tables
+ 	* Sampling frequency = 48000 Hz.
+ 	* WAVETABLE INDEX WIDTH: Q12:16
+ 	*/
+-	const std::array<uint32_t,FEAT_NUMBER_OF_GEARS> step_table  = {
++	// PurrMidi: not const -> placed in .data (RAM) instead of flash. These tables are read several
++	// times per sample in the audio interrupt, and uncached flash reads are very slow on the STM32H7.
++	inline std::array<uint32_t,FEAT_NUMBER_OF_GEARS> step_table  = {
+ 	0x0002CA6A,0x0002F4E5,0x000321E7,0x00035196,0x0003841A,0x0003B9A0,0x0003F255,0x00042E69,
+ 	0x00046E0F,0x0004B17E,0x0004F8F0,0x000544A1,0x000594D3,0x0005E9C9,0x000643CD,0x0006A32B,
+ 	0x00070835,0x00077340,0x0007E4AA,0x00085CD1,0x0008DC1E,0x000962FD,0x0009F1E0,0x000A8943,
+@@ -75,7 +77,7 @@ namespace tables
+ 	* @todo Change to int16_t when we update the Synthesizer Architecture internal sample width.
+ 	* @details 16 bits signed resolution.
+ 	*/
+-		const std::array<int16_t,4096> wave_sine  = {
++		inline std::array<int16_t,4096> wave_sine  = {
+      0,    12,    25,    37,    50,    62,    75,    87,   100,   113,   125,   138,   150,   163,   175,   188,
+    201,   213,   226,   238,   251,   263,   276,   288,   301,   314,   326,   339,   351,   364,   376,   389,
+    401,   414,   427,   439,   452,   464,   477,   489,   502,   514,   527,   539,   552,   564,   577,   590,
+@@ -598,7 +600,7 @@ namespace tables
+ 	* LOWEST MIDI NOTE = 24; HIGHEST MIDI NOTE = 84; TOTAL NOTES = 61
+ 	* LOWEST GEAR TONE = 24; HIGHEST GEAR TONE = 102; TOTAL GEARS = 79
+ 	*/
+-	const std::array<uint8_t,549> switchbox  = {
++	inline std::array<uint8_t,549> switchbox  = {
+ 		0,7,0,12,19,24,28,31,36,
+ 		1,8,1,13,20,25,29,32,37,
+ 		2,9,2,14,21,26,30,33,38,
+diff --git a/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp b/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp
+index 2c1646a..482277d 100644
+--- a/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp
++++ b/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp
+@@ -28,7 +28,7 @@ namespace synth
+ 	namespace voice
+ 		{
+ 		const cc::value_t *voice_organ::_drawbars;
+-		const uint32_t *voice_organ::_phase_table;
++		const uint32_t *voice_organ::_phase_counter;
+ 
+ 		voice_organ::voice_organ()
+ 			{
+@@ -41,10 +41,10 @@ namespace synth
+ 
+ 			}
+ 
+-		void voice_organ::init(const cc::value_t *drawbar_vector,const uint32_t *phase_table)
++		void voice_organ::init(const cc::value_t *drawbar_vector,const uint32_t *phase_counter)
+ 			{
+ 			_drawbars = drawbar_vector;
+-			_phase_table = phase_table;
++			_phase_counter = phase_counter;
+ 			}
+ 
+ 		inline void voice_organ::activate(uint8_t note)
+@@ -138,7 +138,10 @@ namespace synth
+ 			{
+ 			const uint8_t tonewheel_note = tables::switchbox[my_note*9 + tone];
+ 
+-			const uint16_t wave_index = tables::phase_to_wave_index(_phase_table[tonewheel_note]);
++			// Tonewheel phase = sample counter * step (mod 2^32). Identical to accumulating the step every
++			// sample into a per-tonewheel phase table, but needs no 79-entry table update per sample.
++			const uint32_t phase = (*_phase_counter) * tables::step_table[tonewheel_note];
++			const uint16_t wave_index = tables::phase_to_wave_index(phase);
+ 
+ 			const voice::sample_t wave_value = static_cast<voice::sample_t>(tables::wave_sine[wave_index]);
+ 
+diff --git a/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.hpp b/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.hpp
+index b815f89..d37dafd 100644
+--- a/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.hpp
++++ b/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.hpp
+@@ -46,7 +46,7 @@ namespace synth
+ 			* An independent init method to bind CC controllers and the external phase table.
+ 			* @todo The method input should be a reference/pointer to an std::array of 9 values.
+ 			*/
+-			static void init(const cc::value_t *drawbar_vector,const uint32_t *phase_table);
++			static void init(const cc::value_t *drawbar_vector,const uint32_t *phase_counter);
+ 			void activate(uint8_t note) override;
+ 			void deactivate() override;
+ 			void reset();
+@@ -87,7 +87,7 @@ namespace synth
+ 			/**
+ 			* Shared phase table between organ voices.
+ 			*/
+-			static const uint32_t *_phase_table;
++			static const uint32_t *_phase_counter;
+ 			/**
+ 			* Gets a sample from a single tonewheel.
+ 			*
+diff --git a/Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp b/Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp
+index 86044b5..8f7f684 100644
+--- a/Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp
++++ b/Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp
+@@ -47,13 +47,13 @@ namespace synth
+ 		if (this != &other)
+ 			{
+ 			oscillators = other.oscillators;
+-			phase_table = other.phase_table;
++			phase_counter = other.phase_counter;
+ 			voice_stamp = other.voice_stamp;
+ 			stamp_counter = other.stamp_counter;
+ 			fx = other.fx;
+ 			cc_drawbars = other.cc_drawbars;
+ 			voice::voice_organ::init(static_cast<const cc::value_t*>(cc_drawbars.data()),
+-									static_cast<const uint32_t*>(phase_table.data()));
++									&phase_counter);
+ 			}
+ 		return *this;
+ 		}
+@@ -63,9 +63,7 @@ namespace synth
+ 		std::for_each(cc_drawbars.begin(),
+ 					cc_drawbars.end(),
+ 					[](cc::value_t &vector_value){vector_value = 127;});
+-		std::for_each(phase_table.begin(),
+-					phase_table.end(),
+-					[](uint32_t &phase){phase = 0;});
++		phase_counter = 0;
+ 		voice_stamp.fill(0);
+ 		stamp_counter = 0;
+ 		reset_all();
+@@ -75,7 +73,7 @@ namespace synth
+ 			osc.set_release(voice::clean_cut_value);
+ 			}
+ 		voice::voice_organ::init(static_cast<const cc::value_t*>(cc_drawbars.data()),
+-								static_cast<const uint32_t*>(phase_table.data()));
++								&phase_counter);
+ 		fx = efx::efx_chorus();
+ 		#ifdef CHORUS_TEST
+ 		fx.activate();
+@@ -276,11 +274,7 @@ namespace synth
+ 
+ 	inline void synth_organ::update_phase_table()
+ 		{
+-		std::transform (phase_table.begin(),	//First element start
+-						phase_table.end(),		//First element end
+-						tables::step_table.begin(),		//Second element start
+-						phase_table.begin(),	//Result element start
+-						std::plus<uint32_t>());	//Binary Operator
++		++phase_counter;
+ 		}
+ 
+ 	inline synth::sample_t synth_organ::to_external_sample(synth::internal_sample_t sample)
+diff --git a/Middlewares/Third_Party/bfreeOrgan2/synth_organ.hpp b/Middlewares/Third_Party/bfreeOrgan2/synth_organ.hpp
+index 7c15e0f..f61d7ed 100644
+--- a/Middlewares/Third_Party/bfreeOrgan2/synth_organ.hpp
++++ b/Middlewares/Third_Party/bfreeOrgan2/synth_organ.hpp
+@@ -133,7 +133,7 @@ namespace synth
+ 		/**
+ 		* The Phase Table.
+ 		*/
+-		std::array<uint32_t,tables::FEAT_NUMBER_OF_GEARS> phase_table;
++		uint32_t phase_counter;
+ 		/**
+ 		* An effect unit.
+ 		*/

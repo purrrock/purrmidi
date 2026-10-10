@@ -1,0 +1,381 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7cae19f..8f76127 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -122,6 +122,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+ 
+     Core/Src/usbh_midi.c
+     Core/Src/display.c
++    Core/Src/diag.c
+     Core/Src/chord_detector.c
+     Engine/midi/midi_queue.c
+     Engine/midi/midi_dispatch.c
+diff --git a/Core/Inc/diag.h b/Core/Inc/diag.h
+new file mode 100644
+index 0000000..1c4abc3
+--- /dev/null
++++ b/Core/Inc/diag.h
+@@ -0,0 +1,27 @@
++#ifndef DIAG_H
++#define DIAG_H
++
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* Polling, register-level UART3 output. Safe to call from any context (ISR, fault handler,
++ * Error_Handler): it does not use stdio, malloc or HAL state. */
++void Diag_Puts(const char *s);
++void Diag_PutHex(uint32_t v);   /* "0x%08X" */
++void Diag_PutDec(uint32_t v);
++
++/* Enables the DWT cycle counter (DWT->CYCCNT) used to time the audio interrupt. */
++void Diag_EnableCycleCounter(void);
++
++/* Called (via a naked trampoline in stm32h7xx_it.c) from HardFault / MemManage / BusFault /
++ * UsageFault. frame = stacked R0,R1,R2,R3,R12,LR,PC,xPSR. Prints the registers and halts. */
++void Diag_FaultReport(uint32_t *frame, uint32_t exc_return, uint32_t kind) __attribute__((noreturn));
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* DIAG_H */
+diff --git a/Core/Src/diag.c b/Core/Src/diag.c
+new file mode 100644
+index 0000000..8aa68ee
+--- /dev/null
++++ b/Core/Src/diag.c
+@@ -0,0 +1,91 @@
++#include "diag.h"
++#include "main.h"
++
++static void put_char(char c)
++{
++    uint32_t guard = 2000000U;
++    while (((USART3->ISR & USART_ISR_TXE_TXFNF) == 0U) && --guard) { }
++    USART3->TDR = (uint8_t)c;
++}
++
++void Diag_Puts(const char *s)
++{
++    while (*s) {
++        if (*s == '\n') {
++            put_char('\r');
++        }
++        put_char(*s++);
++    }
++}
++
++void Diag_PutHex(uint32_t v)
++{
++    static const char digits[] = "0123456789ABCDEF";
++    put_char('0');
++    put_char('x');
++    for (int i = 28; i >= 0; i -= 4) {
++        put_char(digits[(v >> i) & 0xFU]);
++    }
++}
++
++void Diag_PutDec(uint32_t v)
++{
++    char tmp[11];
++    int n = 0;
++    do {
++        tmp[n++] = (char)('0' + (v % 10U));
++        v /= 10U;
++    } while (v != 0U);
++    while (n > 0) {
++        put_char(tmp[--n]);
++    }
++}
++
++void Diag_EnableCycleCounter(void)
++{
++    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
++    DWT->LAR = 0xC5ACCE55U;            /* unlock (Cortex-M7) */
++    DWT->CYCCNT = 0U;
++    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
++}
++
++static void field(const char *name, uint32_t v)
++{
++    Diag_Puts(" ");
++    Diag_Puts(name);
++    Diag_Puts("=");
++    Diag_PutHex(v);
++}
++
++void Diag_FaultReport(uint32_t *frame, uint32_t exc_return, uint32_t kind)
++{
++    static const char *const names[] = { "HardFault", "MemManage", "BusFault", "UsageFault" };
++
++    __disable_irq();
++    Diag_Puts("\n*** ");
++    Diag_Puts(names[kind & 3U]);
++    Diag_Puts(" ***\n");
++
++    field("PC", frame[6]);
++    field("LR", frame[5]);
++    field("xPSR", frame[7]);
++    Diag_Puts("\n");
++    field("R0", frame[0]);
++    field("R1", frame[1]);
++    field("R2", frame[2]);
++    field("R3", frame[3]);
++    field("R12", frame[4]);
++    Diag_Puts("\n");
++    field("CFSR", SCB->CFSR);
++    field("HFSR", SCB->HFSR);
++    field("MMFAR", SCB->MMFAR);
++    field("BFAR", SCB->BFAR);
++    Diag_Puts("\n");
++    field("EXC_RETURN", exc_return);
++    field("SP", (uint32_t)frame);
++    field("ICSR", SCB->ICSR);          /* VECTACTIVE (bits 8:0) = interrupt that was running */
++    Diag_Puts("\n");
++    Diag_Puts("decode: arm-none-eabi-addr2line -f -C -e build/Release/purrmidi.elf <PC> <LR>\n");
++
++    for (;;) { }
++}
+diff --git a/Core/Src/main.c b/Core/Src/main.c
+index 3e69ca0..85252f6 100644
+--- a/Core/Src/main.c
++++ b/Core/Src/main.c
+@@ -39,6 +39,7 @@
+ #include "usbh_midi.h"
+ #include "midi_dispatch.h"
+ #include "soundfont_synth.h"
++#include "diag.h"
+ /* USER CODE END Includes */
+ 
+ /* Private typedef -----------------------------------------------------------*/
+@@ -82,6 +83,24 @@ static uint16_t active_note_count = 0;
+ /* Some keyboards send the "next instrument" Program Change 127 twice per button press
+  * (e.g. on press and on release). Repeats closer than this are ignored. */
+ #define PC_NEXT_REPEAT_GUARD_MS 300U
++
++/* 1 = enable the Cortex-M7 instruction cache. The code runs from flash, which is slow at 480 MHz
++ * without a cache (several wait states per fetch); the organ engine is the heaviest per-sample
++ * code in the firmware and ran 3-5x slower than it should. */
++#define ENABLE_ICACHE 1
++
++/* 1 = time every audio DMA interrupt with the DWT cycle counter and report it on the UART:
++ *   [AUDIO] organ: isr max=NNN us (NN% of 2666 us budget) ...
++ * An interrupt that takes longer than its budget (one DMA half-buffer) starves the main loop
++ * (USB, MIDI, display) forever - this is how the system "hangs" even though nothing crashed. */
++#define AUDIO_DIAG_UART 1
++
++static volatile uint32_t audio_cyc_max = 0;      /* longest fill so far (CPU cycles) */
++static volatile uint32_t audio_cyc_last = 0;
++static volatile uint32_t audio_calls = 0;
++static volatile uint32_t audio_over80 = 0;       /* fills that used > 80% of the budget */
++static volatile uint32_t audio_over100 = 0;      /* fills that used > 100% of the budget */
++static volatile bool     audio_reset_stats = false;
+ /* Audio: 48 kHz, stereo, 16 bit. Circular DMA ring split into two halves.
+  * It must NOT be placed in DTCM (DMA2 cannot reach it): own section in AXI SRAM,
+  * see .dma_buffer in the linker script. D-Cache is off, so no cache maintenance needed. */
+@@ -176,6 +195,10 @@ int main(void)
+   HAL_Init();
+ 
+   /* USER CODE BEGIN Init */
++  Diag_EnableCycleCounter();
++#if ENABLE_ICACHE
++  SCB_EnableICache();
++#endif
+ 
+   /* USER CODE END Init */
+ 
+@@ -200,6 +223,9 @@ int main(void)
+   // SDStorage_Mount()
+   SynthEngine_Init(); // Включает синтезатор по умолчанию (E-Piano); дальше выбор — по Program Change
+   printf("Synth engine: %s\r\n", SynthEngine_GetName());
++  printf("[SYS] SYSCLK=%lu Hz, I-cache %s, audio budget %lu us per %u frames\r\n",
++         (unsigned long)SystemCoreClock, ENABLE_ICACHE ? "ON" : "off",
++         (unsigned long)(1000000UL * (AUDIO_BUFFER_FRAMES / 2U) / 48000UL), (unsigned)(AUDIO_BUFFER_FRAMES / 2U));
+ #if SF2_LOAD_AT_BOOT
+   printf("[SF2] Loading SoundFont from SD...\r\n");
+   if (SoundFontSynth_InitSF2())
+@@ -286,6 +312,7 @@ int main(void)
+         if (command == MIDI_STATUS_PROGRAM_CHANGE)
+         {
+             printf("[PC] ch=%u program %u -> %s\r\n", event.status & 0x0FU, event.data1, SynthEngine_GetName());
++            audio_reset_stats = true;   /* separate timing statistics for every engine */
+         }
+ 
+         if (command == MIDI_STATUS_NOTE_ON && event.data2 != 0)
+@@ -350,6 +377,44 @@ int main(void)
+         }
+     }
+ 
++#if AUDIO_DIAG_UART
++    {
++        /* Report only when a new maximum is reached (or the budget was exceeded), so the log stays quiet. */
++        static uint32_t last_audio_report = 0;
++        static uint32_t reported_max = 0;
++        static uint32_t reported_over80 = 0;
++        uint32_t t_now = HAL_GetTick();
++
++        if (audio_reset_stats)
++        {
++            audio_reset_stats = false;
++            audio_cyc_max = 0;
++            audio_over80 = 0;
++            audio_over100 = 0;
++            reported_max = 0;
++            reported_over80 = 0;
++        }
++        if (t_now - last_audio_report >= 250U)
++        {
++            last_audio_report = t_now;
++            uint32_t m = audio_cyc_max;
++            uint32_t o80 = audio_over80;
++            if (m > reported_max + reported_max / 8U || o80 != reported_over80)
++            {
++                const uint32_t us = SystemCoreClock / 1000000U;
++                const uint32_t budget = (SystemCoreClock / 48000U) * (AUDIO_BUFFER_FRAMES / 2U);
++                printf("[AUDIO] %s: isr last=%lu us max=%lu us (%lu%% of %lu us) >80%%: %lu >100%%: %lu calls=%lu\r\n",
++                       SynthEngine_GetName(),
++                       (unsigned long)(audio_cyc_last / us), (unsigned long)(m / us),
++                       (unsigned long)(m / (budget / 100U)), (unsigned long)(budget / us),
++                       (unsigned long)o80, (unsigned long)audio_over100, (unsigned long)audio_calls);
++                reported_max = m;
++                reported_over80 = o80;
++            }
++        }
++    }
++#endif
++
+ #if USB_DIAG_UART
+     uint32_t now = HAL_GetTick();
+     uint32_t silence_ms = now - MIDI_USB_GetLastPacketTick();
+@@ -445,17 +510,50 @@ void SystemClock_Config(void)
+ 
+ /* Audio DMA callbacks (DMA2_Stream0 ISR): refill the half that was just played.
+  * Half-transfer -> first half is free; transfer-complete -> second half is free. */
++
++/* Fills one half of the DMA ring and measures how long it took. */
++static void audio_fill(int16_t *dst)
++{
++    const uint32_t frames = AUDIO_BUFFER_FRAMES / 2U;
++    const uint32_t t0 = DWT->CYCCNT;
++    SynthEngine_FillStereoBuffer(dst, frames);
++    const uint32_t dt = DWT->CYCCNT - t0;
++
++    const uint32_t budget = (SystemCoreClock / 48000U) * frames;   /* one half-buffer period */
++    audio_cyc_last = dt;
++    audio_calls++;
++    if (dt > audio_cyc_max) {
++        audio_cyc_max = dt;
++    }
++    if (dt > budget - budget / 5U) {
++        audio_over80++;
++    }
++    if (dt > budget) {
++        if (audio_over100++ == 0U) {
++            /* Last gasp: the main loop is probably starved from now on, so report right here. */
++            const uint32_t us = SystemCoreClock / 1000000U;
++            Diag_Puts("\n[AUDIO] ISR OVERRUN: fill took ");
++            Diag_PutDec(dt / us);
++            Diag_Puts(" us, budget ");
++            Diag_PutDec(budget / us);
++            Diag_Puts(" us, engine ");
++            Diag_Puts(SynthEngine_GetName());
++            Diag_Puts("\n");
++        }
++    }
++}
++
+ void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai)
+ {
+     if (hsai->Instance == SAI1_Block_A) {
+-        SynthEngine_FillStereoBuffer(&audio_buffer[0], AUDIO_BUFFER_FRAMES / 2);
++        audio_fill(&audio_buffer[0]);
+     }
+ }
+ 
+ void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai)
+ {
+     if (hsai->Instance == SAI1_Block_A) {
+-        SynthEngine_FillStereoBuffer(&audio_buffer[AUDIO_BUFFER_SIZE / 2], AUDIO_BUFFER_FRAMES / 2);
++        audio_fill(&audio_buffer[AUDIO_BUFFER_SIZE / 2]);
+     }
+ }
+ 
+@@ -499,6 +597,9 @@ void Error_Handler(void)
+   /* USER CODE BEGIN Error_Handler_Debug */
+   /* User can add his own implementation to report the HAL error return state */
+   __disable_irq();
++  Diag_Puts("\n*** Error_Handler() called, LR=");
++  Diag_PutHex((uint32_t)__builtin_return_address(0));
++  Diag_Puts(" ***\n");
+   while (1)
+   {
+   }
+diff --git a/Core/Src/stm32h7xx_it.c b/Core/Src/stm32h7xx_it.c
+index 707d549..10c42d6 100644
+--- a/Core/Src/stm32h7xx_it.c
++++ b/Core/Src/stm32h7xx_it.c
+@@ -22,6 +22,7 @@
+ #include "stm32h7xx_it.h"
+ /* Private includes ----------------------------------------------------------*/
+ /* USER CODE BEGIN Includes */
++#include "diag.h"
+ /* USER CODE END Includes */
+ 
+ /* Private typedef -----------------------------------------------------------*/
+@@ -46,6 +47,20 @@
+ 
+ /* Private function prototypes -----------------------------------------------*/
+ /* USER CODE BEGIN PFP */
++/* The fault handlers are naked so that the asm below sees the original (unmodified) stack pointer. */
++void HardFault_Handler(void)   __attribute__((naked));
++void MemManage_Handler(void)   __attribute__((naked));
++void BusFault_Handler(void)    __attribute__((naked));
++void UsageFault_Handler(void)  __attribute__((naked));
++
++#define DIAG_FAULT_ENTRY(kind)                                                   \
++    __asm volatile("tst lr, #4\n\t"                                             \
++                   "ite eq\n\t"                                                  \
++                   "mrseq r0, msp\n\t"                                           \
++                   "mrsne r0, psp\n\t"                                           \
++                   "mov r1, lr\n\t"                                              \
++                   "movs r2, %0\n\t"                                             \
++                   "b Diag_FaultReport\n\t" :: "i"(kind))
+ 
+ /* USER CODE END PFP */
+ 
+@@ -86,6 +101,7 @@ void NMI_Handler(void)
+ void HardFault_Handler(void)
+ {
+   /* USER CODE BEGIN HardFault_IRQn 0 */
++  DIAG_FAULT_ENTRY(0);
+ 
+   /* USER CODE END HardFault_IRQn 0 */
+   while (1)
+@@ -101,6 +117,7 @@ void HardFault_Handler(void)
+ void MemManage_Handler(void)
+ {
+   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
++  DIAG_FAULT_ENTRY(1);
+ 
+   /* USER CODE END MemoryManagement_IRQn 0 */
+   while (1)
+@@ -116,6 +133,7 @@ void MemManage_Handler(void)
+ void BusFault_Handler(void)
+ {
+   /* USER CODE BEGIN BusFault_IRQn 0 */
++  DIAG_FAULT_ENTRY(2);
+ 
+   /* USER CODE END BusFault_IRQn 0 */
+   while (1)
+@@ -131,6 +149,7 @@ void BusFault_Handler(void)
+ void UsageFault_Handler(void)
+ {
+   /* USER CODE BEGIN UsageFault_IRQn 0 */
++  DIAG_FAULT_ENTRY(3);
+ 
+   /* USER CODE END UsageFault_IRQn 0 */
+   while (1)

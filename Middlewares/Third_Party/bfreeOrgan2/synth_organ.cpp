@@ -47,13 +47,13 @@ namespace synth
 		if (this != &other)
 			{
 			oscillators = other.oscillators;
-			phase_table = other.phase_table;
+			phase_counter = other.phase_counter;
 			voice_stamp = other.voice_stamp;
 			stamp_counter = other.stamp_counter;
 			fx = other.fx;
 			cc_drawbars = other.cc_drawbars;
 			voice::voice_organ::init(static_cast<const cc::value_t*>(cc_drawbars.data()),
-									static_cast<const uint32_t*>(phase_table.data()));
+									&phase_counter);
 			}
 		return *this;
 		}
@@ -63,9 +63,7 @@ namespace synth
 		std::for_each(cc_drawbars.begin(),
 					cc_drawbars.end(),
 					[](cc::value_t &vector_value){vector_value = 127;});
-		std::for_each(phase_table.begin(),
-					phase_table.end(),
-					[](uint32_t &phase){phase = 0;});
+		phase_counter = 0;
 		voice_stamp.fill(0);
 		stamp_counter = 0;
 		reset_all();
@@ -75,7 +73,7 @@ namespace synth
 			osc.set_release(voice::clean_cut_value);
 			}
 		voice::voice_organ::init(static_cast<const cc::value_t*>(cc_drawbars.data()),
-								static_cast<const uint32_t*>(phase_table.data()));
+								&phase_counter);
 		fx = efx::efx_chorus();
 		#ifdef CHORUS_TEST
 		fx.activate();
@@ -276,11 +274,7 @@ namespace synth
 
 	inline void synth_organ::update_phase_table()
 		{
-		std::transform (phase_table.begin(),	//First element start
-						phase_table.end(),		//First element end
-						tables::step_table.begin(),		//Second element start
-						phase_table.begin(),	//Result element start
-						std::plus<uint32_t>());	//Binary Operator
+		++phase_counter;
 		}
 
 	inline synth::sample_t synth_organ::to_external_sample(synth::internal_sample_t sample)

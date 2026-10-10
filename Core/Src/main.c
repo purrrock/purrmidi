@@ -39,6 +39,8 @@
 #include "usbh_midi.h"
 #include "midi_dispatch.h"
 #include "soundfont_synth.h"
+#include "diag.h"
+#include "organ_synth.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -82,6 +84,26 @@ static uint16_t active_note_count = 0;
 /* Some keyboards send the "next instrument" Program Change 127 twice per button press
  * (e.g. on press and on release). Repeats closer than this are ignored. */
 #define PC_NEXT_REPEAT_GUARD_MS 300U
+
+/* 1 = enable the Cortex-M7 instruction cache. The code runs from flash, which is slow at 480 MHz
+ * without a cache (several wait states per fetch); the organ engine is the heaviest per-sample
+ * code in the firmware and ran 3-5x slower than it should. */
+#define ENABLE_ICACHE 1
+
+extern uint32_t _sitcm_text;   /* linker symbol: start of the code copied to ITCM */
+
+/* 1 = time every audio DMA interrupt with the DWT cycle counter and report it on the UART:
+ *   [AUDIO] organ: isr max=NNN us (NN% of 2666 us budget) ...
+ * An interrupt that takes longer than its budget (one DMA half-buffer) starves the main loop
+ * (USB, MIDI, display) forever - this is how the system "hangs" even though nothing crashed. */
+#define AUDIO_DIAG_UART 1
+
+static volatile uint32_t audio_cyc_max = 0;      /* longest fill so far (CPU cycles) */
+static volatile uint32_t audio_cyc_last = 0;
+static volatile uint32_t audio_calls = 0;
+static volatile uint32_t audio_over80 = 0;       /* fills that used > 80% of the budget */
+static volatile uint32_t audio_over100 = 0;      /* fills that used > 100% of the budget */
+static volatile bool     audio_reset_stats = false;
 /* Audio: 48 kHz, stereo, 16 bit. Circular DMA ring split into two halves.
  * It must NOT be placed in DTCM (DMA2 cannot reach it): own section in AXI SRAM,
  * see .dma_buffer in the linker script. D-Cache is off, so no cache maintenance needed. */
@@ -176,6 +198,10 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
+  Diag_EnableCycleCounter();
+#if ENABLE_ICACHE
+  SCB_EnableICache();
+#endif
 
   /* USER CODE END Init */
 
@@ -200,6 +226,11 @@ int main(void)
   // SDStorage_Mount()
   SynthEngine_Init(); // Включает синтезатор по умолчанию (E-Piano); дальше выбор — по Program Change
   printf("Synth engine: %s\r\n", SynthEngine_GetName());
+  printf("[SYS] organ code at %p (0x0000xxxx = ITCM, 0x0800xxxx = flash), sample table at %p\r\n",
+         (void *)OrganSynth_FillStereoBuffer, (void *)&_sitcm_text);
+  printf("[SYS] SYSCLK=%lu Hz, I-cache %s, audio budget %lu us per %u frames\r\n",
+         (unsigned long)SystemCoreClock, ENABLE_ICACHE ? "ON" : "off",
+         (unsigned long)(1000000UL * (AUDIO_BUFFER_FRAMES / 2U) / 48000UL), (unsigned)(AUDIO_BUFFER_FRAMES / 2U));
 #if SF2_LOAD_AT_BOOT
   printf("[SF2] Loading SoundFont from SD...\r\n");
   if (SoundFontSynth_InitSF2())
@@ -286,6 +317,7 @@ int main(void)
         if (command == MIDI_STATUS_PROGRAM_CHANGE)
         {
             printf("[PC] ch=%u program %u -> %s\r\n", event.status & 0x0FU, event.data1, SynthEngine_GetName());
+            audio_reset_stats = true;   /* separate timing statistics for every engine */
         }
 
         if (command == MIDI_STATUS_NOTE_ON && event.data2 != 0)
@@ -349,6 +381,44 @@ int main(void)
             }
         }
     }
+
+#if AUDIO_DIAG_UART
+    {
+        /* Report only when a new maximum is reached (or the budget was exceeded), so the log stays quiet. */
+        static uint32_t last_audio_report = 0;
+        static uint32_t reported_max = 0;
+        static uint32_t reported_over80 = 0;
+        uint32_t t_now = HAL_GetTick();
+
+        if (audio_reset_stats)
+        {
+            audio_reset_stats = false;
+            audio_cyc_max = 0;
+            audio_over80 = 0;
+            audio_over100 = 0;
+            reported_max = 0;
+            reported_over80 = 0;
+        }
+        if (t_now - last_audio_report >= 250U)
+        {
+            last_audio_report = t_now;
+            uint32_t m = audio_cyc_max;
+            uint32_t o80 = audio_over80;
+            if (m > reported_max + reported_max / 8U || o80 != reported_over80)
+            {
+                const uint32_t us = SystemCoreClock / 1000000U;
+                const uint32_t budget = (SystemCoreClock / 48000U) * (AUDIO_BUFFER_FRAMES / 2U);
+                printf("[AUDIO] %s: isr last=%lu us max=%lu us (%lu%% of %lu us) >80%%: %lu >100%%: %lu calls=%lu\r\n",
+                       SynthEngine_GetName(),
+                       (unsigned long)(audio_cyc_last / us), (unsigned long)(m / us),
+                       (unsigned long)(m / (budget / 100U)), (unsigned long)(budget / us),
+                       (unsigned long)o80, (unsigned long)audio_over100, (unsigned long)audio_calls);
+                reported_max = m;
+                reported_over80 = o80;
+            }
+        }
+    }
+#endif
 
 #if USB_DIAG_UART
     uint32_t now = HAL_GetTick();
@@ -445,17 +515,50 @@ void SystemClock_Config(void)
 
 /* Audio DMA callbacks (DMA2_Stream0 ISR): refill the half that was just played.
  * Half-transfer -> first half is free; transfer-complete -> second half is free. */
+
+/* Fills one half of the DMA ring and measures how long it took. */
+static void audio_fill(int16_t *dst)
+{
+    const uint32_t frames = AUDIO_BUFFER_FRAMES / 2U;
+    const uint32_t t0 = DWT->CYCCNT;
+    SynthEngine_FillStereoBuffer(dst, frames);
+    const uint32_t dt = DWT->CYCCNT - t0;
+
+    const uint32_t budget = (SystemCoreClock / 48000U) * frames;   /* one half-buffer period */
+    audio_cyc_last = dt;
+    audio_calls++;
+    if (dt > audio_cyc_max) {
+        audio_cyc_max = dt;
+    }
+    if (dt > budget - budget / 5U) {
+        audio_over80++;
+    }
+    if (dt > budget) {
+        if (audio_over100++ == 0U) {
+            /* Last gasp: the main loop is probably starved from now on, so report right here. */
+            const uint32_t us = SystemCoreClock / 1000000U;
+            Diag_Puts("\n[AUDIO] ISR OVERRUN: fill took ");
+            Diag_PutDec(dt / us);
+            Diag_Puts(" us, budget ");
+            Diag_PutDec(budget / us);
+            Diag_Puts(" us, engine ");
+            Diag_Puts(SynthEngine_GetName());
+            Diag_Puts("\n");
+        }
+    }
+}
+
 void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai)
 {
     if (hsai->Instance == SAI1_Block_A) {
-        SynthEngine_FillStereoBuffer(&audio_buffer[0], AUDIO_BUFFER_FRAMES / 2);
+        audio_fill(&audio_buffer[0]);
     }
 }
 
 void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai)
 {
     if (hsai->Instance == SAI1_Block_A) {
-        SynthEngine_FillStereoBuffer(&audio_buffer[AUDIO_BUFFER_SIZE / 2], AUDIO_BUFFER_FRAMES / 2);
+        audio_fill(&audio_buffer[AUDIO_BUFFER_SIZE / 2]);
     }
 }
 
@@ -499,6 +602,9 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
+  Diag_Puts("\n*** Error_Handler() called, LR=");
+  Diag_PutHex((uint32_t)__builtin_return_address(0));
+  Diag_Puts(" ***\n");
   while (1)
   {
   }

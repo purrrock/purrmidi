@@ -46,7 +46,7 @@ namespace synth
 			* An independent init method to bind CC controllers and the external phase table.
 			* @todo The method input should be a reference/pointer to an std::array of 9 values.
 			*/
-			static void init(const cc::value_t *drawbar_vector,const uint32_t *phase_table);
+			static void init(const cc::value_t *drawbar_vector,const uint32_t *phase_counter);
 			void activate(uint8_t note) override;
 			void deactivate() override;
 			void reset();
@@ -87,7 +87,7 @@ namespace synth
 			/**
 			* Shared phase table between organ voices.
 			*/
-			static const uint32_t *_phase_table;
+			static const uint32_t *_phase_counter;
 			/**
 			* Gets a sample from a single tonewheel.
 			*

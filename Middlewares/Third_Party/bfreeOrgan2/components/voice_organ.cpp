@@ -28,7 +28,7 @@ namespace synth
 	namespace voice
 		{
 		const cc::value_t *voice_organ::_drawbars;
-		const uint32_t *voice_organ::_phase_table;
+		const uint32_t *voice_organ::_phase_counter;
 
 		voice_organ::voice_organ()
 			{
@@ -41,10 +41,10 @@ namespace synth
 
 			}
 
-		void voice_organ::init(const cc::value_t *drawbar_vector,const uint32_t *phase_table)
+		void voice_organ::init(const cc::value_t *drawbar_vector,const uint32_t *phase_counter)
 			{
 			_drawbars = drawbar_vector;
-			_phase_table = phase_table;
+			_phase_counter = phase_counter;
 			}
 
 		inline void voice_organ::activate(uint8_t note)
@@ -138,7 +138,10 @@ namespace synth
 			{
 			const uint8_t tonewheel_note = tables::switchbox[my_note*9 + tone];
 
-			const uint16_t wave_index = tables::phase_to_wave_index(_phase_table[tonewheel_note]);
+			// Tonewheel phase = sample counter * step (mod 2^32). Identical to accumulating the step every
+			// sample into a per-tonewheel phase table, but needs no 79-entry table update per sample.
+			const uint32_t phase = (*_phase_counter) * tables::step_table[tonewheel_note];
+			const uint16_t wave_index = tables::phase_to_wave_index(phase);
 
 			const voice::sample_t wave_value = static_cast<voice::sample_t>(tables::wave_sine[wave_index]);
 

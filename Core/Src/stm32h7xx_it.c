@@ -22,6 +22,7 @@
 #include "stm32h7xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "diag.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,6 +47,20 @@
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
+/* The fault handlers are naked so that the asm below sees the original (unmodified) stack pointer. */
+void HardFault_Handler(void)   __attribute__((naked));
+void MemManage_Handler(void)   __attribute__((naked));
+void BusFault_Handler(void)    __attribute__((naked));
+void UsageFault_Handler(void)  __attribute__((naked));
+
+#define DIAG_FAULT_ENTRY(kind)                                                   \
+    __asm volatile("tst lr, #4\n\t"                                             \
+                   "ite eq\n\t"                                                  \
+                   "mrseq r0, msp\n\t"                                           \
+                   "mrsne r0, psp\n\t"                                           \
+                   "mov r1, lr\n\t"                                              \
+                   "movs r2, %0\n\t"                                             \
+                   "b Diag_FaultReport\n\t" :: "i"(kind))
 
 /* USER CODE END PFP */
 
@@ -86,6 +101,7 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
+  DIAG_FAULT_ENTRY(0);
 
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
@@ -101,6 +117,7 @@ void HardFault_Handler(void)
 void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
+  DIAG_FAULT_ENTRY(1);
 
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
@@ -116,6 +133,7 @@ void MemManage_Handler(void)
 void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
+  DIAG_FAULT_ENTRY(2);
 
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
@@ -131,6 +149,7 @@ void BusFault_Handler(void)
 void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
+  DIAG_FAULT_ENTRY(3);
 
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)

@@ -1,0 +1,87 @@
+diff --git a/Core/Src/main.c b/Core/Src/main.c
+index 85252f6..a91ad4b 100644
+--- a/Core/Src/main.c
++++ b/Core/Src/main.c
+@@ -40,6 +40,7 @@
+ #include "midi_dispatch.h"
+ #include "soundfont_synth.h"
+ #include "diag.h"
++#include "organ_synth.h"
+ /* USER CODE END Includes */
+ 
+ /* Private typedef -----------------------------------------------------------*/
+@@ -89,6 +90,8 @@ static uint16_t active_note_count = 0;
+  * code in the firmware and ran 3-5x slower than it should. */
+ #define ENABLE_ICACHE 1
+ 
++extern uint32_t _sitcm_text;   /* linker symbol: start of the code copied to ITCM */
++
+ /* 1 = time every audio DMA interrupt with the DWT cycle counter and report it on the UART:
+  *   [AUDIO] organ: isr max=NNN us (NN% of 2666 us budget) ...
+  * An interrupt that takes longer than its budget (one DMA half-buffer) starves the main loop
+@@ -223,6 +226,8 @@ int main(void)
+   // SDStorage_Mount()
+   SynthEngine_Init(); // Включает синтезатор по умолчанию (E-Piano); дальше выбор — по Program Change
+   printf("Synth engine: %s\r\n", SynthEngine_GetName());
++  printf("[SYS] organ code at %p (0x0000xxxx = ITCM, 0x0800xxxx = flash), sample table at %p\r\n",
++         (void *)OrganSynth_FillStereoBuffer, (void *)&_sitcm_text);
+   printf("[SYS] SYSCLK=%lu Hz, I-cache %s, audio budget %lu us per %u frames\r\n",
+          (unsigned long)SystemCoreClock, ENABLE_ICACHE ? "ON" : "off",
+          (unsigned long)(1000000UL * (AUDIO_BUFFER_FRAMES / 2U) / 48000UL), (unsigned)(AUDIO_BUFFER_FRAMES / 2U));
+diff --git a/STM32H743xx_FLASH.ld b/STM32H743xx_FLASH.ld
+index 7971faf..1c717ec 100644
+--- a/STM32H743xx_FLASH.ld
++++ b/STM32H743xx_FLASH.ld
+@@ -84,6 +84,25 @@ SECTIONS
+     . = ALIGN(4);
+   } >FLASH
+ 
++  /* Hot audio code of the organ engine runs from ITCM RAM (0 wait states, independent of the I-cache).
++     Executing it from flash made every voice ~10x slower than its instruction count suggests.
++     Only normal function sections are listed (.text._Z* = C++ mangled, .text.Organ* = extern "C" API);
++     .text.startup (static constructors) deliberately stays in flash: it runs before ITCM could matter.
++     Loaded from FLASH, copied to ITCM by startup_stm32h743xx.s. */
++  .itcm_text :
++  {
++    . = ALIGN(4);
++    _sitcm_text = .;
++    *organ_synth.cpp.obj(.text._Z* .text.Organ*)
++    *synth_organ.cpp.obj(.text._Z*)
++    *voice_organ.cpp.obj(.text._Z*)
++    *env_ar.cpp.obj(.text._Z*)
++    *efx_chorus.cpp.obj(.text._Z*)
++    . = ALIGN(4);
++    _eitcm_text = .;
++  } >ITCMRAM AT> FLASH
++  _siitcm_text = LOADADDR(.itcm_text);
++
+   /* The program code and other data goes into FLASH */
+   .text :
+   {
+diff --git a/startup_stm32h743xx.s b/startup_stm32h743xx.s
+index 1456354..b6a9202 100644
+--- a/startup_stm32h743xx.s
++++ b/startup_stm32h743xx.s
+@@ -81,6 +81,22 @@ LoopCopyDataInit:
+   adds r4, r0, r3
+   cmp r4, r1
+   bcc CopyDataInit
++/* Copy the ITCM code (hot audio code) from flash to ITCM RAM */
++  ldr r0, =_sitcm_text
++  ldr r1, =_eitcm_text
++  ldr r2, =_siitcm_text
++  movs r3, #0
++  b LoopCopyItcmInit
++
++CopyItcmInit:
++  ldr r4, [r2, r3]
++  str r4, [r0, r3]
++  adds r3, r3, #4
++
++LoopCopyItcmInit:
++  adds r4, r0, r3
++  cmp r4, r1
++  bcc CopyItcmInit
+ /* Zero fill the bss segment. */
+   ldr r2, =_sbss
+   ldr r4, =_ebss

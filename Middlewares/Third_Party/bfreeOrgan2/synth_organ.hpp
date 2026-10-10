@@ -133,7 +133,7 @@ namespace synth
 		/**
 		* The Phase Table.
 		*/
-		std::array<uint32_t,tables::FEAT_NUMBER_OF_GEARS> phase_table;
+		uint32_t phase_counter;
 		/**
 		* An effect unit.
 		*/

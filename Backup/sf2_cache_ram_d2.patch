@@ -1,0 +1,47 @@
+diff --git a/Engine/synth/sf2_cache.cpp b/Engine/synth/sf2_cache.cpp
+index 2252968..0000000 100644
+--- a/Engine/synth/sf2_cache.cpp
++++ b/Engine/synth/sf2_cache.cpp
+@@ -24,6 +24,13 @@ struct CacheBlock {
+     int16_t samples[SF2_BLOCK_SAMPLES];
+ };
+ 
++#if !SF2_HOST_MODE
++/* Keep the large PCM cache in DMA-accessible SRAM_D2, not the limited DTCM. */
++#define SF2_CACHE_SECTION __attribute__((section(".ram_d2"), aligned(32)))
++#else
++#define SF2_CACHE_SECTION
++#endif
++
+ #define REQ_QUEUE_SIZE 64U
+ struct ReqQueue {
+     std::atomic<uint32_t> head{0};
+@@ -33,7 +40,7 @@ struct ReqQueue {
+     uint32_t items[REQ_QUEUE_SIZE];
+ };
+ 
+-CacheBlock g_cache[SF2_CACHE_BLOCKS];
++SF2_CACHE_SECTION CacheBlock g_cache[SF2_CACHE_BLOCKS];
+ ReqQueue   g_req_queue;
+ 
+ std::atomic<uint32_t> g_lru_clock{0};
+
+diff --git a/STM32H743xx_FLASH.ld b/STM32H743xx_FLASH.ld
+--- a/STM32H743xx_FLASH.ld
++++ b/STM32H743xx_FLASH.ld
+@@ -246,6 +246,15 @@
+ 
+ 
+ 
++  /* Large SF2 PCM cache: D2 SRAM is accessible to the CPU and avoids consuming DTCM. */
++  .ram_d2 (NOLOAD) : ALIGN(32)
++  {
++    . = ALIGN(32);
++    *(.ram_d2)
++    *(.ram_d2*)
++    . = ALIGN(32);
++  } >RAM_D2
++
+   /* DMA buffers: DMA1/DMA2 cannot access DTCM (.data/.bss live there),
+      so audio ring buffer goes to AXI SRAM. Not zeroed by startup -> clear it in code. */
+   .dma_buffer (NOLOAD) : ALIGN(32)

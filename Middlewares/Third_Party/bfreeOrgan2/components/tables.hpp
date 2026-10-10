@@ -51,7 +51,9 @@ namespace tables
 	* Sampling frequency = 48000 Hz.
 	* WAVETABLE INDEX WIDTH: Q12:16
 	*/
-	const std::array<uint32_t,FEAT_NUMBER_OF_GEARS> step_table  = {
+	// PurrMidi: not const -> placed in .data (RAM) instead of flash. These tables are read several
+	// times per sample in the audio interrupt, and uncached flash reads are very slow on the STM32H7.
+	inline std::array<uint32_t,FEAT_NUMBER_OF_GEARS> step_table  = {
 	0x0002CA6A,0x0002F4E5,0x000321E7,0x00035196,0x0003841A,0x0003B9A0,0x0003F255,0x00042E69,
 	0x00046E0F,0x0004B17E,0x0004F8F0,0x000544A1,0x000594D3,0x0005E9C9,0x000643CD,0x0006A32B,
 	0x00070835,0x00077340,0x0007E4AA,0x00085CD1,0x0008DC1E,0x000962FD,0x0009F1E0,0x000A8943,
@@ -75,7 +77,7 @@ namespace tables
 	* @todo Change to int16_t when we update the Synthesizer Architecture internal sample width.
 	* @details 16 bits signed resolution.
 	*/
-		const std::array<int16_t,4096> wave_sine  = {
+		inline std::array<int16_t,4096> wave_sine  = {
      0,    12,    25,    37,    50,    62,    75,    87,   100,   113,   125,   138,   150,   163,   175,   188,
    201,   213,   226,   238,   251,   263,   276,   288,   301,   314,   326,   339,   351,   364,   376,   389,
    401,   414,   427,   439,   452,   464,   477,   489,   502,   514,   527,   539,   552,   564,   577,   590,
@@ -598,7 +600,7 @@ namespace tables
 	* LOWEST MIDI NOTE = 24; HIGHEST MIDI NOTE = 84; TOTAL NOTES = 61
 	* LOWEST GEAR TONE = 24; HIGHEST GEAR TONE = 102; TOTAL GEARS = 79
 	*/
-	const std::array<uint8_t,549> switchbox  = {
+	inline std::array<uint8_t,549> switchbox  = {
 		0,7,0,12,19,24,28,31,36,
 		1,8,1,13,20,25,29,32,37,
 		2,9,2,14,21,26,30,33,38,
