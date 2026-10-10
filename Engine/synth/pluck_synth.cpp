@@ -68,14 +68,12 @@ static std::atomic<uint32_t> dropped_note_on_count{0};
 static std::atomic<uint8_t> global_note_press_count[128];
 static bool audio_sustain_pedal = false;
 
-#define NOTE_ON_FIFO_LIMIT (EVENT_FIFO_SIZE - 4)
-
-// Постановка обычных событий Note On в FIFO с резервированием ячеек под релизы
+// Постановка обычных событий Note On в FIFO
 static bool event_fifo_push_note_on(const PluckEvent& event) {
     uint32_t head = fifo_head.load(std::memory_order_relaxed);
     uint32_t tail = fifo_tail.load(std::memory_order_acquire);
 
-    if (head - tail >= NOTE_ON_FIFO_LIMIT) {
+    if (head - tail >= EVENT_FIFO_SIZE) {
         dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
@@ -85,14 +83,40 @@ static bool event_fifo_push_note_on(const PluckEvent& event) {
     return true;
 }
 
-// Постановка критичных событий (Note Off, CC64) в резервированные ячейки без нарушения SPSC
+// Постановка критичных событий (Note Off, CC64) в FIFO с вытеснением Note On при переполнении
 static void event_fifo_push_critical(const PluckEvent& event) {
     uint32_t head = fifo_head.load(std::memory_order_relaxed);
     uint32_t tail = fifo_tail.load(std::memory_order_acquire);
 
     if (head - tail >= EVENT_FIFO_SIZE) {
-        dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
-        return;
+        // Буфер 100% забит. Ищем невычитанный EVENT_NOTE_ON от head-1 до tail+1 для замещения
+        uint32_t evict_idx = 0xFFFFFFFFU;
+        for (uint32_t idx = head - 1; idx > tail; --idx) {
+            if (event_fifo[idx & (EVENT_FIFO_SIZE - 1)].type == EVENT_NOTE_ON) {
+                evict_idx = idx;
+                break;
+            }
+        }
+
+        if (evict_idx != 0xFFFFFFFFU) {
+            // Вытесняем события Note On из ячейки evict_idx
+            uint8_t evicted_note = event_fifo[evict_idx & (EVENT_FIFO_SIZE - 1)].param1;
+            uint8_t count = global_note_press_count[evicted_note].load(std::memory_order_relaxed);
+            while (count > 0) {
+                if (global_note_press_count[evicted_note].compare_exchange_weak(count, count - 1, std::memory_order_relaxed)) {
+                    break;
+                }
+            }
+            dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
+
+            // Замещаем вытесненный Note On критичным релиз-событием
+            event_fifo[evict_idx & (EVENT_FIFO_SIZE - 1)] = event;
+            return;
+        } else {
+            // Фолбэк при невероятном случае, если все 32 ячейки уже забиты релиз-событиями
+            dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
     }
 
     event_fifo[head & (EVENT_FIFO_SIZE - 1)] = event;
@@ -336,13 +360,11 @@ int16_t PluckSynth_NextSample(void) {
         } else if (event.type == EVENT_NOTE_OFF) {
             uint8_t note = event.param1;
             for (int i = 0; i < PLUCK_VOICES; i++) {
-                if (voices[i].voice_state.load(std::memory_order_relaxed) == (int32_t)note) {
-                    if (voices[i].press_count > 0) {
-                        voices[i].press_count--;
-                    }
+                if (voices[i].voice_state.load(std::memory_order_relaxed) == (int32_t)note && voices[i].press_count > 0) {
+                    voices[i].press_count--;
                     if (voices[i].press_count == 0) {
                         if (audio_sustain_pedal) {
-                            voices[i].sustain_held = true; // Захват педалью при отпускании
+                            voices[i].sustain_held = true; // Захват педалью ТОЛЬКО если педаль была нажата
                         } else {
                             voices[i].sustain_held = false;
                         }

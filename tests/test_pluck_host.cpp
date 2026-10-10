@@ -121,8 +121,8 @@ void test_fifo_overflow_critical_release_delivery() {
     }
 
     uint32_t dropped = PluckSynth_GetDroppedEventsCount();
-    std::cout << "Dropped NoteOn events count: " << dropped << "\n";
-    assert(dropped == 12); // 40 - 28 = 12 dropped NoteOn events (4 reserved for critical releases)
+    std::cout << "Dropped NoteOn events count: " << dropped << std::endl;
+    assert(dropped == 8);
 
     std::vector<int16_t> buf(48000 * 3 * 2, 0);
     PluckSynth_FillStereoBuffer(buf.data(), 2400); // Render queued events
