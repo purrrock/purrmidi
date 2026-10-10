@@ -9,6 +9,7 @@ using namespace daisysp;
 
 #define PLUCK_SAMPLE_RATE       48000.0f
 #define PLUCK_BUFFER_SIZE       2048
+#define PLUCK_RELEASE_TIME_SEC  0.25f   // Длительность работы гасителя (damper) после Note Off в секундах
 #define PLUCK_MASTER_GAIN       0.85f   // Запас по громкости против клиппинга
 #define PLUCK_MAX_DAMP          0.999f  // Потолок damp (выше 0.99 нужен для компенсации высоких нот)
 #define NOTE_EVENT_FIFO_SIZE    16      // Размер FIFO буфера событий NoteOn (должен быть степенью двойки)
@@ -28,14 +29,22 @@ struct PluckVoice {
     int16_t midi_note;
     float damp_offset;
     float freq;
+    float damper_env;
+    float level_ema;
     uint32_t trigger_age;
-    uint32_t silence_samples;
     bool pending_trig;
     bool active;
 };
 
+// Буферы голосов размещаются в AXI SRAM (.dma_buffer), чтобы не переполнять DTCMRAM на STM32H7
+#if defined(__GNUC__) && !defined(__EMSCRIPTEN__) && defined(__arm__)
+static PluckVoice voices[PLUCK_VOICES] __attribute__((section(".dma_buffer"), aligned(32)));
+#else
 static PluckVoice voices[PLUCK_VOICES];
+#endif
+
 static uint32_t global_trigger_counter = 0;
+static float release_coeff = 0.0f;
 
 // Переменные состояния непрерывных контроллеров (MIDI CC)
 static std::atomic<float> user_decay{0.96f};
@@ -94,17 +103,19 @@ static inline float compensate_damp(float damp, float freq) {
 }
 
 void PluckSynth_Init(void) {
+    release_coeff = expf(-1.0f / (PLUCK_SAMPLE_RATE * PLUCK_RELEASE_TIME_SEC));
     global_trigger_counter = 0;
 
     for (int i = 0; i < PLUCK_VOICES; i++) {
         voices[i].string_voice.Init(PLUCK_SAMPLE_RATE, voices[i].pluck_buffer, PLUCK_BUFFER_SIZE, PLUCK_MODE_RECURSIVE);
-        voices[i].midi_note       = -1;
-        voices[i].damp_offset     = 0.0f;
-        voices[i].freq            = 440.0f;
-        voices[i].trigger_age     = 0;
-        voices[i].silence_samples = 0;
-        voices[i].pending_trig    = false;
-        voices[i].active          = false;
+        voices[i].midi_note    = -1;
+        voices[i].damp_offset  = 0.0f;
+        voices[i].freq         = 440.0f;
+        voices[i].damper_env   = 0.0f;
+        voices[i].level_ema    = 0.0f;
+        voices[i].trigger_age  = 0;
+        voices[i].pending_trig = false;
+        voices[i].active       = false;
 
         voices[i].string_voice.SetFreq(440.0f);
         voices[i].string_voice.SetAmp(0.5f);
@@ -235,13 +246,14 @@ int16_t PluckSynth_NextSample(void) {
         }
 
         PluckVoice& v = voices[target_voice];
-        v.active          = true;
-        v.midi_note       = (int16_t)event.note;
-        v.freq            = event.freq;
-        v.damp_offset     = event.damp_offset;
-        v.trigger_age     = ++global_trigger_counter;
-        v.silence_samples = 0;
-        v.pending_trig    = true;
+        v.active       = true;
+        v.midi_note    = (int16_t)event.note;
+        v.freq         = event.freq;
+        v.damp_offset  = event.damp_offset;
+        v.damper_env   = 1.0f;
+        v.level_ema    = 1.0f;
+        v.trigger_age  = ++global_trigger_counter;
+        v.pending_trig = true;
 
         v.string_voice.SetFreq(event.freq);
         v.string_voice.SetAmp(event.amp);
@@ -271,20 +283,28 @@ int16_t PluckSynth_NextSample(void) {
 
             float sample_f = v.string_voice.Process(trig);
 
-            // Естественное физическое затухание струны Karplus-Strong
-            if (std::abs(sample_f) < 0.0001f) {
-                v.silence_samples++;
-                // Освобождаем голос, когда фактический уровень сигнала устойчиво опустился ниже порога
-                if (v.silence_samples > 64) {
-                    v.active = false;
-                    v.midi_note = -1;
-                    sample_f = 0.0f;
+            // Работа гасителя (damper): если клавиша отпущена и педаль Sustain не нажата,
+            // прижимаем струну демпфером (ускоренное гашение). Если педаль нажата или клавиша удерживается,
+            // струна затухает естественно по алгоритму Karplus-Strong.
+            if (v.midi_note >= 0 && v.midi_note < 128) {
+                bool is_pressed = note_pressed[v.midi_note].load(std::memory_order_relaxed);
+                bool sus_pedal  = sustain_pedal.load(std::memory_order_relaxed);
+
+                if (!is_pressed && !sus_pedal) {
+                    v.damper_env *= release_coeff;
                 }
-            } else {
-                v.silence_samples = 0;
             }
 
-            if (v.active) {
+            sample_f *= v.damper_env;
+
+            // Оценка сглаженного уровня энергии (EMA) для устойчивого освобождения голосa
+            v.level_ema = 0.99f * v.level_ema + 0.01f * std::abs(sample_f);
+
+            if (v.level_ema < 0.0001f) {
+                v.active = false;
+                v.midi_note = -1;
+                sample_f = 0.0f;
+            } else {
                 active_voices_count++;
                 mix_sum_f += sample_f;
             }

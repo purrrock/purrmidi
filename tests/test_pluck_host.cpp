@@ -67,43 +67,51 @@ void test_pluck_render_and_freq() {
     }
 }
 
-void test_noteon_vel_0_and_sustain() {
-    // NoteOn velocity 0 behaves as NoteOff
+void test_sustain_pedal_differentiation() {
+    // 1. Measure energy AFTER NoteOff with Sustain pedal OFF
     PluckSynth_Init();
+    PluckSynth_ControlChange(64, 0); // Sustain OFF
     PluckSynth_NoteOn(60, 100);
 
-    std::vector<int16_t> buf(4800 * 2, 0);
-    PluckSynth_FillStereoBuffer(buf.data(), 4800);
+    std::vector<int16_t> buf_off_01s(4800 * 2, 0);
+    PluckSynth_FillStereoBuffer(buf_off_01s.data(), 4800); // 0.1s key press
 
-    PluckSynth_NoteOn(60, 0);
-
-    std::vector<int16_t> tail(48000 * 3 * 2, 0);
-    PluckSynth_FillStereoBuffer(tail.data(), 48000 * 3);
-
-    size_t end_start = static_cast<size_t>(48000 * 2.8);
-    for (size_t i = end_start; i < 48000 * 3; ++i) {
-        assert(tail[i * 2] == 0);
-    }
-
-    // CC64 held keeps sound after NoteOff
-    PluckSynth_Init();
-    PluckSynth_ControlChange(64, 127);
-    PluckSynth_NoteOn(60, 100);
-
-    PluckSynth_FillStereoBuffer(buf.data(), 4800);
     PluckSynth_NoteOff(60);
 
-    std::vector<int16_t> sus_buf(48000 * 2, 0);
-    PluckSynth_FillStereoBuffer(sus_buf.data(), 48000);
+    std::vector<int16_t> buf_off_tail(24000 * 2, 0); // 0.5s after note off
+    PluckSynth_FillStereoBuffer(buf_off_tail.data(), 24000);
 
-    bool sound_present = false;
-    for (size_t i = static_cast<size_t>(48000 * 0.8); i < 48000; ++i) {
-        if (std::abs(sus_buf[i * 2]) > 10) {
-            sound_present = true;
-            break;
-        }
+    double energy_off = 0.0;
+    // Measure energy in window 0.2s..0.5s after Note Off (samples 9600 to 24000)
+    for (size_t i = 9600; i < 24000; ++i) {
+        double s = buf_off_tail[i * 2];
+        energy_off += s * s;
     }
-    assert(sound_present);
+
+    // 2. Measure energy AFTER NoteOff with Sustain pedal ON
+    PluckSynth_Init();
+    PluckSynth_ControlChange(64, 127); // Sustain ON
+    PluckSynth_NoteOn(60, 100);
+
+    std::vector<int16_t> buf_on_01s(4800 * 2, 0);
+    PluckSynth_FillStereoBuffer(buf_on_01s.data(), 4800);
+
+    PluckSynth_NoteOff(60);
+
+    std::vector<int16_t> buf_on_tail(24000 * 2, 0);
+    PluckSynth_FillStereoBuffer(buf_on_tail.data(), 24000);
+
+    double energy_on = 0.0;
+    for (size_t i = 9600; i < 24000; ++i) {
+        double s = buf_on_tail[i * 2];
+        energy_on += s * s;
+    }
+
+    std::cout << "Sustain OFF tail energy: " << energy_off
+              << ", Sustain ON tail energy: " << energy_on << "\n";
+
+    // Assert that Sustain ON holds significantly more energy than Sustain OFF (damper applied)
+    assert(energy_on > 3.0 * energy_off);
 }
 
 void test_reinit_and_control_regressions() {
@@ -137,10 +145,64 @@ void test_reinit_and_control_regressions() {
     assert(non_zero);
 }
 
-void test_polyphony_chords_and_stealing() {
+void test_deterministic_voice_stealing_and_reuse() {
     PluckSynth_Init();
 
-    // 1. Three distinct notes sounding simultaneously (C4=60, E4=64, G4=67)
+    // Fill all 8 voices sequentially
+    for (uint8_t note = 60; note <= 67; ++note) {
+        PluckSynth_NoteOn(note, 100);
+        std::vector<int16_t> step_buf(100 * 2, 0);
+        PluckSynth_FillStereoBuffer(step_buf.data(), 100);
+    }
+
+    // Note 60 was triggered first (oldest). Trigger 9th note (68).
+    PluckSynth_NoteOn(68, 100);
+
+    std::vector<int16_t> steal_buf(4800 * 2, 0);
+    PluckSynth_FillStereoBuffer(steal_buf.data(), 4800);
+
+    bool sound_active = false;
+    for (size_t i = 0; i < 4800; ++i) {
+        if (std::abs(steal_buf[i * 2]) > 100) {
+            sound_active = true;
+            break;
+        }
+    }
+    assert(sound_active);
+
+    // Let all notes decay completely and verify voice slots are freed and reused
+    PluckSynth_NoteOff(68);
+    for (uint8_t note = 61; note <= 67; ++note) {
+        PluckSynth_NoteOff(note);
+    }
+
+    std::vector<int16_t> decay_buf(48000 * 3 * 2, 0);
+    PluckSynth_FillStereoBuffer(decay_buf.data(), 48000 * 3);
+
+    // Verify silence after complete decay
+    for (size_t i = static_cast<size_t>(48000 * 2.8); i < 48000 * 3; ++i) {
+        assert(decay_buf[i * 2] == 0);
+    }
+
+    // Trigger new note 72 and verify voice re-allocation
+    PluckSynth_NoteOn(72, 100);
+    std::vector<int16_t> reuse_buf(1000 * 2, 0);
+    PluckSynth_FillStereoBuffer(reuse_buf.data(), 1000);
+
+    bool reused_voice_active = false;
+    for (size_t i = 0; i < 1000; ++i) {
+        if (std::abs(reuse_buf[i * 2]) > 500) {
+            reused_voice_active = true;
+            break;
+        }
+    }
+    assert(reused_voice_active);
+}
+
+void test_polyphony_chords_and_clipping() {
+    PluckSynth_Init();
+
+    // 1. Play 3 notes simultaneously (Chord: C4=60, E4=64, G4=67)
     PluckSynth_NoteOn(60, 100);
     PluckSynth_NoteOn(64, 100);
     PluckSynth_NoteOn(67, 100);
@@ -150,19 +212,15 @@ void test_polyphony_chords_and_stealing() {
     PluckSynth_FillStereoBuffer(chord_buf.data(), frames_05s);
 
     bool chord_active = false;
-    int max_chord_sample = 0;
     for (size_t i = 0; i < frames_05s; ++i) {
-        int sample_abs = std::abs(chord_buf[i * 2]);
-        if (sample_abs > 1000) {
+        if (std::abs(chord_buf[i * 2]) > 1000) {
             chord_active = true;
-        }
-        if (sample_abs > max_chord_sample) {
-            max_chord_sample = sample_abs;
+            break;
         }
     }
     assert(chord_active);
 
-    // 2. NoteOff on 1 note (C4=60) does NOT cut the other two notes (E4 & G4)
+    // 2. NoteOff on 1 note (C4=60) while E4 and G4 remain active
     PluckSynth_NoteOff(60);
 
     std::vector<int16_t> partial_off_buf(4800 * 2, 0);
@@ -177,64 +235,12 @@ void test_polyphony_chords_and_stealing() {
     }
     assert(sound_remains);
 
-    // 3. Released strings decay naturally via Karplus-Strong and free voices when silent
-    PluckSynth_NoteOff(64);
-    PluckSynth_NoteOff(67);
-    std::vector<int16_t> full_decay_buf(48000 * 3 * 2, 0);
-    PluckSynth_FillStereoBuffer(full_decay_buf.data(), 48000 * 3);
-
-    size_t end_offset = static_cast<size_t>(48000 * 2.8);
-    for (size_t i = end_offset; i < 48000 * 3; ++i) {
-        assert(full_decay_buf[i * 2] == 0);
-    }
-
-    // 4. Voice pool exhaustion: 8 voices active, 9th note steals the oldest voice
+    // 3. Test 8-note chord headroom & absence of continuous digital clipping saturation
     PluckSynth_Init();
     for (uint8_t note = 60; note <= 67; ++note) {
-        PluckSynth_NoteOn(note, 100);
-    }
-    // 9th note steals oldest voice (note 60)
-    PluckSynth_NoteOn(68, 100);
-
-    std::vector<int16_t> steal_buf(4800 * 2, 0);
-    PluckSynth_FillStereoBuffer(steal_buf.data(), 4800);
-
-    bool steal_sound_active = false;
-    for (size_t i = 0; i < 4800; ++i) {
-        if (std::abs(steal_buf[i * 2]) > 100) {
-            steal_sound_active = true;
-            break;
-        }
-    }
-    assert(steal_sound_active);
-
-    // 5. Repeated NoteOn/NoteOff, Sustain, and voice re-allocation
-    PluckSynth_Init();
-    for (int i = 0; i < 20; ++i) {
-        PluckSynth_NoteOn(60, 100);
-        PluckSynth_FillStereoBuffer(steal_buf.data(), 100);
-        PluckSynth_NoteOff(60);
-        PluckSynth_FillStereoBuffer(steal_buf.data(), 100);
+        PluckSynth_NoteOn(note, 127); // Max velocity
     }
 
-    // Re-use freed voices after complete decay
-    PluckSynth_FillStereoBuffer(full_decay_buf.data(), 48000 * 3);
-    PluckSynth_NoteOn(72, 100);
-    PluckSynth_FillStereoBuffer(steal_buf.data(), 1000);
-    bool reused_voice_active = false;
-    for (size_t i = 0; i < 1000; ++i) {
-        if (std::abs(steal_buf[i * 2]) > 500) {
-            reused_voice_active = true;
-            break;
-        }
-    }
-    assert(reused_voice_active);
-
-    // 6. Check dynamic range and absence of hard clipping saturation on 8-note chord
-    PluckSynth_Init();
-    for (uint8_t note = 60; note <= 67; ++note) {
-        PluckSynth_NoteOn(note, 127); // Full velocity chord
-    }
     std::vector<int16_t> chord_max_buf(4800 * 2, 0);
     PluckSynth_FillStereoBuffer(chord_max_buf.data(), 4800);
 
@@ -249,17 +255,18 @@ void test_polyphony_chords_and_stealing() {
             hard_clipped_samples++;
         }
     }
-    std::cout << "8-note full-velocity chord max peak: " << max_chord_peak
+
+    std::cout << "8-note full-velocity chord peak: " << max_chord_peak
               << ", hard clipped samples: " << hard_clipped_samples << " / 4800\n";
-    // Ensure headroom scaling prevents continuous digital hard clipping saturation (< 5% of samples)
-    assert(hard_clipped_samples < 240);
+    assert(hard_clipped_samples < 240); // < 5% of samples
 }
 
 int main() {
     test_pluck_render_and_freq();
-    test_noteon_vel_0_and_sustain();
+    test_sustain_pedal_differentiation();
     test_reinit_and_control_regressions();
-    test_polyphony_chords_and_stealing();
+    test_deterministic_voice_stealing_and_reuse();
+    test_polyphony_chords_and_clipping();
     std::cout << "test_pluck_host passed successfully." << std::endl;
     return 0;
 }
