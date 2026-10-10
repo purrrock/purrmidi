@@ -53,8 +53,8 @@ void PluckSynth_SetDamp(float damp);
 bool PluckSynth_IsNoteActive(uint8_t midi_note);
 
 /**
- * @brief Получение количества отброшенных событий NoteOn из-за переполнения FIFO
- * @return Счётчик отброшенных событий
+ * @brief Получение количества отброшенных событий Note On из-за переполнения FIFO
+ * @return Счётчик отброшенных событий Note On
  */
 uint32_t PluckSynth_GetDroppedEventsCount(void);
 

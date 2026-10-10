@@ -63,23 +63,40 @@ static std::atomic<float> user_damp{0.85f};
 static PluckEvent event_fifo[EVENT_FIFO_SIZE];
 static std::atomic<uint32_t> fifo_head{0};
 static std::atomic<uint32_t> fifo_tail{0};
-static std::atomic<uint32_t> dropped_events_count{0};
+static std::atomic<uint32_t> dropped_note_on_count{0};
 
+static std::atomic<uint8_t> global_note_press_count[128];
 static bool audio_sustain_pedal = false;
 
-// Lock-free SPSC FIFO для событий MIDI
-static bool event_fifo_push(const PluckEvent& event) {
+#define NOTE_ON_FIFO_LIMIT (EVENT_FIFO_SIZE - 4)
+
+// Постановка обычных событий Note On в FIFO с резервированием ячеек под релизы
+static bool event_fifo_push_note_on(const PluckEvent& event) {
     uint32_t head = fifo_head.load(std::memory_order_relaxed);
     uint32_t tail = fifo_tail.load(std::memory_order_acquire);
 
-    if (head - tail >= EVENT_FIFO_SIZE) {
-        dropped_events_count.fetch_add(1, std::memory_order_relaxed);
+    if (head - tail >= NOTE_ON_FIFO_LIMIT) {
+        dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
 
     event_fifo[head & (EVENT_FIFO_SIZE - 1)] = event;
     fifo_head.store(head + 1, std::memory_order_release);
     return true;
+}
+
+// Постановка критичных событий (Note Off, CC64) в резервированные ячейки без нарушения SPSC
+static void event_fifo_push_critical(const PluckEvent& event) {
+    uint32_t head = fifo_head.load(std::memory_order_relaxed);
+    uint32_t tail = fifo_tail.load(std::memory_order_acquire);
+
+    if (head - tail >= EVENT_FIFO_SIZE) {
+        dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+
+    event_fifo[head & (EVENT_FIFO_SIZE - 1)] = event;
+    fifo_head.store(head + 1, std::memory_order_release);
 }
 
 static bool event_fifo_pop(PluckEvent& event) {
@@ -134,9 +151,13 @@ void PluckSynth_Init(void) {
     user_decay.store(0.96f, std::memory_order_relaxed);
     user_damp.store(0.85f, std::memory_order_relaxed);
 
+    for (int i = 0; i < 128; i++) {
+        global_note_press_count[i].store(0, std::memory_order_relaxed);
+    }
+
     fifo_head.store(0, std::memory_order_relaxed);
     fifo_tail.store(0, std::memory_order_relaxed);
-    dropped_events_count.store(0, std::memory_order_relaxed);
+    dropped_note_on_count.store(0, std::memory_order_relaxed);
 }
 
 void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
@@ -146,6 +167,14 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     }
 
     if (midi_note >= 128) return;
+
+    // Предварительный атомарный инкремент с насыщением (max 255)
+    uint8_t count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
+    while (count < 255) {
+        if (global_note_press_count[midi_note].compare_exchange_weak(count, count + 1, std::memory_order_relaxed)) {
+            break;
+        }
+    }
 
     float freq = mtof((float)midi_note);
     float min_freq = (PLUCK_SAMPLE_RATE / (float)(PLUCK_BUFFER_SIZE - 4));
@@ -167,18 +196,33 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     event.decay       = decay;
     event.damp_offset = damp_offset;
 
-    event_fifo_push(event);
+    if (!event_fifo_push_note_on(event)) {
+        // Если событие отброшено из-за переполнения FIFO, откатываем инкремент
+        uint8_t cur_count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
+        while (cur_count > 0) {
+            if (global_note_press_count[midi_note].compare_exchange_weak(cur_count, cur_count - 1, std::memory_order_relaxed)) {
+                break;
+            }
+        }
+    }
 }
 
 void PluckSynth_NoteOff(uint8_t midi_note) {
     if (midi_note >= 128) return;
+
+    uint8_t count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
+    while (count > 0) {
+        if (global_note_press_count[midi_note].compare_exchange_weak(count, count - 1, std::memory_order_relaxed)) {
+            break;
+        }
+    }
 
     PluckEvent event;
     event.type   = EVENT_NOTE_OFF;
     event.param1 = midi_note;
     event.param2 = 0;
 
-    event_fifo_push(event);
+    event_fifo_push_critical(event);
 }
 
 void PluckSynth_SetDecay(float decay) {
@@ -200,7 +244,7 @@ bool PluckSynth_IsNoteActive(uint8_t midi_note) {
 }
 
 uint32_t PluckSynth_GetDroppedEventsCount(void) {
-    return dropped_events_count.load(std::memory_order_relaxed);
+    return dropped_note_on_count.load(std::memory_order_relaxed);
 }
 
 void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
@@ -222,7 +266,7 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
             event.type   = EVENT_CONTROL_CHANGE;
             event.param1 = control;
             event.param2 = value;
-            event_fifo_push(event);
+            event_fifo_push_critical(event);
             break;
         }
 
@@ -292,11 +336,13 @@ int16_t PluckSynth_NextSample(void) {
         } else if (event.type == EVENT_NOTE_OFF) {
             uint8_t note = event.param1;
             for (int i = 0; i < PLUCK_VOICES; i++) {
-                if (voices[i].voice_state.load(std::memory_order_relaxed) == (int32_t)note && voices[i].press_count > 0) {
-                    voices[i].press_count--;
+                if (voices[i].voice_state.load(std::memory_order_relaxed) == (int32_t)note) {
+                    if (voices[i].press_count > 0) {
+                        voices[i].press_count--;
+                    }
                     if (voices[i].press_count == 0) {
                         if (audio_sustain_pedal) {
-                            voices[i].sustain_held = true; // Захват педалью ТОЛЬКО если педаль была нажата
+                            voices[i].sustain_held = true; // Захват педалью при отпускании
                         } else {
                             voices[i].sustain_held = false;
                         }
