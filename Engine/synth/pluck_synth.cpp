@@ -14,6 +14,7 @@ using namespace daisysp;
 #define PLUCK_MASTER_GAIN       0.85f   // Запас по громкости против клиппинга
 #define PLUCK_MAX_DAMP          0.999f  // Потолок damp (выше 0.99 нужен для компенсации высоких нот)
 #define EVENT_FIFO_SIZE         32      // Буфер событий NoteOn, NoteOff, CC (степень двойки)
+#define NOTE_ON_FIFO_LIMIT      28      // Лимит слотов для Note On (оставляет резерв для Note Off и CC)
 #define PLUCK_OUTPUT_SCALE      (PLUCK_MASTER_GAIN * 32767.0f) // Предрасчитанная константа
 
 enum PluckEventType : uint8_t {
@@ -73,7 +74,7 @@ static bool event_fifo_push_note_on(const PluckEvent& event) {
     uint32_t head = fifo_head.load(std::memory_order_relaxed);
     uint32_t tail = fifo_tail.load(std::memory_order_acquire);
 
-    if (head - tail >= EVENT_FIFO_SIZE) {
+    if (head - tail >= NOTE_ON_FIFO_LIMIT) {
         dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
@@ -83,44 +84,18 @@ static bool event_fifo_push_note_on(const PluckEvent& event) {
     return true;
 }
 
-// Постановка критичных событий (Note Off, CC64) в FIFO с вытеснением Note On при переполнении
-static void event_fifo_push_critical(const PluckEvent& event) {
+// Постановка критичных событий (Note Off, CC64) в FIFO с использованием полной емкости (резервирование слотов)
+static bool event_fifo_push_critical(const PluckEvent& event) {
     uint32_t head = fifo_head.load(std::memory_order_relaxed);
     uint32_t tail = fifo_tail.load(std::memory_order_acquire);
 
     if (head - tail >= EVENT_FIFO_SIZE) {
-        // Буфер 100% забит. Ищем невычитанный EVENT_NOTE_ON от head-1 до tail+1 для замещения
-        uint32_t evict_idx = 0xFFFFFFFFU;
-        for (uint32_t idx = head - 1; idx > tail; --idx) {
-            if (event_fifo[idx & (EVENT_FIFO_SIZE - 1)].type == EVENT_NOTE_ON) {
-                evict_idx = idx;
-                break;
-            }
-        }
-
-        if (evict_idx != 0xFFFFFFFFU) {
-            // Вытесняем события Note On из ячейки evict_idx
-            uint8_t evicted_note = event_fifo[evict_idx & (EVENT_FIFO_SIZE - 1)].param1;
-            uint8_t count = global_note_press_count[evicted_note].load(std::memory_order_relaxed);
-            while (count > 0) {
-                if (global_note_press_count[evicted_note].compare_exchange_weak(count, count - 1, std::memory_order_relaxed)) {
-                    break;
-                }
-            }
-            dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
-
-            // Замещаем вытесненный Note On критичным релиз-событием
-            event_fifo[evict_idx & (EVENT_FIFO_SIZE - 1)] = event;
-            return;
-        } else {
-            // Фолбэк при невероятном случае, если все 32 ячейки уже забиты релиз-событиями
-            dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
-            return;
-        }
+        return false;
     }
 
     event_fifo[head & (EVENT_FIFO_SIZE - 1)] = event;
     fifo_head.store(head + 1, std::memory_order_release);
+    return true;
 }
 
 static bool event_fifo_pop(PluckEvent& event) {
@@ -246,7 +221,16 @@ void PluckSynth_NoteOff(uint8_t midi_note) {
     event.param1 = midi_note;
     event.param2 = 0;
 
-    event_fifo_push_critical(event);
+    if (!event_fifo_push_critical(event)) {
+        // Если FIFO переполнен (все 32 слота заняты), восстанавливаем
+        // global_note_press_count[midi_note] для поддержания согласованности
+        uint8_t cur_count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
+        while (cur_count < 255) {
+            if (global_note_press_count[midi_note].compare_exchange_weak(cur_count, cur_count + 1, std::memory_order_relaxed)) {
+                break;
+            }
+        }
+    }
 }
 
 void PluckSynth_SetDecay(float decay) {
@@ -290,7 +274,7 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
             event.type   = EVENT_CONTROL_CHANGE;
             event.param1 = control;
             event.param2 = value;
-            event_fifo_push_critical(event);
+            (void)event_fifo_push_critical(event);
             break;
         }
 
