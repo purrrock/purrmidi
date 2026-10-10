@@ -49,13 +49,27 @@ void test_queue_overrun() {
     assert(MIDI_Queue_GetOverrunCount() == 300 - 255);
 }
 
-void test_dispatch_integration() {
+void test_queue_pop_dispatch_integration() {
     MIDI_Queue_Init();
     SynthEngine_Init();
 
-    MIDI_Event_t ev_on = {MIDI_STATUS_NOTE_ON, 60, 100};
-    MIDI_Dispatch(&ev_on);
+    // Push Note On to queue
+    MIDI_Event_t ev_in = {MIDI_STATUS_NOTE_ON, 60, 100};
+    bool pushed = MIDI_Queue_Push(&ev_in);
+    assert(pushed);
 
+    // Pop event from queue
+    MIDI_Event_t ev_out;
+    bool popped = MIDI_Queue_Pop(&ev_out);
+    assert(popped);
+    assert(ev_out.status == MIDI_STATUS_NOTE_ON);
+    assert(ev_out.data1 == 60);
+    assert(ev_out.data2 == 100);
+
+    // Dispatch popped event to current synth engine
+    MIDI_Dispatch(&ev_out);
+
+    // Verify audio rendering generates non-zero sound
     std::vector<int16_t> buf(4800 * 2, 0);
     SynthEngine_FillStereoBuffer(buf.data(), 4800);
 
@@ -72,7 +86,7 @@ void test_dispatch_integration() {
 int main() {
     test_queue_fifo_order();
     test_queue_overrun();
-    test_dispatch_integration();
+    test_queue_pop_dispatch_integration();
     std::cout << "test_queue_dispatch passed successfully (synth: " << SynthEngine_GetName() << ")." << std::endl;
     return 0;
 }
