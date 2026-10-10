@@ -26,7 +26,7 @@ struct NoteOnEvent {
 
 struct PluckVoice {
     Pluck string_voice;
-    float pluck_buffer[PLUCK_BUFFER_SIZE + 16]; // Запас от выходя за границы при fp[npts_] в DaisySP
+    float pluck_buffer[PLUCK_BUFFER_SIZE + 16]; // Запас от выхода за границы при fp[npts_] в DaisySP
     int16_t midi_note;
     float damp_offset;
     float freq;
@@ -144,9 +144,7 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
         return;
     }
 
-    if (midi_note < 128) {
-        global_note_press_count[midi_note].fetch_add(1, std::memory_order_relaxed);
-    }
+    if (midi_note >= 128) return;
 
     float freq = mtof((float)midi_note);
     float min_freq = (PLUCK_SAMPLE_RATE / (float)(PLUCK_BUFFER_SIZE - 4));
@@ -166,7 +164,15 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     event.decay       = decay;
     event.damp_offset = damp_offset;
 
-    note_event_fifo_push(event);
+    if (note_event_fifo_push(event)) {
+        // Увеличиваем счётчик нажатий с насыщением (max 255) ТОЛЬКО при успешной постановке в FIFO
+        uint8_t count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
+        while (count < 255) {
+            if (global_note_press_count[midi_note].compare_exchange_weak(count, count + 1, std::memory_order_relaxed)) {
+                break;
+            }
+        }
+    }
 }
 
 void PluckSynth_NoteOff(uint8_t midi_note) {
@@ -227,7 +233,7 @@ int16_t PluckSynth_NextSample(void) {
     NoteOnEvent event;
     bool sus_pedal_now = sustain_pedal.load(std::memory_order_relaxed);
 
-    // 1. Обработка входящих Note On событий
+    // 1. Обработка входящих Note On событий из FIFO
     while (note_event_fifo_pop(event)) {
         int target_voice = -1;
 

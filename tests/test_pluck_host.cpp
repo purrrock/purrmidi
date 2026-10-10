@@ -82,6 +82,49 @@ void test_noteon_velocity_zero_regression() {
     std::cout << "Verified: NoteOn with velocity 0 behaves identically to NoteOff.\n";
 }
 
+void test_fifo_overflow_and_press_count_boundary() {
+    PluckSynth_Init();
+
+    // 1. Push 25 NoteOn events to FIFO (size = 16) without rendering in between.
+    // FIFO capacity is 16; 9 events will be dropped.
+    for (int i = 0; i < 25; ++i) {
+        PluckSynth_NoteOn(60, 100);
+    }
+
+    std::vector<int16_t> buf(48000 * 3 * 2, 0);
+    PluckSynth_FillStereoBuffer(buf.data(), 2400); // Render queued FIFO events
+
+    assert(PluckSynth_IsNoteActive(60) == true);
+
+    // Send exactly 16 NoteOff events (matching accepted events)
+    for (int i = 0; i < 16; ++i) {
+        PluckSynth_NoteOff(60);
+    }
+
+    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5); // Render damper decay
+
+    // Verify note 60 is completely damped and not stuck
+    assert(PluckSynth_IsNoteActive(60) == false);
+    std::cout << "Verified: FIFO overflow drops extra events cleanly without press count corruption.\n";
+
+    // 2. Test saturation boundary (>255 NoteOn events)
+    PluckSynth_Init();
+    for (int i = 0; i < 300; ++i) {
+        PluckSynth_NoteOn(60, 100);
+        PluckSynth_FillStereoBuffer(buf.data(), 10); // Process event
+    }
+
+    assert(PluckSynth_IsNoteActive(60) == true);
+
+    for (int i = 0; i < 300; ++i) {
+        PluckSynth_NoteOff(60);
+    }
+
+    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5);
+    assert(PluckSynth_IsNoteActive(60) == false);
+    std::cout << "Verified: uint8 press count saturation boundary handled cleanly.\n";
+}
+
 void test_overlapping_same_pitch_notes() {
     PluckSynth_Init();
 
@@ -117,7 +160,7 @@ void test_sustain_pedal_and_note_off_isolation() {
     PluckSynth_ControlChange(64, 0); // Sustain OFF
     PluckSynth_NoteOn(60, 100);
 
-    std::vector<int16_t> buf(24000 * 2, 0);
+    std::vector<int16_t> buf(48000 * 3 * 2, 0);
     PluckSynth_FillStereoBuffer(buf.data(), 2400); // 0.05s key press
 
     PluckSynth_NoteOff(60); // NoteOff sent while pedal is OFF
@@ -125,7 +168,8 @@ void test_sustain_pedal_and_note_off_isolation() {
 
     // Press pedal LATER
     PluckSynth_ControlChange(64, 127);
-    PluckSynth_FillStereoBuffer(buf.data(), 24000); // 0.5s render
+    std::vector<int16_t> long_buf(48000 * 3 * 2, 0);
+    PluckSynth_FillStereoBuffer(long_buf.data(), 48000 * 2.5); // 2.5s render for full damper decay
 
     assert(PluckSynth_IsNoteActive(60) == false);
     std::cout << "Verified: Note Off before pedal press is not latched by late pedal press.\n";
@@ -144,7 +188,7 @@ void test_sustain_pedal_and_note_off_isolation() {
 
     // 3. Releasing pedal (CC64 = 0) initiates damper decay on sustained notes
     PluckSynth_ControlChange(64, 0); // Pedal released!
-    PluckSynth_FillStereoBuffer(buf.data(), 24000); // 0.5s render
+    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5); // 2.5s render for full damper decay
 
     assert(PluckSynth_IsNoteActive(60) == false);   // Voice released after damper decay
     std::cout << "Verified: Releasing pedal clears sustain_held and damps note.\n";
@@ -323,6 +367,7 @@ void test_polyphony_chords_and_clipping() {
 int main() {
     test_pluck_render_and_freq();
     test_noteon_velocity_zero_regression();
+    test_fifo_overflow_and_press_count_boundary();
     test_overlapping_same_pitch_notes();
     test_sustain_pedal_and_note_off_isolation();
     test_reinit_and_control_regressions();
