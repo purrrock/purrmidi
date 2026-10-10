@@ -53,6 +53,12 @@ void PluckSynth_SetDamp(float damp);
 bool PluckSynth_IsNoteActive(uint8_t midi_note);
 
 /**
+ * @brief Получение количества отброшенных событий NoteOn из-за переполнения FIFO
+ * @return Счётчик отброшенных событий
+ */
+uint32_t PluckSynth_GetDroppedEventsCount(void);
+
+/**
  * @brief Расчёт одного аудиосэмпла (вызывается из прерывания DMA)
  * @return Знаковый 16-битный сэмпл для ЦАП PCM5102A
  */

@@ -27,16 +27,16 @@ struct NoteOnEvent {
 struct PluckVoice {
     Pluck string_voice;
     float pluck_buffer[PLUCK_BUFFER_SIZE + 16]; // Запас от выхода за границы при fp[npts_] в DaisySP
-    int16_t midi_note;
-    float damp_offset;
-    float freq;
-    float damper_env;
-    float level_ema;
-    uint32_t trigger_age;
-    bool pending_trig;
-    bool active;
-    bool note_pressed;
-    bool sustain_held;
+    std::atomic<int16_t> midi_note{-1};
+    float damp_offset{0.0f};
+    float freq{440.0f};
+    float damper_env{0.0f};
+    float level_ema{0.0f};
+    uint32_t trigger_age{0};
+    bool pending_trig{false};
+    std::atomic<bool> active{false};
+    bool note_pressed{false};
+    bool sustain_held{false};
 };
 
 // Буферы голосов размещаются в AXI SRAM (.dma_buffer), чтобы не переполнять DTCMRAM на STM32H7
@@ -108,14 +108,14 @@ void PluckSynth_Init(void) {
     for (int i = 0; i < PLUCK_VOICES; i++) {
         std::memset(voices[i].pluck_buffer, 0, sizeof(voices[i].pluck_buffer));
         voices[i].string_voice.Init(PLUCK_SAMPLE_RATE, voices[i].pluck_buffer, PLUCK_BUFFER_SIZE - 1, PLUCK_MODE_RECURSIVE);
-        voices[i].midi_note    = -1;
+        voices[i].midi_note.store(-1, std::memory_order_relaxed);
         voices[i].damp_offset  = 0.0f;
         voices[i].freq         = 440.0f;
         voices[i].damper_env   = 0.0f;
         voices[i].level_ema    = 0.0f;
         voices[i].trigger_age  = 0;
         voices[i].pending_trig = false;
-        voices[i].active       = false;
+        voices[i].active.store(false, std::memory_order_relaxed);
         voices[i].note_pressed = false;
         voices[i].sustain_held = false;
 
@@ -146,6 +146,14 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
 
     if (midi_note >= 128) return;
 
+    // 1. Предварительное увеличение счётчика нажатий с насыщением (max 255) ДО добавления в FIFO
+    uint8_t count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
+    while (count < 255) {
+        if (global_note_press_count[midi_note].compare_exchange_weak(count, count + 1, std::memory_order_relaxed)) {
+            break;
+        }
+    }
+
     float freq = mtof((float)midi_note);
     float min_freq = (PLUCK_SAMPLE_RATE / (float)(PLUCK_BUFFER_SIZE - 4));
     float max_freq = (PLUCK_SAMPLE_RATE * 0.45f);
@@ -164,11 +172,11 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     event.decay       = decay;
     event.damp_offset = damp_offset;
 
-    if (note_event_fifo_push(event)) {
-        // Увеличиваем счётчик нажатий с насыщением (max 255) ТОЛЬКО при успешной постановке в FIFO
-        uint8_t count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
-        while (count < 255) {
-            if (global_note_press_count[midi_note].compare_exchange_weak(count, count + 1, std::memory_order_relaxed)) {
+    // 2. Если FIFO переполнен, откатываем предварительно увеличенный счётчик нажатий
+    if (!note_event_fifo_push(event)) {
+        uint8_t cur_count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
+        while (cur_count > 0) {
+            if (global_note_press_count[midi_note].compare_exchange_weak(cur_count, cur_count - 1, std::memory_order_relaxed)) {
                 break;
             }
         }
@@ -197,11 +205,16 @@ void PluckSynth_SetDamp(float damp) {
 bool PluckSynth_IsNoteActive(uint8_t midi_note) {
     if (midi_note >= 128) return false;
     for (int i = 0; i < PLUCK_VOICES; i++) {
-        if (voices[i].active && voices[i].midi_note == (int16_t)midi_note) {
+        if (voices[i].active.load(std::memory_order_acquire) &&
+            voices[i].midi_note.load(std::memory_order_acquire) == (int16_t)midi_note) {
             return true;
         }
     }
     return false;
+}
+
+uint32_t PluckSynth_GetDroppedEventsCount(void) {
+    return dropped_events_count.load(std::memory_order_relaxed);
 }
 
 void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
@@ -238,7 +251,8 @@ int16_t PluckSynth_NextSample(void) {
         int target_voice = -1;
 
         for (int i = 0; i < PLUCK_VOICES; i++) {
-            if (voices[i].active && voices[i].midi_note == (int16_t)event.note) {
+            if (voices[i].active.load(std::memory_order_relaxed) &&
+                voices[i].midi_note.load(std::memory_order_relaxed) == (int16_t)event.note) {
                 target_voice = i;
                 break;
             }
@@ -246,7 +260,8 @@ int16_t PluckSynth_NextSample(void) {
 
         if (target_voice == -1) {
             for (int i = 0; i < PLUCK_VOICES; i++) {
-                if (!voices[i].active || voices[i].midi_note == -1) {
+                if (!voices[i].active.load(std::memory_order_relaxed) ||
+                    voices[i].midi_note.load(std::memory_order_relaxed) == -1) {
                     target_voice = i;
                     break;
                 }
@@ -266,8 +281,7 @@ int16_t PluckSynth_NextSample(void) {
         }
 
         PluckVoice& v = voices[target_voice];
-        v.active       = true;
-        v.midi_note    = (int16_t)event.note;
+        v.midi_note.store((int16_t)event.note, std::memory_order_relaxed);
         v.freq         = event.freq;
         v.damp_offset  = event.damp_offset;
         v.damper_env   = 1.0f;
@@ -276,6 +290,7 @@ int16_t PluckSynth_NextSample(void) {
         v.pending_trig = true;
         v.note_pressed = true;
         v.sustain_held = false;
+        v.active.store(true, std::memory_order_release);
 
         v.string_voice.SetFreq(event.freq);
         v.string_voice.SetAmp(event.amp);
@@ -295,9 +310,10 @@ int16_t PluckSynth_NextSample(void) {
     for (int i = 0; i < PLUCK_VOICES; i++) {
         PluckVoice& v = voices[i];
 
-        if (v.active) {
-            if (v.midi_note >= 0 && v.midi_note < 128) {
-                bool is_pressed = (global_note_press_count[v.midi_note].load(std::memory_order_relaxed) > 0);
+        if (v.active.load(std::memory_order_relaxed)) {
+            int16_t note_id = v.midi_note.load(std::memory_order_relaxed);
+            if (note_id >= 0 && note_id < 128) {
+                bool is_pressed = (global_note_press_count[note_id].load(std::memory_order_relaxed) > 0);
 
                 // Переход состояния нажатия клавиши -> отпускания
                 if (v.note_pressed && !is_pressed) {
@@ -338,8 +354,8 @@ int16_t PluckSynth_NextSample(void) {
             v.level_ema = 0.99f * v.level_ema + 0.01f * std::abs(sample_f);
 
             if (v.level_ema < 0.0001f) {
-                v.active       = false;
-                v.midi_note    = -1;
+                v.active.store(false, std::memory_order_release);
+                v.midi_note.store(-1, std::memory_order_release);
                 v.note_pressed = false;
                 v.sustain_held = false;
                 sample_f       = 0.0f;

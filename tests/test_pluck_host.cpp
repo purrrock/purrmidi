@@ -91,12 +91,16 @@ void test_fifo_overflow_and_press_count_boundary() {
         PluckSynth_NoteOn(60, 100);
     }
 
+    uint32_t dropped = PluckSynth_GetDroppedEventsCount();
+    std::cout << "Dropped events count: " << dropped << "\n";
+    assert(dropped == 9);
+
     std::vector<int16_t> buf(48000 * 3 * 2, 0);
     PluckSynth_FillStereoBuffer(buf.data(), 2400); // Render queued FIFO events
 
     assert(PluckSynth_IsNoteActive(60) == true);
 
-    // Send exactly 16 NoteOff events (matching accepted events)
+    // Send exactly 16 NoteOff events (matching accepted events = 25 - 9 = 16)
     for (int i = 0; i < 16; ++i) {
         PluckSynth_NoteOff(60);
     }
@@ -168,8 +172,7 @@ void test_sustain_pedal_and_note_off_isolation() {
 
     // Press pedal LATER
     PluckSynth_ControlChange(64, 127);
-    std::vector<int16_t> long_buf(48000 * 3 * 2, 0);
-    PluckSynth_FillStereoBuffer(long_buf.data(), 48000 * 2.5); // 2.5s render for full damper decay
+    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5); // 2.5s render for full damper decay
 
     assert(PluckSynth_IsNoteActive(60) == false);
     std::cout << "Verified: Note Off before pedal press is not latched by late pedal press.\n";
