@@ -1,3 +1,4 @@
+```yaml
 name: Host Build & Tests CI
 
 on:
@@ -45,3 +46,45 @@ jobs:
 
       - name: Build purrmidi_win.exe
         run: cmake --build --preset win-msvc-release
+
+  stm32-build:
+    name: Build STM32H743 firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi
+
+      - name: Verify ARM toolchain
+        run: |
+          arm-none-eabi-gcc --version
+          cmake --version
+          ninja --version
+
+      - name: Configure STM32 firmware
+        run: cmake --preset Debug
+
+      - name: Build STM32 firmware
+        run: cmake --build --preset Debug
+
+      - name: Verify firmware ELF
+        run: test -s build/Debug/purrmidi.elf
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: purrmidi-stm32h743-firmware
+          path: build/Debug/purrmidi.elf
+          if-no-files-found: error
+          retention-days: 14
+```
