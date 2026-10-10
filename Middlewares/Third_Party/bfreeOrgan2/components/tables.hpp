@@ -12,7 +12,9 @@
 	VERSION: 0.1
 	DATE: Feb 1st, 2019
 	AUTHOR: Franco Caspe
-	LICENSE:
+
+Copyright [2019] [Franco Caspe]
+SPDX-License-Identifier: Apache-2.0
 */
 
 /** @file tables.hpp

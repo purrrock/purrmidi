@@ -47,7 +47,7 @@ namespace synth
 			debug_counter = 0ul;
 			#endif
 			const uint8_t rate_1_hz = 0x08; //Rate codified in q4:3
-			const uint8_t rate_8_hz = 0x08<<3; //Rate codified in q4:3
+			// const uint8_t rate_8_hz = 0x08<<3; //Rate codified in q4:3
 			set_rate(rate_1_hz);
 			set_amplitude(127);
 			}
