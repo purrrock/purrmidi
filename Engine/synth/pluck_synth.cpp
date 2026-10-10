@@ -13,11 +13,19 @@ using namespace daisysp;
 #define PLUCK_RELEASE_TIME_SEC  0.25f   // Длительность работы гасителя (damper) после Note Off в секундах
 #define PLUCK_MASTER_GAIN       0.85f   // Запас по громкости против клиппинга
 #define PLUCK_MAX_DAMP          0.999f  // Потолок damp (выше 0.99 нужен для компенсации высоких нот)
-#define NOTE_EVENT_FIFO_SIZE    16      // Размер FIFO буфера событий NoteOn (должен быть степенью двойки)
+#define EVENT_FIFO_SIZE         32      // Буфер событий NoteOn, NoteOff, CC (степень двойки)
 #define PLUCK_OUTPUT_SCALE      (PLUCK_MASTER_GAIN * 32767.0f) // Предрасчитанная константа
 
-struct NoteOnEvent {
-    uint8_t note;
+enum PluckEventType : uint8_t {
+    EVENT_NOTE_ON,
+    EVENT_NOTE_OFF,
+    EVENT_CONTROL_CHANGE
+};
+
+struct PluckEvent {
+    PluckEventType type;
+    uint8_t param1; // note number or CC control
+    uint8_t param2; // velocity or CC value
     float freq;
     float amp;
     float decay;
@@ -27,15 +35,14 @@ struct NoteOnEvent {
 struct PluckVoice {
     Pluck string_voice;
     float pluck_buffer[PLUCK_BUFFER_SIZE + 16]; // Запас от выхода за границы при fp[npts_] в DaisySP
-    std::atomic<int16_t> midi_note{-1};
+    std::atomic<int32_t> voice_state{-1};      // -1 = свободен, 0..127 = номер активной ноты
     float damp_offset{0.0f};
     float freq{440.0f};
     float damper_env{0.0f};
     float level_ema{0.0f};
     uint32_t trigger_age{0};
+    uint8_t press_count{0};                    // Счётчик удержаний нажатия клавиши для данной ноты
     bool pending_trig{false};
-    std::atomic<bool> active{false};
-    bool note_pressed{false};
     bool sustain_held{false};
 };
 
@@ -53,30 +60,29 @@ static float release_coeff = 0.0f;
 static std::atomic<float> user_decay{0.96f};
 static std::atomic<float> user_damp{0.85f};
 
-static NoteOnEvent note_event_fifo[NOTE_EVENT_FIFO_SIZE];
+static PluckEvent event_fifo[EVENT_FIFO_SIZE];
 static std::atomic<uint32_t> fifo_head{0};
 static std::atomic<uint32_t> fifo_tail{0};
 static std::atomic<uint32_t> dropped_events_count{0};
 
-static std::atomic<bool> sustain_pedal{false};
-static std::atomic<uint8_t> global_note_press_count[128];
+static bool audio_sustain_pedal = false;
 
-// Lock-free SPSC FIFO для событий NoteOn
-static bool note_event_fifo_push(const NoteOnEvent& event) {
+// Lock-free SPSC FIFO для событий MIDI
+static bool event_fifo_push(const PluckEvent& event) {
     uint32_t head = fifo_head.load(std::memory_order_relaxed);
     uint32_t tail = fifo_tail.load(std::memory_order_acquire);
 
-    if (head - tail >= NOTE_EVENT_FIFO_SIZE) {
+    if (head - tail >= EVENT_FIFO_SIZE) {
         dropped_events_count.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
 
-    note_event_fifo[head & (NOTE_EVENT_FIFO_SIZE - 1)] = event;
+    event_fifo[head & (EVENT_FIFO_SIZE - 1)] = event;
     fifo_head.store(head + 1, std::memory_order_release);
     return true;
 }
 
-static bool note_event_fifo_pop(NoteOnEvent& event) {
+static bool event_fifo_pop(PluckEvent& event) {
     uint32_t tail = fifo_tail.load(std::memory_order_relaxed);
     uint32_t head = fifo_head.load(std::memory_order_acquire);
 
@@ -84,7 +90,7 @@ static bool note_event_fifo_pop(NoteOnEvent& event) {
         return false;
     }
 
-    event = note_event_fifo[tail & (NOTE_EVENT_FIFO_SIZE - 1)];
+    event = event_fifo[tail & (EVENT_FIFO_SIZE - 1)];
     fifo_tail.store(tail + 1, std::memory_order_release);
     return true;
 }
@@ -104,19 +110,19 @@ static inline float compensate_damp(float damp, float freq) {
 void PluckSynth_Init(void) {
     release_coeff = expf(-1.0f / (PLUCK_SAMPLE_RATE * PLUCK_RELEASE_TIME_SEC));
     global_trigger_counter = 0;
+    audio_sustain_pedal = false;
 
     for (int i = 0; i < PLUCK_VOICES; i++) {
         std::memset(voices[i].pluck_buffer, 0, sizeof(voices[i].pluck_buffer));
         voices[i].string_voice.Init(PLUCK_SAMPLE_RATE, voices[i].pluck_buffer, PLUCK_BUFFER_SIZE - 1, PLUCK_MODE_RECURSIVE);
-        voices[i].midi_note.store(-1, std::memory_order_relaxed);
+        voices[i].voice_state.store(-1, std::memory_order_relaxed);
         voices[i].damp_offset  = 0.0f;
         voices[i].freq         = 440.0f;
         voices[i].damper_env   = 0.0f;
         voices[i].level_ema    = 0.0f;
         voices[i].trigger_age  = 0;
         voices[i].pending_trig = false;
-        voices[i].active.store(false, std::memory_order_relaxed);
-        voices[i].note_pressed = false;
+        voices[i].press_count  = 0;
         voices[i].sustain_held = false;
 
         voices[i].string_voice.SetFreq(440.0f);
@@ -128,11 +134,6 @@ void PluckSynth_Init(void) {
     user_decay.store(0.96f, std::memory_order_relaxed);
     user_damp.store(0.85f, std::memory_order_relaxed);
 
-    sustain_pedal.store(false, std::memory_order_relaxed);
-    for (int i = 0; i < 128; i++) {
-        global_note_press_count[i].store(0, std::memory_order_relaxed);
-    }
-    
     fifo_head.store(0, std::memory_order_relaxed);
     fifo_tail.store(0, std::memory_order_relaxed);
     dropped_events_count.store(0, std::memory_order_relaxed);
@@ -146,14 +147,6 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
 
     if (midi_note >= 128) return;
 
-    // 1. Предварительное увеличение счётчика нажатий с насыщением (max 255) ДО добавления в FIFO
-    uint8_t count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
-    while (count < 255) {
-        if (global_note_press_count[midi_note].compare_exchange_weak(count, count + 1, std::memory_order_relaxed)) {
-            break;
-        }
-    }
-
     float freq = mtof((float)midi_note);
     float min_freq = (PLUCK_SAMPLE_RATE / (float)(PLUCK_BUFFER_SIZE - 4));
     float max_freq = (PLUCK_SAMPLE_RATE * 0.45f);
@@ -165,33 +158,27 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     float damp_offset = norm_vel * 0.10f;
     float decay = user_decay.load(std::memory_order_relaxed);
 
-    NoteOnEvent event;
-    event.note        = midi_note;
+    PluckEvent event;
+    event.type        = EVENT_NOTE_ON;
+    event.param1      = midi_note;
+    event.param2      = velocity;
     event.freq        = freq;
     event.amp         = amp;
     event.decay       = decay;
     event.damp_offset = damp_offset;
 
-    // 2. Если FIFO переполнен, откатываем предварительно увеличенный счётчик нажатий
-    if (!note_event_fifo_push(event)) {
-        uint8_t cur_count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
-        while (cur_count > 0) {
-            if (global_note_press_count[midi_note].compare_exchange_weak(cur_count, cur_count - 1, std::memory_order_relaxed)) {
-                break;
-            }
-        }
-    }
+    event_fifo_push(event);
 }
 
 void PluckSynth_NoteOff(uint8_t midi_note) {
-    if (midi_note < 128) {
-        uint8_t count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
-        while (count > 0) {
-            if (global_note_press_count[midi_note].compare_exchange_weak(count, count - 1, std::memory_order_relaxed)) {
-                break;
-            }
-        }
-    }
+    if (midi_note >= 128) return;
+
+    PluckEvent event;
+    event.type   = EVENT_NOTE_OFF;
+    event.param1 = midi_note;
+    event.param2 = 0;
+
+    event_fifo_push(event);
 }
 
 void PluckSynth_SetDecay(float decay) {
@@ -205,8 +192,7 @@ void PluckSynth_SetDamp(float damp) {
 bool PluckSynth_IsNoteActive(uint8_t midi_note) {
     if (midi_note >= 128) return false;
     for (int i = 0; i < PLUCK_VOICES; i++) {
-        if (voices[i].active.load(std::memory_order_acquire) &&
-            voices[i].midi_note.load(std::memory_order_acquire) == (int16_t)midi_note) {
+        if (voices[i].voice_state.load(std::memory_order_acquire) == (int32_t)midi_note) {
             return true;
         }
     }
@@ -232,8 +218,11 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
             break;
 
         case 64: {
-            bool pedal_on = (value >= 64);
-            sustain_pedal.store(pedal_on, std::memory_order_relaxed);
+            PluckEvent event;
+            event.type   = EVENT_CONTROL_CHANGE;
+            event.param1 = control;
+            event.param2 = value;
+            event_fifo_push(event);
             break;
         }
 
@@ -243,62 +232,89 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
 }
 
 int16_t PluckSynth_NextSample(void) {
-    NoteOnEvent event;
-    bool sus_pedal_now = sustain_pedal.load(std::memory_order_relaxed);
+    PluckEvent event;
 
-    // 1. Обработка входящих Note On событий из FIFO
-    while (note_event_fifo_pop(event)) {
-        int target_voice = -1;
+    // 1. Последовательная строго хронологическая обработка событий из FIFO
+    while (event_fifo_pop(event)) {
+        if (event.type == EVENT_NOTE_ON) {
+            int target_voice = -1;
 
-        for (int i = 0; i < PLUCK_VOICES; i++) {
-            if (voices[i].active.load(std::memory_order_relaxed) &&
-                voices[i].midi_note.load(std::memory_order_relaxed) == (int16_t)event.note) {
-                target_voice = i;
-                break;
-            }
-        }
-
-        if (target_voice == -1) {
+            // Поиск голоса, уже играющего данную ноту
             for (int i = 0; i < PLUCK_VOICES; i++) {
-                if (!voices[i].active.load(std::memory_order_relaxed) ||
-                    voices[i].midi_note.load(std::memory_order_relaxed) == -1) {
+                if (voices[i].voice_state.load(std::memory_order_relaxed) == (int32_t)event.param1) {
                     target_voice = i;
                     break;
                 }
             }
-        }
 
-        if (target_voice == -1) {
-            uint32_t max_age_diff = 0;
-            target_voice = 0;
+            // Иначе ищем свободный голос
+            if (target_voice == -1) {
+                for (int i = 0; i < PLUCK_VOICES; i++) {
+                    if (voices[i].voice_state.load(std::memory_order_relaxed) == -1) {
+                        target_voice = i;
+                        break;
+                    }
+                }
+            }
+
+            // Иначе вытесняем самый старый голос
+            if (target_voice == -1) {
+                uint32_t max_age_diff = 0;
+                target_voice = 0;
+                for (int i = 0; i < PLUCK_VOICES; i++) {
+                    uint32_t age_diff = global_trigger_counter - voices[i].trigger_age;
+                    if (age_diff >= max_age_diff) {
+                        max_age_diff = age_diff;
+                        target_voice = i;
+                    }
+                }
+            }
+
+            PluckVoice& v = voices[target_voice];
+            v.freq         = event.freq;
+            v.damp_offset  = event.damp_offset;
+            v.damper_env   = 1.0f;
+            v.level_ema    = 1.0f;
+            v.trigger_age  = ++global_trigger_counter;
+            v.pending_trig = true;
+            if (v.press_count < 255) v.press_count++;
+            v.sustain_held = false;
+            v.voice_state.store((int32_t)event.param1, std::memory_order_release);
+
+            v.string_voice.SetFreq(event.freq);
+            v.string_voice.SetAmp(event.amp);
+            v.string_voice.SetDecay(event.decay);
+
+            float current_damp = user_damp.load(std::memory_order_relaxed);
+            v.string_voice.SetDamp(compensate_damp(
+                clamp_f(current_damp + v.damp_offset, 0.0f, 1.0f), v.freq));
+
+        } else if (event.type == EVENT_NOTE_OFF) {
+            uint8_t note = event.param1;
             for (int i = 0; i < PLUCK_VOICES; i++) {
-                uint32_t age_diff = global_trigger_counter - voices[i].trigger_age;
-                if (age_diff >= max_age_diff) {
-                    max_age_diff = age_diff;
-                    target_voice = i;
+                if (voices[i].voice_state.load(std::memory_order_relaxed) == (int32_t)note && voices[i].press_count > 0) {
+                    voices[i].press_count--;
+                    if (voices[i].press_count == 0) {
+                        if (audio_sustain_pedal) {
+                            voices[i].sustain_held = true; // Захват педалью ТОЛЬКО если педаль была нажата
+                        } else {
+                            voices[i].sustain_held = false;
+                        }
+                    }
+                }
+            }
+        } else if (event.type == EVENT_CONTROL_CHANGE) {
+            if (event.param1 == 64) {
+                bool pedal_on = (event.param2 >= 64);
+                audio_sustain_pedal = pedal_on;
+                if (!pedal_on) {
+                    // Отпускание педали снимает удержание у всех голосов
+                    for (int i = 0; i < PLUCK_VOICES; i++) {
+                        voices[i].sustain_held = false;
+                    }
                 }
             }
         }
-
-        PluckVoice& v = voices[target_voice];
-        v.midi_note.store((int16_t)event.note, std::memory_order_relaxed);
-        v.freq         = event.freq;
-        v.damp_offset  = event.damp_offset;
-        v.damper_env   = 1.0f;
-        v.level_ema    = 1.0f;
-        v.trigger_age  = ++global_trigger_counter;
-        v.pending_trig = true;
-        v.note_pressed = true;
-        v.sustain_held = false;
-        v.active.store(true, std::memory_order_release);
-
-        v.string_voice.SetFreq(event.freq);
-        v.string_voice.SetAmp(event.amp);
-        v.string_voice.SetDecay(event.decay);
-
-        float current_damp = user_damp.load(std::memory_order_relaxed);
-        v.string_voice.SetDamp(compensate_damp(
-            clamp_f(current_damp + v.damp_offset, 0.0f, 1.0f), v.freq));
     }
 
     // 2. Вычисление и смешивание сигналов активных голосов
@@ -310,30 +326,7 @@ int16_t PluckSynth_NextSample(void) {
     for (int i = 0; i < PLUCK_VOICES; i++) {
         PluckVoice& v = voices[i];
 
-        if (v.active.load(std::memory_order_relaxed)) {
-            int16_t note_id = v.midi_note.load(std::memory_order_relaxed);
-            if (note_id >= 0 && note_id < 128) {
-                bool is_pressed = (global_note_press_count[note_id].load(std::memory_order_relaxed) > 0);
-
-                // Переход состояния нажатия клавиши -> отпускания
-                if (v.note_pressed && !is_pressed) {
-                    v.note_pressed = false;
-                    if (sus_pedal_now) {
-                        v.sustain_held = true; // Захват удержания педалью в момент отпускания
-                    }
-                }
-
-                if (is_pressed) {
-                    v.note_pressed = true;
-                    v.sustain_held = false;
-                }
-
-                // Сброс удержания педалью при отпускании CC64
-                if (!sus_pedal_now) {
-                    v.sustain_held = false;
-                }
-            }
-
+        if (v.voice_state.load(std::memory_order_relaxed) >= 0) {
             v.string_voice.SetDecay(current_decay);
             v.string_voice.SetDamp(compensate_damp(
                 clamp_f(current_damp + v.damp_offset, 0.0f, 1.0f), v.freq));
@@ -344,7 +337,7 @@ int16_t PluckSynth_NextSample(void) {
             float sample_f = v.string_voice.Process(trig);
 
             // Если клавиша отпущена И нота не удерживается педалью CC64, опускаем демпфер (damper decay)
-            if (!v.note_pressed && !v.sustain_held) {
+            if (v.press_count == 0 && !v.sustain_held) {
                 v.damper_env *= release_coeff;
             }
 
@@ -354,9 +347,8 @@ int16_t PluckSynth_NextSample(void) {
             v.level_ema = 0.99f * v.level_ema + 0.01f * std::abs(sample_f);
 
             if (v.level_ema < 0.0001f) {
-                v.active.store(false, std::memory_order_release);
-                v.midi_note.store(-1, std::memory_order_release);
-                v.note_pressed = false;
+                v.voice_state.store(-1, std::memory_order_release);
+                v.press_count  = 0;
                 v.sustain_held = false;
                 sample_f       = 0.0f;
             } else {

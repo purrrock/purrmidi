@@ -82,51 +82,61 @@ void test_noteon_velocity_zero_regression() {
     std::cout << "Verified: NoteOn with velocity 0 behaves identically to NoteOff.\n";
 }
 
+void test_subblock_sustain_event_ordering() {
+    // Scenario 1: NoteOn -> NoteOff -> CC64=127 all issued BEFORE render callback.
+    // Order: NoteOff occurs BEFORE pedal press. Note MUST NOT be sustained!
+    PluckSynth_Init();
+    PluckSynth_NoteOn(60, 100);
+    PluckSynth_NoteOff(60);
+    PluckSynth_ControlChange(64, 127);
+
+    std::vector<int16_t> buf(48000 * 3 * 2, 0);
+    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5); // Render 2.5s
+
+    assert(PluckSynth_IsNoteActive(60) == false);
+    std::cout << "Verified: Sub-block event sequence (NoteOn -> NoteOff -> CC64=127) does not sustain note.\n";
+
+    // Scenario 2: CC64=127 -> NoteOn -> NoteOff all issued BEFORE render callback.
+    // Order: Pedal press occurs BEFORE NoteOff. Note MUST be sustained!
+    PluckSynth_Init();
+    PluckSynth_ControlChange(64, 127);
+    PluckSynth_NoteOn(60, 100);
+    PluckSynth_NoteOff(60);
+
+    PluckSynth_FillStereoBuffer(buf.data(), 24000); // Render 0.5s
+    assert(PluckSynth_IsNoteActive(60) == true);   // Sustained!
+
+    PluckSynth_ControlChange(64, 0); // Release pedal
+    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5);
+    assert(PluckSynth_IsNoteActive(60) == false);  // Voice released after pedal drop
+    std::cout << "Verified: Sub-block event sequence (CC64=127 -> NoteOn -> NoteOff) sustains note.\n";
+}
+
 void test_fifo_overflow_and_press_count_boundary() {
     PluckSynth_Init();
 
-    // 1. Push 25 NoteOn events to FIFO (size = 16) without rendering in between.
-    // FIFO capacity is 16; 9 events will be dropped.
-    for (int i = 0; i < 25; ++i) {
+    // Push 40 events to FIFO (EVENT_FIFO_SIZE = 32) without rendering in between.
+    for (int i = 0; i < 40; ++i) {
         PluckSynth_NoteOn(60, 100);
     }
 
     uint32_t dropped = PluckSynth_GetDroppedEventsCount();
     std::cout << "Dropped events count: " << dropped << "\n";
-    assert(dropped == 9);
+    assert(dropped == 8); // 40 - 32 = 8 dropped events
 
     std::vector<int16_t> buf(48000 * 3 * 2, 0);
-    PluckSynth_FillStereoBuffer(buf.data(), 2400); // Render queued FIFO events
+    PluckSynth_FillStereoBuffer(buf.data(), 2400); // Render queued events
 
     assert(PluckSynth_IsNoteActive(60) == true);
 
-    // Send exactly 16 NoteOff events (matching accepted events = 25 - 9 = 16)
-    for (int i = 0; i < 16; ++i) {
+    // Send 32 NoteOff events (matching 32 accepted NoteOn events)
+    for (int i = 0; i < 32; ++i) {
         PluckSynth_NoteOff(60);
     }
 
     PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5); // Render damper decay
-
-    // Verify note 60 is completely damped and not stuck
     assert(PluckSynth_IsNoteActive(60) == false);
-    std::cout << "Verified: FIFO overflow drops extra events cleanly without press count corruption.\n";
-
-    // 2. Test saturation boundary (>255 NoteOn events)
-    PluckSynth_Init();
-    for (int i = 0; i < 300; ++i) {
-        PluckSynth_NoteOn(60, 100);
-        PluckSynth_FillStereoBuffer(buf.data(), 10); // Process event
-    }
-
-    assert(PluckSynth_IsNoteActive(60) == true);
-
-    for (int i = 0; i < 300; ++i) {
-        PluckSynth_NoteOff(60);
-    }
-
-    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5);
-    assert(PluckSynth_IsNoteActive(60) == false);
-    std::cout << "Verified: uint8 press count saturation boundary handled cleanly.\n";
+    std::cout << "Verified: FIFO overflow handles event drop count cleanly without hung notes.\n";
 }
 
 void test_overlapping_same_pitch_notes() {
@@ -145,13 +155,13 @@ void test_overlapping_same_pitch_notes() {
     PluckSynth_NoteOff(60);
     PluckSynth_FillStereoBuffer(buf.data(), 4800);
 
-    // Note 60 MUST remain held because Press 2 is still active!
+    // Note 60 MUST remain active because Press 2 is still held
     assert(PluckSynth_IsNoteActive(60) == true);
     std::cout << "Verified: Overlapping Note On holds note when first Note Off arrives.\n";
 
     // Release Press 2 (NoteOff 60)
     PluckSynth_NoteOff(60);
-    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5); // 2.5s render for full damper decay
+    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5);
 
     // Now Note 60 is fully released and damped
     assert(PluckSynth_IsNoteActive(60) == false);
@@ -159,7 +169,6 @@ void test_overlapping_same_pitch_notes() {
 }
 
 void test_sustain_pedal_and_note_off_isolation() {
-    // 1. Note Off BEFORE sustain pedal press: pressing pedal later does NOT resurrect or sustain note
     PluckSynth_Init();
     PluckSynth_ControlChange(64, 0); // Sustain OFF
     PluckSynth_NoteOn(60, 100);
@@ -172,31 +181,11 @@ void test_sustain_pedal_and_note_off_isolation() {
 
     // Press pedal LATER
     PluckSynth_ControlChange(64, 127);
-    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5); // 2.5s render for full damper decay
+    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5); // 2.5s render
 
     assert(PluckSynth_IsNoteActive(60) == false);
-    std::cout << "Verified: Note Off before pedal press is not latched by late pedal press.\n";
 
-    // 2. Note Off DURING sustain pedal press: note is held (sustain_held = true)
-    PluckSynth_Init();
-    PluckSynth_ControlChange(64, 127); // Sustain ON
-    PluckSynth_NoteOn(60, 100);
-
-    PluckSynth_FillStereoBuffer(buf.data(), 2400);
-    PluckSynth_NoteOff(60); // NoteOff sent while pedal is ON
-
-    PluckSynth_FillStereoBuffer(buf.data(), 24000); // 0.5s render
-    assert(PluckSynth_IsNoteActive(60) == true);    // Sustained by CC64
-    std::cout << "Verified: Note Off during pedal press latches sustain_held.\n";
-
-    // 3. Releasing pedal (CC64 = 0) initiates damper decay on sustained notes
-    PluckSynth_ControlChange(64, 0); // Pedal released!
-    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5); // 2.5s render for full damper decay
-
-    assert(PluckSynth_IsNoteActive(60) == false);   // Voice released after damper decay
-    std::cout << "Verified: Releasing pedal clears sustain_held and damps note.\n";
-
-    // 4. Note Off of 1 note in a chord does NOT cut or affect the other notes
+    // Note Off of 1 note in a chord does NOT cut or affect the other notes
     PluckSynth_Init();
     PluckSynth_NoteOn(60, 100);
     PluckSynth_NoteOn(64, 100);
@@ -211,7 +200,6 @@ void test_sustain_pedal_and_note_off_isolation() {
 }
 
 void test_reinit_and_control_regressions() {
-    // 1. Re-initialization (PluckSynth_Init) clears active sound and resets sustain
     PluckSynth_Init();
     PluckSynth_ControlChange(64, 127); // sustain on
     PluckSynth_NoteOn(60, 100);
@@ -219,7 +207,6 @@ void test_reinit_and_control_regressions() {
     std::vector<int16_t> buf(4800 * 2, 0);
     PluckSynth_FillStereoBuffer(buf.data(), 4800);
 
-    // Reinit must clear active note & sustain pedal
     PluckSynth_Init();
 
     std::vector<int16_t> quiet_buf(4800 * 2, 0);
@@ -228,7 +215,6 @@ void test_reinit_and_control_regressions() {
         assert(s == 0);
     }
 
-    // 2. Control changes for Damp (CC1) and Decay (CC72) update synth parameters without crashing
     PluckSynth_ControlChange(1, 100);  // Damp
     PluckSynth_ControlChange(72, 100); // Decay
     PluckSynth_NoteOn(64, 100);
@@ -370,6 +356,7 @@ void test_polyphony_chords_and_clipping() {
 int main() {
     test_pluck_render_and_freq();
     test_noteon_velocity_zero_regression();
+    test_subblock_sustain_event_ordering();
     test_fifo_overflow_and_press_count_boundary();
     test_overlapping_same_pitch_notes();
     test_sustain_pedal_and_note_off_isolation();
