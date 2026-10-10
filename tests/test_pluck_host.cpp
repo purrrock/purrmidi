@@ -176,7 +176,7 @@ void test_fifo_overflow_critical_release_delivery() {
     assert(PluckSynth_IsNoteActive(60) == false); // Critical CC64=0 delivered! No stuck sustain!
     std::cout << "Verified: Critical CC64=0 uses reserved FIFO slots and releases sustain.\n";
 
-    // 4. Test full 32-slot FIFO saturation and emergency overflow recovery
+    // 4. Test full 32-slot FIFO saturation and emergency overflow recovery state machine
     PluckSynth_Init();
     PluckSynth_ControlChange(64, 127); // Sustain ON
     PluckSynth_NoteOn(60, 100);
@@ -192,7 +192,7 @@ void test_fifo_overflow_critical_release_delivery() {
     }
 
     // Now send critical NoteOff(60) when FIFO is 100% full (32/32 slots used).
-    // This triggers emergency overflow recovery.
+    // This triggers emergency overflow recovery state machine request.
     PluckSynth_NoteOff(60);
 
     // Render audio block to trigger emergency state reset in consumer thread
@@ -200,7 +200,7 @@ void test_fifo_overflow_critical_release_delivery() {
 
     // Verify emergency recovery released all held notes and sustain pedal
     assert(PluckSynth_IsNoteActive(60) == false);
-    std::cout << "Verified: Emergency recovery released held notes and sustain pedal on 100% FIFO saturation.\n";
+    std::cout << "Verified: Emergency recovery state machine released held notes and sustain pedal on 100% FIFO saturation.\n";
 
     // 5. Test post-recovery synth functionality (new NoteOn -> NoteOff cycle)
     PluckSynth_NoteOn(72, 100);
