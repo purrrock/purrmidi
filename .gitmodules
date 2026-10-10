@@ -1,6 +1,6 @@
 [submodule "Middlewares/Third_Party/DaisySP"]
 	path = Middlewares/Third_Party/DaisySP
-	url = https://github.com/electro-smith/DaisySP.git
+	url = https://github.com/daisyaudio/DaisySP-LGPL.git
 [submodule "Middlewares/Third_Party/MiniSTM32H7xx"]
 	path = Middlewares/Third_Party/MiniSTM32H7xx
 	url = https://github.com/WeActStudio/MiniSTM32H7xx.git
