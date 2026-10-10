@@ -176,7 +176,7 @@ void test_fifo_overflow_critical_release_delivery() {
     assert(PluckSynth_IsNoteActive(60) == false); // Critical CC64=0 delivered! No stuck sustain!
     std::cout << "Verified: Critical CC64=0 uses reserved FIFO slots and releases sustain.\n";
 
-    // 4. Test full 32-slot FIFO saturation by critical events (Note Off & CC64=0 loss prevention)
+    // 4. Test full 32-slot FIFO saturation and emergency overflow recovery
     PluckSynth_Init();
     PluckSynth_ControlChange(64, 127); // Sustain ON
     PluckSynth_NoteOn(60, 100);
@@ -191,15 +191,26 @@ void test_fifo_overflow_critical_release_delivery() {
         PluckSynth_NoteOff(64 + (i % 8));
     }
 
-    // Now send critical NoteOff(60) and CC64=0 when FIFO is 100% full (32/32 slots used)
+    // Now send critical NoteOff(60) when FIFO is 100% full (32/32 slots used).
+    // This triggers emergency overflow recovery.
     PluckSynth_NoteOff(60);
-    PluckSynth_ControlChange(64, 0);
 
+    // Render audio block to trigger emergency state reset in consumer thread
     PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5);
 
-    // Verify fallback mechanism delivered both NoteOff(60) and CC64=0 without stuck note or stuck sustain!
+    // Verify emergency recovery released all held notes and sustain pedal
     assert(PluckSynth_IsNoteActive(60) == false);
-    std::cout << "Verified: 100% full FIFO saturation delivers critical NoteOff and CC64=0 via atomic fallback registers.\n";
+    std::cout << "Verified: Emergency recovery released held notes and sustain pedal on 100% FIFO saturation.\n";
+
+    // 5. Test post-recovery synth functionality (new NoteOn -> NoteOff cycle)
+    PluckSynth_NoteOn(72, 100);
+    PluckSynth_FillStereoBuffer(buf.data(), 2400);
+    assert(PluckSynth_IsNoteActive(72) == true);
+
+    PluckSynth_NoteOff(72);
+    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5);
+    assert(PluckSynth_IsNoteActive(72) == false);
+    std::cout << "Verified: Post-recovery NoteOn -> NoteOff cycle operates normally.\n";
 }
 
 void test_overlapping_same_pitch_notes() {
