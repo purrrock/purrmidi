@@ -8,8 +8,10 @@
 extern "C" {
 #endif
 
+#define PLUCK_VOICES 8
+
 /**
- * @brief Инициализация одноголосного синтезатора струны (Karplus-Strong)
+ * @brief Инициализация полифонического синтезатора струны (Karplus-Strong)
  */
 void PluckSynth_Init(void);
 
@@ -42,6 +44,19 @@ void PluckSynth_SetDecay(float decay);
  * @brief Ручная установка яркости/демпфирования струны (0.0f .. 1.0f)
  */
 void PluckSynth_SetDamp(float damp);
+
+/**
+ * @brief Проверка, звучит ли в данный момент MIDI-нота на каком-либо из голосов
+ * @param midi_note Номер MIDI-ноты (0..127)
+ * @return true если нота активна и звучит, иначе false
+ */
+bool PluckSynth_IsNoteActive(uint8_t midi_note);
+
+/**
+ * @brief Получение количества отброшенных событий Note On из-за переполнения FIFO
+ * @return Счётчик отброшенных событий Note On
+ */
+uint32_t PluckSynth_GetDroppedEventsCount(void);
 
 /**
  * @brief Расчёт одного аудиосэмпла (вызывается из прерывания DMA)
