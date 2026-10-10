@@ -89,9 +89,41 @@ static void test_release_and_sustain() {
     CHECK(all_zero(render(4800), 0, 4800));
 }
 
+static void test_cc120_cc123_and_reinit_regressions() {
+    // 1. CC 120 (All Sound Off) — сбрасывает gate/sustain и затухает через релиз до тишины
+    SineSynth_Init();
+    SineSynth_ControlChange(64, 127);
+    SineSynth_NoteOn(60, 100);
+    render(2400);
+    SineSynth_ControlChange(120, 0);
+    auto cc120_buf = render(4800);
+    CHECK(all_zero(cc120_buf, 3000, 4800));
+
+    // 2. CC 123 (All Notes Off) — отпускает ноту и сбрасывает сустейн
+    SineSynth_Init();
+    SineSynth_ControlChange(64, 127); // с зажатым сустейном
+    SineSynth_NoteOn(60, 100);
+    render(2400);
+    SineSynth_ControlChange(123, 0);
+    auto release_buf = render(4800);
+    CHECK(all_zero(release_buf, 3000, 4800));
+
+    // 3. Re-initialization (SineSynth_Init) — сбрасывает состояние и восстанавливает дефолтный громкость CC7
+    SineSynth_Init();
+    SineSynth_ControlChange(7, 0); // mute via CC7
+    SineSynth_NoteOn(60, 100);
+    CHECK(all_zero(render(2400), 0, 2400)); // quiet due to CC7=0
+
+    SineSynth_Init(); // Reinit restores state
+    SineSynth_NoteOn(60, 100);
+    auto reinit_buf = render(2400);
+    CHECK(!all_zero(reinit_buf, 0, 2400)); // sound restored
+}
+
 int main() {
     test_pitch_and_stereo();
     test_release_and_sustain();
+    test_cc120_cc123_and_reinit_regressions();
     std::cout << "test_sine_host passed successfully." << std::endl;
     return 0;
 }

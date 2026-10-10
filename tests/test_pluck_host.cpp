@@ -107,9 +107,41 @@ void test_noteon_vel_0_and_sustain() {
     assert(sound_present);
 }
 
+void test_reinit_and_control_regressions() {
+    // 1. Re-initialization (PluckSynth_Init) clears active sound and resets sustain
+    PluckSynth_Init();
+    PluckSynth_ControlChange(64, 127); // sustain on
+    PluckSynth_NoteOn(60, 100);
+
+    std::vector<int16_t> buf(4800 * 2, 0);
+    PluckSynth_FillStereoBuffer(buf.data(), 4800);
+
+    // Reinit must clear active note & sustain pedal
+    PluckSynth_Init();
+
+    std::vector<int16_t> quiet_buf(4800 * 2, 0);
+    PluckSynth_FillStereoBuffer(quiet_buf.data(), 4800);
+    for (int16_t s : quiet_buf) {
+        assert(s == 0);
+    }
+
+    // 2. Control changes for Damp (CC1) and Decay (CC72) update synth parameters without crashing
+    PluckSynth_ControlChange(1, 100);  // Damp
+    PluckSynth_ControlChange(72, 100); // Decay
+    PluckSynth_NoteOn(64, 100);
+    PluckSynth_FillStereoBuffer(buf.data(), 4800);
+
+    bool non_zero = false;
+    for (int16_t s : buf) {
+        if (s != 0) { non_zero = true; break; }
+    }
+    assert(non_zero);
+}
+
 int main() {
     test_pluck_render_and_freq();
     test_noteon_vel_0_and_sustain();
+    test_reinit_and_control_regressions();
     std::cout << "test_pluck_host passed successfully." << std::endl;
     return 0;
 }
