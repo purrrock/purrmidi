@@ -184,6 +184,16 @@ void PluckSynth_SetDamp(float damp) {
     user_damp.store(clamp_f(damp, 0.0f, PLUCK_MAX_DAMP), std::memory_order_relaxed);
 }
 
+bool PluckSynth_IsNoteActive(uint8_t midi_note) {
+    if (midi_note >= 128) return false;
+    for (int i = 0; i < PLUCK_VOICES; i++) {
+        if (voices[i].active && voices[i].midi_note == (int16_t)midi_note) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
     float norm = (float)value * (1.0f / 127.0f);
 

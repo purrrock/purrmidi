@@ -46,6 +46,13 @@ void PluckSynth_SetDecay(float decay);
 void PluckSynth_SetDamp(float damp);
 
 /**
+ * @brief Проверка, звучит ли в данный момент MIDI-нота на каком-либо из голосов
+ * @param midi_note Номер MIDI-ноты (0..127)
+ * @return true если нота активна и звучит, иначе false
+ */
+bool PluckSynth_IsNoteActive(uint8_t midi_note);
+
+/**
  * @brief Расчёт одного аудиосэмпла (вызывается из прерывания DMA)
  * @return Знаковый 16-битный сэмпл для ЦАП PCM5102A
  */
