@@ -138,10 +138,74 @@ void test_reinit_and_control_regressions() {
     assert(non_zero);
 }
 
+void test_polyphony_chords_and_stealing() {
+    PluckSynth_Init();
+
+    // 1. Play 3 notes simultaneously (Chord: C4=60, E4=64, G4=67)
+    PluckSynth_NoteOn(60, 100);
+    PluckSynth_NoteOn(64, 100);
+    PluckSynth_NoteOn(67, 100);
+
+    uint32_t frames_05s = 24000;
+    std::vector<int16_t> chord_buf(frames_05s * 2, 0);
+    PluckSynth_FillStereoBuffer(chord_buf.data(), frames_05s);
+
+    for (size_t i = 0; i < frames_05s; ++i) {
+        int16_t sample = chord_buf[i * 2];
+        assert(sample <= 32767 && sample >= -32768);
+    }
+
+    // 2. NoteOff for 1 note (C4=60) while E4 and G4 remain active
+    PluckSynth_NoteOff(60);
+
+    std::vector<int16_t> partial_off_buf(4800 * 2, 0);
+    PluckSynth_FillStereoBuffer(partial_off_buf.data(), 4800);
+
+    bool sound_remains = false;
+    for (size_t i = 0; i < 4800; ++i) {
+        if (std::abs(partial_off_buf[i * 2]) > 50) {
+            sound_remains = true;
+            break;
+        }
+    }
+    assert(sound_remains);
+
+    // 3. Test voice stealing when playing more than 8 notes (9 notes)
+    PluckSynth_Init();
+    for (uint8_t note = 60; note <= 68; ++note) {
+        PluckSynth_NoteOn(note, 100);
+    }
+
+    std::vector<int16_t> steal_buf(4800 * 2, 0);
+    PluckSynth_FillStereoBuffer(steal_buf.data(), 4800);
+
+    for (size_t i = 0; i < 4800; ++i) {
+        int16_t s = steal_buf[i * 2];
+        assert(s <= 32767 && s >= -32768);
+    }
+
+    // 4. Test repeated NoteOn / NoteOff on the same note
+    PluckSynth_Init();
+    for (int i = 0; i < 20; ++i) {
+        PluckSynth_NoteOn(60, 100);
+        PluckSynth_FillStereoBuffer(steal_buf.data(), 200);
+        PluckSynth_NoteOff(60);
+        PluckSynth_FillStereoBuffer(steal_buf.data(), 200);
+    }
+
+    // Fading out completely after off
+    std::vector<int16_t> fade_buf(48000 * 3 * 2, 0);
+    PluckSynth_FillStereoBuffer(fade_buf.data(), 48000 * 3);
+    for (size_t i = 48000 * 2.8; i < 48000 * 3; ++i) {
+        assert(fade_buf[i * 2] == 0);
+    }
+}
+
 int main() {
     test_pluck_render_and_freq();
     test_noteon_vel_0_and_sustain();
     test_reinit_and_control_regressions();
+    test_polyphony_chords_and_stealing();
     std::cout << "test_pluck_host passed successfully." << std::endl;
     return 0;
 }

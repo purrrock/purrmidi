@@ -8,8 +8,10 @@
 extern "C" {
 #endif
 
+#define PLUCK_VOICES 8
+
 /**
- * @brief Инициализация одноголосного синтезатора струны (Karplus-Strong)
+ * @brief Инициализация полифонического синтезатора струны (Karplus-Strong)
  */
 void PluckSynth_Init(void);
 

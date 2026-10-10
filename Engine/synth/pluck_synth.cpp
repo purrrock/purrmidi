@@ -13,7 +13,7 @@ using namespace daisysp;
 #define PLUCK_MASTER_GAIN       0.85f   // Запас по громкости против клиппинга
 #define PLUCK_MAX_DAMP          0.999f  // Потолок damp (выше 0.99 нужен для компенсации высоких нот)
 #define NOTE_EVENT_FIFO_SIZE    16      // Размер FIFO буфера событий NoteOn (должен быть степенью двойки)
-#define PLUCK_OUTPUT_SCALE      (PLUCK_MASTER_GAIN * 32767.0f) // Предрасчитанная константа[cite: 9]
+#define PLUCK_OUTPUT_SCALE      (PLUCK_MASTER_GAIN * 32767.0f) // Предрасчитанная константа
 
 struct NoteOnEvent {
     uint8_t note;
@@ -23,16 +23,20 @@ struct NoteOnEvent {
     float damp_offset; // Сохраняем только прибавку от velocity, а не финальное значение
 };
 
-// Объект физического моделирования струны и буфер линии задержки (8 КБ)[cite: 8]
-static Pluck string_voice;
-static float pluck_buffer[PLUCK_BUFFER_SIZE];
+struct PluckVoice {
+    Pluck string_voice;
+    float pluck_buffer[PLUCK_BUFFER_SIZE];
+    int16_t midi_note;
+    float envelope;
+    float damp_offset;
+    float freq;
+    uint32_t trigger_age;
+    bool pending_trig;
+};
 
-// Переменные огибающей и состояния в контексте аудиопотока
+static PluckVoice voices[PLUCK_VOICES];
+static uint32_t global_trigger_counter = 0;
 static float release_coeff = 0.0f;
-static float envelope = 0.0f;
-static int16_t active_audio_note = -1;
-static float active_damp_offset = 0.0f; // Удерживает влияние удара по клавише на время звучания ноты
-static float active_freq = 440.0f;      // Частота активной ноты (для компенсации damp)
 
 // Переменные состояния непрерывных контроллеров (MIDI CC)
 static std::atomic<float> user_decay{0.96f};
@@ -91,14 +95,23 @@ static inline float compensate_damp(float damp, float freq) {
 }
 
 void PluckSynth_Init(void) {
-    // Инициализация алгоритма Карплуса-Стронга в рекурсивном режиме сглаживания
-    string_voice.Init(PLUCK_SAMPLE_RATE, pluck_buffer, PLUCK_BUFFER_SIZE, PLUCK_MODE_RECURSIVE);
+    release_coeff = expf(-1.0f / (PLUCK_SAMPLE_RATE * PLUCK_RELEASE_TIME_SEC));
+    global_trigger_counter = 0;
 
-    release_coeff      = expf(-1.0f / (PLUCK_SAMPLE_RATE * PLUCK_RELEASE_TIME_SEC));
-    envelope           = 0.0f;
-    active_audio_note  = -1;
-    active_damp_offset = 0.0f;
-    active_freq        = 440.0f;
+    for (int i = 0; i < PLUCK_VOICES; i++) {
+        voices[i].string_voice.Init(PLUCK_SAMPLE_RATE, voices[i].pluck_buffer, PLUCK_BUFFER_SIZE, PLUCK_MODE_RECURSIVE);
+        voices[i].midi_note = -1;
+        voices[i].envelope = 0.0f;
+        voices[i].damp_offset = 0.0f;
+        voices[i].freq = 440.0f;
+        voices[i].trigger_age = 0;
+        voices[i].pending_trig = false;
+
+        voices[i].string_voice.SetFreq(440.0f);
+        voices[i].string_voice.SetAmp(0.5f);
+        voices[i].string_voice.SetDecay(0.96f);
+        voices[i].string_voice.SetDamp(0.85f);
+    }
 
     user_decay.store(0.96f, std::memory_order_relaxed);
     user_damp.store(0.85f, std::memory_order_relaxed);
@@ -111,11 +124,6 @@ void PluckSynth_Init(void) {
     fifo_head.store(0, std::memory_order_relaxed);
     fifo_tail.store(0, std::memory_order_relaxed);
     dropped_events_count.store(0, std::memory_order_relaxed);
-
-    string_voice.SetFreq(440.0f);
-    string_voice.SetAmp(0.5f);
-    string_voice.SetDecay(0.96f);
-    string_voice.SetDamp(0.85f);
 }
 
 void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
@@ -190,69 +198,115 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
 }
 
 int16_t PluckSynth_NextSample(void) {
-    float trig = 0.0f;
     NoteOnEvent event;
 
-    // 1. Проверяем наличие новых событий нот
-    if (note_event_fifo_pop(event)) {
-        string_voice.SetFreq(event.freq);
-        string_voice.SetAmp(event.amp);
-        string_voice.SetDecay(event.decay);
-        
-        // Фиксируем смещение damp от текущего удара по клавише
-        active_damp_offset = event.damp_offset;
-        active_freq        = event.freq;
-        float current_damp = user_damp.load(std::memory_order_relaxed);
-        string_voice.SetDamp(compensate_damp(
-            clamp_f(current_damp + active_damp_offset, 0.0f, 1.0f), active_freq));
+    // 1. Проверяем наличие новых событий нот и выделяем голоса
+    while (note_event_fifo_pop(event)) {
+        int target_voice = -1;
 
-        trig = 1.0f;
-        envelope = 1.0f;
-        active_audio_note = (int16_t)event.note;
-    } else {
-        // 2. Если новой ноты нет, непрерывно применяем положение ручек
-        string_voice.SetDecay(user_decay.load(std::memory_order_relaxed));
-        
-        // Добавляем к глобальному Damp сохраненное смещение активной ноты
-        float current_damp = user_damp.load(std::memory_order_relaxed);
-        string_voice.SetDamp(compensate_damp(
-            clamp_f(current_damp + active_damp_offset, 0.0f, 1.0f), active_freq));
+        // Поиск голоса, уже играющего данную ноту
+        for (int i = 0; i < PLUCK_VOICES; i++) {
+            if (voices[i].midi_note == (int16_t)event.note) {
+                target_voice = i;
+                break;
+            }
+        }
 
-        trig = 0.0f;
-    }
-
-    float sample_f = 0.0f;
-
-    // 3. Вычисление физического моделирования с экономией CPU в моменты тишины[cite: 9]
-    if (envelope > 0.0f) {
-        sample_f = string_voice.Process(trig);
-
-        if (active_audio_note >= 0 && active_audio_note < 128) {
-            bool is_pressed = note_pressed[active_audio_note].load(std::memory_order_relaxed);
-            bool sus_pedal  = sustain_pedal.load(std::memory_order_relaxed);
-
-            // Если клавиша отпущена и педаль не нажата, запускаем затухание огибающей
-            if (!is_pressed && !sus_pedal) {
-                envelope *= release_coeff;
-                if (envelope < 0.0001f) {
-                    envelope = 0.0f;
-                    active_audio_note = -1;
+        // Если не найден, ищем свободный голос
+        if (target_voice == -1) {
+            for (int i = 0; i < PLUCK_VOICES; i++) {
+                if (voices[i].midi_note == -1 || voices[i].envelope <= 0.0001f) {
+                    target_voice = i;
+                    break;
                 }
             }
         }
 
-        sample_f *= envelope;
-        sample_f *= PLUCK_OUTPUT_SCALE; // Применение предрасчитанной константы гейна[cite: 9]
+        // Если все голоса заняты, вытесняем самый старый
+        if (target_voice == -1) {
+            uint32_t max_age_diff = 0;
+            target_voice = 0;
+            for (int i = 0; i < PLUCK_VOICES; i++) {
+                uint32_t age_diff = global_trigger_counter - voices[i].trigger_age;
+                if (age_diff >= max_age_diff) {
+                    max_age_diff = age_diff;
+                    target_voice = i;
+                }
+            }
+        }
 
-        // Жёсткое ограничение для защиты от переполнения int16_t (Hard Clipping)
-        if (sample_f > 32767.0f) {
-            sample_f = 32767.0f;
-        } else if (sample_f < -32768.0f) {
-            sample_f = -32768.0f;
+        PluckVoice& v = voices[target_voice];
+        v.midi_note    = (int16_t)event.note;
+        v.freq         = event.freq;
+        v.damp_offset  = event.damp_offset;
+        v.envelope     = 1.0f;
+        v.trigger_age  = ++global_trigger_counter;
+        v.pending_trig = true;
+
+        v.string_voice.SetFreq(event.freq);
+        v.string_voice.SetAmp(event.amp);
+        v.string_voice.SetDecay(event.decay);
+
+        float current_damp = user_damp.load(std::memory_order_relaxed);
+        v.string_voice.SetDamp(compensate_damp(
+            clamp_f(current_damp + v.damp_offset, 0.0f, 1.0f), v.freq));
+    }
+
+    // 2. Вычисление и смешивание сигналов активных голосов
+    float mix_sum_f = 0.0f;
+    uint32_t active_voices_count = 0;
+    float current_decay = user_decay.load(std::memory_order_relaxed);
+    float current_damp = user_damp.load(std::memory_order_relaxed);
+
+    for (int i = 0; i < PLUCK_VOICES; i++) {
+        PluckVoice& v = voices[i];
+
+        if (v.envelope > 0.0f || v.pending_trig) {
+            active_voices_count++;
+
+            v.string_voice.SetDecay(current_decay);
+            v.string_voice.SetDamp(compensate_damp(
+                clamp_f(current_damp + v.damp_offset, 0.0f, 1.0f), v.freq));
+
+            float trig = v.pending_trig ? 1.0f : 0.0f;
+            v.pending_trig = false;
+
+            float sample_f = v.string_voice.Process(trig);
+
+            if (v.midi_note >= 0 && v.midi_note < 128) {
+                bool is_pressed = note_pressed[v.midi_note].load(std::memory_order_relaxed);
+                bool sus_pedal  = sustain_pedal.load(std::memory_order_relaxed);
+
+                if (!is_pressed && !sus_pedal) {
+                    v.envelope *= release_coeff;
+                    if (v.envelope < 0.0001f) {
+                        v.envelope = 0.0f;
+                        v.midi_note = -1;
+                    }
+                }
+            }
+
+            sample_f *= v.envelope;
+            mix_sum_f += sample_f;
         }
     }
 
-    return (int16_t)sample_f;
+    // Динамическая нормализация при суммировании нескольких голосов для сохранения динамики
+    float norm_gain = 1.0f;
+    if (active_voices_count > 1) {
+        norm_gain = 1.0f / (1.0f + 0.25f * (float)(active_voices_count - 1));
+    }
+
+    // 3. Масштабирование с учетом гейна и зажимание уровня в int16_t
+    float output_sample_f = mix_sum_f * norm_gain * PLUCK_OUTPUT_SCALE;
+
+    if (output_sample_f > 32767.0f) {
+        output_sample_f = 32767.0f;
+    } else if (output_sample_f < -32768.0f) {
+        output_sample_f = -32768.0f;
+    }
+
+    return (int16_t)output_sample_f;
 }
 
 void PluckSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames) {
