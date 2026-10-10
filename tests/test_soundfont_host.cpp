@@ -88,7 +88,18 @@ static void test_sf2_loading_and_cache_streaming() {
 }
 
 static void test_missing_or_corrupt_file_handling() {
+    // Voices left over from the previous test are still ringing out (their low-pass filter
+    // keeps oscillating for a moment after their sample data disappears). Release them and
+    // let them finish, otherwise this test would measure that tail instead of the "no file" case.
+    SoundFontSynth_Init();
     SF2Cache_CloseFile();
+    {
+        std::vector<int16_t> flush(480 * 2, 0);
+        for (int i = 0; i < 20; ++i) {
+            SoundFontSynth_FillStereoBuffer(flush.data(), 480);
+        }
+    }
+
     bool loaded = SF2Cache_OpenFile("non_existent_file.sf2");
     CHECK(loaded == false);
     CHECK(SF2Cache_IsFileOpen() == false);
@@ -160,9 +171,11 @@ static void test_sf2_cache_reader_protection() {
         std::this_thread::yield();
     }
 
-    // Process background requests and force continuous eviction while audio thread is actively reading
-    for (uint32_t pass = 0; pass < 200; ++pass) {
-        for (uint32_t b = 32; b < 64; ++b) {
+    // Process background requests and force continuous eviction while audio thread is actively reading.
+    // The blocks requested here lie outside the blocks cached above, whatever SF2_CACHE_BLOCKS is.
+    const uint32_t passes = 6400U / SF2_CACHE_BLOCKS;
+    for (uint32_t pass = 0; pass < passes; ++pass) {
+        for (uint32_t b = SF2_CACHE_BLOCKS; b < 2U * SF2_CACHE_BLOCKS; ++b) {
             SF2Cache_RequestBlock(b);
             SF2Cache_ProcessRequests();
         }
@@ -334,6 +347,159 @@ static void test_sf2_cache_load_error_handling() {
     }
 }
 
+
+// --- Regression tests for "no sound / noise" in the SoundFont engine ----------------------
+
+// Longest run of consecutive all-zero stereo frames between the first non-zero frame (the
+// envelope starts at zero, so the onset is skipped) and to_frame of an interleaved buffer.
+static uint32_t longest_zero_run_after_onset(const std::vector<int16_t> &buf, size_t to_frame) {
+    size_t i = 0;
+    while (i < to_frame && buf[2 * i] == 0 && buf[2 * i + 1] == 0) ++i;
+    uint32_t longest = 0, cur = 0;
+    for (; i < to_frame; ++i) {
+        if (buf[2 * i] == 0 && buf[2 * i + 1] == 0) {
+            if (++cur > longest) longest = cur;
+        } else {
+            cur = 0;
+        }
+    }
+    return longest;
+}
+
+// The first blocks of a note are loaded by NoteOn itself, before the voice starts: the very
+// first rendered block must already contain the attack and must not hit the cache-miss path.
+static void test_noteon_preloads_attack() {
+    if (!SoundFontSynth_InitSF2()) return;
+    SoundFontSynth_Init();
+    SF2Cache_ResetStats();
+
+    SoundFontSynth_NoteOn(60, 100);
+
+    SF2CacheStats st;
+    SF2Cache_GetStats(&st);
+    CHECK(st.blocks_loaded >= 2);   // C4 is played by two regions (L/R); each preloads its first blocks
+
+    std::vector<int16_t> buf(256 * 2, 0);
+    SoundFontSynth_FillStereoBuffer(buf.data(), 256);   // note: no SoundFontSynth_Process() yet
+    CHECK(get_buffer_peak(buf.data(), 256) > 0);
+
+    SF2Cache_GetStats(&st);
+    CHECK(st.miss_samples == 0);
+
+    SoundFontSynth_NoteOff(60);
+    SoundFontSynth_FillStereoBuffer(buf.data(), 256);
+}
+
+// The audio callback renders in fixed 10 ms blocks while the main loop services the cache only
+// now and then (on Windows sleep_for(1ms) really sleeps ~15.6 ms, i.e. 2 calls per 3 audio
+// blocks here). The sound must neither disappear nor be torn by holes of silence.
+static void run_streaming_scenario(int note, int velocity, int main_loop_calls_per_3_blocks) {
+    if (!SoundFontSynth_InitSF2()) return;
+    SoundFontSynth_Init();
+    SF2Cache_ResetStats();
+
+    const uint32_t frames = 480;        // 10 ms at 48 kHz
+    const int blocks = 80;              // 0.8 s
+    const int note_off_block = 60;
+    std::vector<int16_t> out((size_t)frames * 2 * blocks, 0);
+
+    SoundFontSynth_NoteOn((uint8_t)note, (uint8_t)velocity);
+    for (int b = 0; b < blocks; ++b) {
+        if (b == note_off_block) SoundFontSynth_NoteOff((uint8_t)note);
+        SoundFontSynth_FillStereoBuffer(&out[(size_t)b * frames * 2], frames);
+        if ((b % 3) < main_loop_calls_per_3_blocks) {
+            SoundFontSynth_Process();
+        }
+    }
+
+    // Sound is present at the very beginning and still present near the end of the held note.
+    CHECK(get_buffer_peak(&out[0], frames) > 0);
+    CHECK(get_buffer_peak(&out[(size_t)(note_off_block - 5) * frames * 2], frames) > 200);
+
+    // No holes of silence while the note sounds (the amplitude is far above 1 LSB there).
+    CHECK(longest_zero_run_after_onset(out, (size_t)note_off_block * frames) < 8);
+
+    SF2CacheStats st;
+    SF2Cache_GetStats(&st);
+    CHECK(st.miss_samples == 0);
+    CHECK(st.load_errors == 0);
+
+    SoundFontSynth_NoteOff((uint8_t)note);
+}
+
+static void test_streaming_survives_slow_main_loop() {
+    run_streaming_scenario(60, 46, 3);   // main loop faster than the audio period
+    run_streaming_scenario(60, 46, 2);   // ~15.6 ms main loop (Windows default timer)
+    run_streaming_scenario(84, 100, 2);  // high note: samples are consumed faster
+    run_streaming_scenario(36, 110, 1);  // ~30 ms main loop
+}
+
+// MIDI events must reach TinySoundFont only from the audio context (through the FIFO).
+// Hammer the engine from the "main" thread while another thread renders; this is meaningful
+// under ThreadSanitizer and must at least never crash or produce out-of-range garbage.
+static void test_events_while_rendering() {
+    if (!SoundFontSynth_InitSF2()) return;
+    SoundFontSynth_Init();
+
+    std::atomic<bool> stop{false};
+    std::thread audio([&]() {
+        std::vector<int16_t> buf(240 * 2);
+        while (!stop.load(std::memory_order_acquire)) {
+            SoundFontSynth_FillStereoBuffer(buf.data(), 240);
+        }
+    });
+
+    for (int i = 0; i < 3000; ++i) {
+        uint8_t n = (uint8_t)(36 + (i * 7) % 60);
+        SoundFontSynth_NoteOn(n, (uint8_t)(20 + (i * 13) % 100));
+        if (i % 3 == 0) SoundFontSynth_ControlChange(64, (uint8_t)((i / 3) % 2 ? 127 : 0));
+        SoundFontSynth_Process();
+        if (i % 2 == 0) SoundFontSynth_NoteOff(n);
+        if (i % 50 == 0) std::this_thread::yield();
+    }
+    stop.store(true, std::memory_order_release);
+    audio.join();
+
+    // Everything still works afterwards.
+    SoundFontSynth_Init();
+    SoundFontSynth_NoteOn(60, 100);
+    std::vector<int16_t> buf(256 * 2, 0);
+    SoundFontSynth_FillStereoBuffer(buf.data(), 256);
+    CHECK(get_buffer_peak(buf.data(), 256) > 0);
+}
+
+// SF2Cache_ProcessRequests() must read ahead of the block the audio thread is playing.
+static void test_cache_reads_ahead() {
+    if (!SoundFontSynth_InitSF2()) return;
+    SF2Cache_Reset();
+    SF2Cache_ResetStats();
+
+    TestTSFLayout fake_tsf_layout;
+    std::memset(&fake_tsf_layout, 0, sizeof(fake_tsf_layout));
+    fake_tsf_layout.smpl_sample_count = 0x0FFFFFFFu;   // only used for the range check in GetSample
+    tsf *fake_tsf = reinterpret_cast<tsf *>(&fake_tsf_layout);
+
+    const uint32_t n = SF2_BLOCK_SAMPLES;
+    const uint32_t b = 200;
+    CHECK(SF2Cache_PreloadBlock(b) == true);
+
+    // The audio thread plays inside block b ...
+    (void)SF2Cache_GetSample(fake_tsf, b * n + 10, nullptr);
+
+    // ... and one main-loop pass later the following blocks are resident.
+    SF2Cache_ProcessRequests();
+    SF2CacheStats st;
+    SF2Cache_GetStats(&st);
+    CHECK(st.blocks_loaded == 1 + SF2_READAHEAD_BLOCKS);
+
+    SF2Cache_ResetStats();
+    for (uint32_t k = 1; k <= SF2_READAHEAD_BLOCKS; ++k) {
+        (void)SF2Cache_GetSample(fake_tsf, (b + k) * n + 5, nullptr);
+    }
+    SF2Cache_GetStats(&st);
+    CHECK(st.miss_samples == 0);
+}
+
 int main() {
     test_engine_registration_and_pc();
     test_sf2_loading_and_cache_streaming();
@@ -342,6 +508,11 @@ int main() {
     test_sf2_cache_reader_protection();
 
     test_sf2_cache_load_error_handling();
+
+    test_noteon_preloads_attack();
+    test_streaming_survives_slow_main_loop();
+    test_events_while_rendering();
+    test_cache_reads_ahead();
 
     if (g_failures != 0) {
         std::cerr << "test_soundfont_host: " << g_failures << " check(s) failed" << std::endl;

@@ -48,7 +48,10 @@ target_include_directories(test_soundfont_host PRIVATE
 )
 target_link_libraries(test_soundfont_host PRIVATE purrmidi_synth_soundfont purrmidi_core)
 target_compile_features(test_soundfont_host PRIVATE cxx_std_17)
-add_test(NAME test_soundfont_host COMMAND test_soundfont_host)
+# Работает из корня репозитория: хост-вариант SF2Cache ищет tests/SNDFNT.SF2 относительно
+# рабочего каталога. Иначе тест молча пропускает все проверки с реальным SoundFont.
+add_test(NAME test_soundfont_host COMMAND test_soundfont_host
+         WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/..")
 
 add_executable(test_queue_dispatch
     test_queue_dispatch.cpp

@@ -8,10 +8,7 @@
 #include <cstdio>
 #include <cstring>
 
-#if defined(PURRMIDI_HOST_BUILD) || defined(WIN32) || defined(__unix__) || defined(__APPLE__)
-#define SF2_HOST_MODE 1
-#else
-#define SF2_HOST_MODE 0
+#if !SF2_HOST_MODE
 #include "ff.h"
 #include "sd_storage.h"
 #endif
@@ -22,7 +19,8 @@ struct CacheBlock {
     std::atomic<uint32_t> block_index{0xFFFFFFFFU};
     std::atomic<uint32_t> state{SF2_BLOCK_EMPTY};
     std::atomic<uint32_t> active_readers{0};
-    uint32_t last_used_tick{0};
+    std::atomic<uint32_t> touched{0};   /* set by audio thread on every hit; consumed by read-ahead */
+    std::atomic<uint32_t> last_used_tick{0};   /* written by audio, read by main (LRU) */
     int16_t samples[SF2_BLOCK_SAMPLES];
 };
 
@@ -39,6 +37,17 @@ ReqQueue   g_req_queue;
 std::atomic<uint32_t> g_lru_clock{0};
 uint32_t g_smpl_file_offset = 0;
 uint32_t g_smpl_total_samples = 0;
+
+std::atomic<uint32_t> g_stat_miss_samples{0};
+std::atomic<uint32_t> g_stat_blocks_loaded{0};
+std::atomic<uint32_t> g_stat_load_errors{0};
+
+enum class LoadResult {
+    Skipped,   /* already resident, or beyond the end of the sample data: nothing was read */
+    Loaded,    /* block read from file and published                                      */
+    Failed,    /* file read failed or was short: nothing published                         */
+    NoSlot     /* every candidate slot is in use by an audio reader                        */
+};
 
 #if SF2_HOST_MODE
 FILE *g_host_file = nullptr;
@@ -155,7 +164,8 @@ void SF2Cache_Reset(void)
         g_cache[i].state.store(SF2_BLOCK_EMPTY, std::memory_order_relaxed);
         g_cache[i].block_index.store(0xFFFFFFFFU, std::memory_order_relaxed);
         g_cache[i].active_readers.store(0, std::memory_order_relaxed);
-        g_cache[i].last_used_tick = 0;
+        g_cache[i].touched.store(0, std::memory_order_relaxed);
+        g_cache[i].last_used_tick.store(0, std::memory_order_relaxed);
         std::memset(g_cache[i].samples, 0, sizeof(g_cache[i].samples));
     }
     g_req_queue.head.store(0, std::memory_order_relaxed);
@@ -175,7 +185,10 @@ static bool try_read_slot(uint32_t slot, uint32_t block_idx, uint32_t sample_off
     if (g_cache[slot].state.load(std::memory_order_seq_cst) == SF2_BLOCK_READY &&
         g_cache[slot].block_index.load(std::memory_order_seq_cst) == block_idx) {
         *out_sample = g_cache[slot].samples[sample_offset];
-        g_cache[slot].last_used_tick = tick;
+        g_cache[slot].last_used_tick.store(tick, std::memory_order_relaxed);
+        if (g_cache[slot].touched.load(std::memory_order_relaxed) == 0) {
+            g_cache[slot].touched.store(1, std::memory_order_relaxed);   /* triggers read-ahead */
+        }
         g_cache[slot].active_readers.fetch_sub(1, std::memory_order_seq_cst);
         return true;
     }
@@ -213,6 +226,7 @@ void SF2Cache_InitStream(struct tsf_stream *stream)
 void SF2Cache_RequestBlock(uint32_t block_index)
 {
     if (block_index == 0xFFFFFFFFU) return;
+    if ((uint64_t)block_index * SF2_BLOCK_SAMPLES >= g_smpl_total_samples) return;   /* past the end */
 
     /* Check if already in cache */
     for (uint32_t i = 0; i < SF2_CACHE_BLOCKS; ++i) {
@@ -240,24 +254,29 @@ void SF2Cache_RequestBlock(uint32_t block_index)
     g_req_queue.head.store(head + 1, std::memory_order_release);
 }
 
-void SF2Cache_ProcessRequests(void)
+/* Returns the slot holding block_idx in READY state, or -1. */
+static int find_ready_slot(uint32_t block_idx)
 {
-    if (!SF2Cache_IsFileOpen()) return;
-
-    uint32_t tail = g_req_queue.tail.load(std::memory_order_relaxed);
-    uint32_t head = g_req_queue.head.load(std::memory_order_acquire);
-
-    if (tail == head) return; /* empty queue */
-
-    uint32_t block_idx = g_req_queue.items[tail % REQ_QUEUE_SIZE];
-    g_req_queue.tail.store(tail + 1, std::memory_order_release);
-
-    /* Double check if already loaded */
     for (uint32_t i = 0; i < SF2_CACHE_BLOCKS; ++i) {
         if (g_cache[i].state.load(std::memory_order_seq_cst) == SF2_BLOCK_READY &&
             g_cache[i].block_index.load(std::memory_order_seq_cst) == block_idx) {
-            return;
+            return (int)i;
         }
+    }
+    return -1;
+}
+
+/*
+ * Main context only. Makes sure block_idx is resident: picks an EMPTY or least recently used
+ * slot that has no audio readers and reads the block from the file into it.
+ */
+static LoadResult load_block(uint32_t block_idx)
+{
+    if ((uint64_t)block_idx * SF2_BLOCK_SAMPLES >= g_smpl_total_samples) {
+        return LoadResult::Skipped;
+    }
+    if (find_ready_slot(block_idx) >= 0) {
+        return LoadResult::Skipped;
     }
 
     /* Find eviction slot (EMPTY or LRU READY) free of active readers */
@@ -283,8 +302,9 @@ void SF2Cache_ProcessRequests(void)
             for (uint32_t i = 0; i < SF2_CACHE_BLOCKS; ++i) {
                 if (!slot_tested[i] &&
                     g_cache[i].state.load(std::memory_order_seq_cst) == SF2_BLOCK_READY) {
-                    if (g_cache[i].last_used_tick < oldest_tick) {
-                        oldest_tick = g_cache[i].last_used_tick;
+                    uint32_t tick_i = g_cache[i].last_used_tick.load(std::memory_order_relaxed);
+                    if (tick_i < oldest_tick) {
+                        oldest_tick = tick_i;
                         candidate = (int)i;
                     }
                 }
@@ -303,9 +323,7 @@ void SF2Cache_ProcessRequests(void)
     }
 
     if (target_slot < 0) {
-        /* All candidate slots are busy with active readers. Re-queue block request and retry later. */
-        SF2Cache_RequestBlock(block_idx);
-        return;
+        return LoadResult::NoSlot;
     }
 
     uint32_t slot = (uint32_t)target_slot;
@@ -313,12 +331,11 @@ void SF2Cache_ProcessRequests(void)
     /* Transition target slot to LOADING and invalidate block_index atomically with release barrier */
     g_cache[slot].block_index.store(0xFFFFFFFFU, std::memory_order_release);
     g_cache[slot].state.store(SF2_BLOCK_LOADING, std::memory_order_release);
+    g_cache[slot].touched.store(0, std::memory_order_relaxed);
 
     /* Read PCM block from file */
     uint32_t file_offset = g_smpl_file_offset + block_idx * (SF2_BLOCK_SAMPLES * 2U);
-    uint32_t samples_left = (block_idx * SF2_BLOCK_SAMPLES < g_smpl_total_samples)
-                            ? (g_smpl_total_samples - block_idx * SF2_BLOCK_SAMPLES)
-                            : 0U;
+    uint32_t samples_left = g_smpl_total_samples - block_idx * SF2_BLOCK_SAMPLES;   /* > 0, checked above */
     uint32_t samples_to_read = (samples_left > SF2_BLOCK_SAMPLES) ? SF2_BLOCK_SAMPLES : samples_left;
     uint32_t bytes_to_read = samples_to_read * 2U;
 
@@ -326,43 +343,113 @@ void SF2Cache_ProcessRequests(void)
 
     bool read_success = false;
 
-    if (bytes_to_read > 0) {
 #if SF2_HOST_MODE
-        if (g_host_file) {
-            std::clearerr(g_host_file);
-            if (std::fseek(g_host_file, (long)file_offset, SEEK_SET) == 0) {
-                size_t bytes_read = std::fread(g_cache[slot].samples, 1, bytes_to_read, g_host_file);
-                if (bytes_read == (size_t)bytes_to_read && std::ferror(g_host_file) == 0) {
+    if (g_host_file) {
+        std::clearerr(g_host_file);
+        if (std::fseek(g_host_file, (long)file_offset, SEEK_SET) == 0) {
+            size_t bytes_read = std::fread(g_cache[slot].samples, 1, bytes_to_read, g_host_file);
+            if (bytes_read == (size_t)bytes_to_read && std::ferror(g_host_file) == 0) {
+                read_success = true;
+            }
+        }
+    }
+#else
+    if (g_fatfs_open) {
+        UINT br = 0;
+        if (f_lseek(&g_fatfs_file, (FSIZE_t)file_offset) == FR_OK) {
+            if (f_read(&g_fatfs_file, g_cache[slot].samples, (UINT)bytes_to_read, &br) == FR_OK) {
+                if ((uint32_t)br == bytes_to_read) {
                     read_success = true;
                 }
             }
         }
-#else
-        if (g_fatfs_open) {
-            UINT br = 0;
-            if (f_lseek(&g_fatfs_file, (FSIZE_t)file_offset) == FR_OK) {
-                if (f_read(&g_fatfs_file, g_cache[slot].samples, (UINT)bytes_to_read, &br) == FR_OK) {
-                    if ((uint32_t)br == bytes_to_read) {
-                        read_success = true;
-                    }
-                }
-            }
-        }
-#endif
     }
+#endif
 
     if (read_success) {
         g_cache[slot].block_index.store(block_idx, std::memory_order_release);
-        g_cache[slot].last_used_tick = g_lru_clock.load(std::memory_order_relaxed);
+        g_cache[slot].last_used_tick.store(g_lru_clock.load(std::memory_order_relaxed), std::memory_order_relaxed);
         g_cache[slot].state.store(SF2_BLOCK_READY, std::memory_order_release);
-    } else {
-        g_cache[slot].block_index.store(0xFFFFFFFFU, std::memory_order_release);
-        g_cache[slot].state.store(SF2_BLOCK_EMPTY, std::memory_order_release);
-        if (bytes_to_read > 0) {
-            SF2Cache_RequestBlock(block_idx);
-        }
-        return;
+        g_stat_blocks_loaded.fetch_add(1, std::memory_order_relaxed);
+        return LoadResult::Loaded;
     }
+
+    g_cache[slot].block_index.store(0xFFFFFFFFU, std::memory_order_release);
+    g_cache[slot].state.store(SF2_BLOCK_EMPTY, std::memory_order_release);
+    g_stat_load_errors.fetch_add(1, std::memory_order_relaxed);
+    return LoadResult::Failed;
+}
+
+void SF2Cache_ProcessRequests(void)
+{
+    if (!SF2Cache_IsFileOpen()) return;
+
+    uint32_t budget = SF2_MAX_BLOCKS_PER_PROCESS;
+
+    /*
+     * 1. Blocks the audio thread already missed (urgent: it is playing silence right now).
+     *    Only requests queued before this call are serviced; a block that fails to load is
+     *    re-queued behind that snapshot and retried by the NEXT call, so a persistent read
+     *    error can never keep this function spinning.
+     */
+    uint32_t tail = g_req_queue.tail.load(std::memory_order_relaxed);
+    const uint32_t head = g_req_queue.head.load(std::memory_order_acquire);
+
+    while (tail != head && budget > 0) {
+        uint32_t block_idx = g_req_queue.items[tail % REQ_QUEUE_SIZE];
+        ++tail;
+        g_req_queue.tail.store(tail, std::memory_order_release);
+
+        switch (load_block(block_idx)) {
+            case LoadResult::Loaded:
+                --budget;
+                break;
+            case LoadResult::Failed:
+                --budget;
+                SF2Cache_RequestBlock(block_idx);   /* retry on the next call */
+                break;
+            case LoadResult::NoSlot:
+                SF2Cache_RequestBlock(block_idx);   /* all candidates busy, retry later */
+                break;
+            case LoadResult::Skipped:
+                break;
+        }
+    }
+
+    /*
+     * 2. Read-ahead. Every block the audio thread read since the last scan is flagged
+     *    "touched"; make sure the next SF2_READAHEAD_BLOCKS blocks are resident before the
+     *    voice gets there, so block boundaries never turn into holes of silence.
+     */
+    for (uint32_t i = 0; i < SF2_CACHE_BLOCKS && budget > 0; ++i) {
+        CacheBlock &cb = g_cache[i];
+        if (cb.touched.load(std::memory_order_relaxed) == 0) continue;
+        if (cb.state.load(std::memory_order_seq_cst) != SF2_BLOCK_READY) continue;
+
+        uint32_t base = cb.block_index.load(std::memory_order_seq_cst);
+        if (base == 0xFFFFFFFFU) continue;
+
+        cb.touched.store(0, std::memory_order_relaxed);
+
+        for (uint32_t k = 1; k <= SF2_READAHEAD_BLOCKS; ++k) {
+            if (budget == 0) {
+                cb.touched.store(1, std::memory_order_relaxed);   /* finish on the next call */
+                break;
+            }
+            LoadResult r = load_block(base + k);
+            if (r == LoadResult::Loaded || r == LoadResult::Failed) {
+                --budget;
+            }
+        }
+    }
+}
+
+bool SF2Cache_PreloadBlock(uint32_t block_index)
+{
+    if (!SF2Cache_IsFileOpen()) return false;
+
+    LoadResult r = load_block(block_index);
+    return (r == LoadResult::Loaded) || (r == LoadResult::Skipped && find_ready_slot(block_index) >= 0);
 }
 
 short SF2Cache_GetSample(tsf *f, uint32_t sample_index, int *last_slot_hint)
@@ -396,6 +483,7 @@ short SF2Cache_GetSample(tsf *f, uint32_t sample_index, int *last_slot_hint)
     }
 
     /* Cache miss: request current block and next block */
+    g_stat_miss_samples.fetch_add(1, std::memory_order_relaxed);
     SF2Cache_RequestBlock(block_idx);
     SF2Cache_RequestBlock(block_idx + 1);
 
@@ -411,6 +499,21 @@ void SF2Cache_SetSmplFileOffset(uint32_t file_offset, uint32_t total_samples)
 {
     g_smpl_file_offset = file_offset;
     g_smpl_total_samples = total_samples;
+}
+
+void SF2Cache_GetStats(SF2CacheStats *out)
+{
+    if (!out) return;
+    out->miss_samples  = g_stat_miss_samples.load(std::memory_order_relaxed);
+    out->blocks_loaded = g_stat_blocks_loaded.load(std::memory_order_relaxed);
+    out->load_errors   = g_stat_load_errors.load(std::memory_order_relaxed);
+}
+
+void SF2Cache_ResetStats(void)
+{
+    g_stat_miss_samples.store(0, std::memory_order_relaxed);
+    g_stat_blocks_loaded.store(0, std::memory_order_relaxed);
+    g_stat_load_errors.store(0, std::memory_order_relaxed);
 }
 
 short tsf_get_sample_pcm16(tsf *f, unsigned int pos, int *last_slot_hint)

@@ -10,6 +10,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <mmsystem.h>   // timeBeginPeriod / timeEndPeriod (winmm is linked in CMakeLists.txt)
 #endif
 
 #include "midi_input.h"
@@ -31,6 +32,14 @@ static std::atomic<bool> g_running{true};
 static std::mutex g_console_mutex;
 
 #ifdef _WIN32
+// By default the Windows system timer ticks every ~15.6 ms, so std::this_thread::sleep_for(1ms)
+// in the main loop really sleeps ~15.6 ms. The SoundFont engine streams its samples from the main
+// loop, so ask for a 1 ms timer for the lifetime of the process.
+struct TimerResolutionGuard {
+    TimerResolutionGuard()  { timeBeginPeriod(1); }
+    ~TimerResolutionGuard() { timeEndPeriod(1); }
+};
+
 static BOOL WINAPI ConsoleHandler(DWORD signal) {
     if (signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT || signal == CTRL_CLOSE_EVENT) {
         g_running.store(false);
@@ -167,6 +176,7 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
+    TimerResolutionGuard timer_resolution_guard;
 #else
     std::signal(SIGINT, SignalHandler);
     std::signal(SIGTERM, SignalHandler);
@@ -281,7 +291,8 @@ int main(int argc, char* argv[]) {
             std::cerr << "Failed to start audio output." << std::endl;
             return 1;
         }
-        std::cout << "Synth engine: " << SynthEngine_GetName() << " (Program Change: 0=epiano, 1=pluck, 2=sine)\n";
+        std::cout << "Synth engine: " << SynthEngine_GetName()
+                  << " (Program Change: 0=epiano, 1=pluck, 2=sine, 3=organ, 4=soundfont, 127=next engine)\n";
         std::cout << "Synth player running. Press ENTER or Ctrl+C to stop...\n";
     } else {
         std::cout << "MIDI Monitor running. Press ENTER or Ctrl+C to stop...\n";
@@ -291,6 +302,10 @@ int main(int argc, char* argv[]) {
         std::cin.get();
         g_running.store(false);
     });
+
+    SF2CacheStats last_sf2_stats{};
+    SF2Cache_ResetStats();
+    auto last_sf2_report = std::chrono::steady_clock::now();
 
     while (g_running.load()) {
         MIDI_Event_t event;
@@ -323,6 +338,28 @@ int main(int argc, char* argv[]) {
         // main thread, never from the real-time audio callback.
         if (config.mode == AppConfig::Mode::Play) {
             SoundFontSynth_Process();
+
+            // --verbose: tell when the SoundFont sample cache could not keep up (the audio
+            // thread then plays silence instead of the missing samples = clicks / dropouts).
+            if (config.verbose) {
+                auto now = std::chrono::steady_clock::now();
+                if (now - last_sf2_report >= std::chrono::milliseconds(250)) {
+                    last_sf2_report = now;
+                    SF2CacheStats st;
+                    SF2Cache_GetStats(&st);
+                    if (st.miss_samples != last_sf2_stats.miss_samples ||
+                        st.load_errors != last_sf2_stats.load_errors) {
+                        std::lock_guard<std::mutex> lock(g_console_mutex);
+                        std::cout << "[SF2] cache underrun: +"
+                                  << (st.miss_samples - last_sf2_stats.miss_samples)
+                                  << " silent sample reads, +"
+                                  << (st.load_errors - last_sf2_stats.load_errors)
+                                  << " read errors (totals: " << st.miss_samples << " / "
+                                  << st.load_errors << ")\n";
+                    }
+                    last_sf2_stats = st;
+                }
+            }
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -342,6 +379,14 @@ int main(int argc, char* argv[]) {
     }
 
     midi_in.ClosePort();
+
+    if (config.mode == AppConfig::Mode::Play && config.verbose) {
+        SF2CacheStats st;
+        SF2Cache_GetStats(&st);
+        std::cout << "[SF2] cache summary: blocks loaded=" << st.blocks_loaded
+                  << ", silent sample reads=" << st.miss_samples
+                  << ", read errors=" << st.load_errors << "\n";
+    }
 
     uint32_t overruns = MIDI_Queue_GetOverrunCount();
     std::cout << "MIDI Queue overrun count: " << overruns << "\n";

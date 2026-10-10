@@ -116,6 +116,10 @@ extern "C" {
 #endif
 unsigned int tsf_get_smpl_file_offset(const struct tsf* f);
 unsigned int tsf_get_smpl_sample_count(const struct tsf* f);
+/* Reports the first sample each voice of tsf_channel_note_on(channel, key, vel) will read.
+   Read-only (does not start voices). Returns the number of matching regions; at most max_out
+   start positions are written to out_starts. Used to pre-load sample data before the voice starts. */
+int tsf_channel_get_note_start_samples(const struct tsf* f, int channel, int key, float vel, unsigned int* out_starts, int max_out);
 #ifdef __cplusplus
 }
 #endif
@@ -1990,6 +1994,24 @@ TSFDEF int tsf_channel_note_on(tsf* f, int channel, int key, float vel)
 		return 1;
 	}
 	return tsf_note_on(f, f->channels->channels[channel].presetIndex, key, vel);
+}
+
+/* PurrMidi modification: region lookup identical to tsf_note_on(), without side effects */
+int tsf_channel_get_note_start_samples(const struct tsf* f, int channel, int key, float vel, unsigned int* out_starts, int max_out)
+{
+	int count = 0, preset_index;
+	short midiVelocity = (short)(vel * 127);
+	const struct tsf_region *region, *regionEnd;
+	if (!f || !out_starts || !f->channels || channel < 0 || channel >= f->channels->channelNum) return 0;
+	preset_index = f->channels->channels[channel].presetIndex;
+	if (preset_index < 0 || preset_index >= f->presetNum || vel <= 0.0f) return 0;
+	for (region = f->presets[preset_index].regions, regionEnd = region + f->presets[preset_index].regionNum; region != regionEnd; region++)
+	{
+		if (key < region->lokey || key > region->hikey || midiVelocity < region->lovel || midiVelocity > region->hivel) continue;
+		if (count < max_out) out_starts[count] = region->offset;
+		count++;
+	}
+	return count;
 }
 
 TSFDEF void tsf_channel_note_off(tsf* f, int channel, int key)
