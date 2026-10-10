@@ -35,39 +35,33 @@ static uint8_t *__sbrk_heap_end = NULL;
  *        and others from the C library
  *
  * @verbatim
- * ############################################################################
- * #  .data  #  .bss  #       newlib heap       #          MSP stack          #
- * #         #        #                         # Reserved by _Min_Stack_Size #
- * ############################################################################
- * ^-- RAM start      ^-- _end                             _estack, RAM end --^
+ * DTCM:     #  .data  #  .bss  #  (small spare)  #  MSP stack  #
+ * AXI SRAM: #  .dma_buffer  #  .axi_heap  <- newlib heap grows here  #
  * @endverbatim
  *
- * This implementation starts allocating at the '_end' linker symbol
- * The '_Min_Stack_Size' linker symbol reserves a memory for the MSP stack
- * The implementation considers '_estack' linker symbol to be RAM end
- * NOTE: If the MSP stack, at any point during execution, grows larger than the
- * reserved size, please increase the '_Min_Stack_Size'.
+ * The heap starts at '_axi_heap_start' and ends at '_axi_heap_end' (the size is set by
+ * '_Axi_Heap_Size' in the linker script).
  *
  * @param incr Memory size
  * @return Pointer to allocated memory
  */
 void *_sbrk(ptrdiff_t incr)
 {
-  extern uint8_t _end; /* Symbol defined in the linker script */
-  extern uint8_t _estack; /* Symbol defined in the linker script */
-  extern uint32_t _Min_Stack_Size; /* Symbol defined in the linker script */
-  const uint32_t stack_limit = (uint32_t)&_estack - (uint32_t)&_Min_Stack_Size;
-  const uint8_t *max_heap = (uint8_t *)stack_limit;
+  /* PurrMidi: the newlib heap lives in its own .axi_heap section (AXI SRAM, see the linker
+   * script) instead of the DTCM space left after .bss. DTCM had only ~20 KB free, while
+   * TinySoundFont needs ~170 KB for the SoundFont preset tables. */
+  extern uint8_t _axi_heap_start; /* Symbols defined in the linker script */
+  extern uint8_t _axi_heap_end;
   uint8_t *prev_heap_end;
 
   /* Initialize heap end at first call */
   if (NULL == __sbrk_heap_end)
   {
-    __sbrk_heap_end = &_end;
+    __sbrk_heap_end = &_axi_heap_start;
   }
 
-  /* Protect heap from growing into the reserved MSP stack */
-  if (__sbrk_heap_end + incr > max_heap)
+  /* Never grow past the end of the heap section */
+  if (incr > (ptrdiff_t)(&_axi_heap_end - __sbrk_heap_end))
   {
     errno = ENOMEM;
     return (void *)-1;

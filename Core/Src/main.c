@@ -72,6 +72,16 @@ static uint16_t active_note_count = 0;
 /* 1 = print [STATS] and [USBDIAG1..3] to UART (debug only), 0 = silent */
 #define USB_DIAG_UART 0
 
+/* 1 = try to load 0:/SNDFNT.SF2 from the SD card once at power-up (progress goes to UART).
+ * The SD init / file parsing blocks for a while, so it is done here, not while playing.
+ * If it fails, the SoundFont engine is skipped by the Program Change 127 cycle.
+ * 0 = never touch the SD card at start-up (the SoundFont engine is then loaded lazily on the
+ * first explicit selection with Program Change 4 and may block the main loop for a while). */
+#define SF2_LOAD_AT_BOOT 1
+
+/* Some keyboards send the "next instrument" Program Change 127 twice per button press
+ * (e.g. on press and on release). Repeats closer than this are ignored. */
+#define PC_NEXT_REPEAT_GUARD_MS 300U
 /* Audio: 48 kHz, stereo, 16 bit. Circular DMA ring split into two halves.
  * It must NOT be placed in DTCM (DMA2 cannot reach it): own section in AXI SRAM,
  * see .dma_buffer in the linker script. D-Cache is off, so no cache maintenance needed. */
@@ -190,6 +200,17 @@ int main(void)
   // SDStorage_Mount()
   SynthEngine_Init(); // Включает синтезатор по умолчанию (E-Piano); дальше выбор — по Program Change
   printf("Synth engine: %s\r\n", SynthEngine_GetName());
+#if SF2_LOAD_AT_BOOT
+  printf("[SF2] Loading SoundFont from SD...\r\n");
+  if (SoundFontSynth_InitSF2())
+  {
+    printf("[SF2] SoundFont ready\r\n");
+  }
+  else
+  {
+    printf("[SF2] SoundFont NOT available - the soundfont engine will be skipped\r\n");
+  }
+#endif
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
   memset(audio_buffer, 0, sizeof(audio_buffer));  /* .dma_buffer is not zeroed by startup */
   if (HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer, AUDIO_BUFFER_SIZE) != HAL_OK)
@@ -240,6 +261,23 @@ int main(void)
     while (MIDI_Queue_Pop(&event))
     {
         // printf("[MIDI] %02X %02X %02X\r\n", event.status, event.data1, event.data2);
+
+        if ((event.status & MIDI_STATUS_MASK) == MIDI_STATUS_PROGRAM_CHANGE && event.data1 == 127)
+        {
+            static bool pc_next_seen = false;
+            static uint32_t pc_next_tick = 0;
+            uint32_t pc_now = HAL_GetTick();
+
+            if (pc_next_seen && (pc_now - pc_next_tick) < PC_NEXT_REPEAT_GUARD_MS)
+            {
+                printf("[PC] ch=%u program 127 repeat ignored (+%lu ms)\r\n",
+                       event.status & 0x0FU, (unsigned long)(pc_now - pc_next_tick));
+                continue;
+            }
+            pc_next_seen = true;
+            pc_next_tick = pc_now;
+        }
+
         MIDI_Dispatch(&event);   /* Note On/Off, CC -> активный синтезатор (lock-free FIFO в аудио-ISR); Program Change -> смена синтезатора */
 
         uint8_t command = event.status & MIDI_STATUS_MASK;
@@ -247,7 +285,7 @@ int main(void)
 
         if (command == MIDI_STATUS_PROGRAM_CHANGE)
         {
-            printf("[PC] program %u -> %s\r\n", event.data1, SynthEngine_GetName());
+            printf("[PC] ch=%u program %u -> %s\r\n", event.status & 0x0FU, event.data1, SynthEngine_GetName());
         }
 
         if (command == MIDI_STATUS_NOTE_ON && event.data2 != 0)

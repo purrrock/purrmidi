@@ -32,6 +32,14 @@ void SoundFontSynth_Process(void);
 /** Returns true if SoundFont file was successfully loaded. */
 bool SoundFontSynth_IsLoaded(void);
 
+/**
+ * Returns false only if loading the SoundFont was already attempted and failed
+ * (no SD card / no file / out of memory). Before the first attempt it returns true,
+ * because the file is loaded lazily on the first engine selection.
+ * Used by the Program Change 127 "next instrument" cycle to skip a dead engine.
+ */
+bool SoundFontSynth_IsAvailable(void);
+
 #ifdef __cplusplus
 }
 #endif

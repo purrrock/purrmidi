@@ -72,6 +72,12 @@ void SynthEngine_ProgramChange(uint8_t program);
  */
 int SynthEngine_Select(SynthEngineId id);
 
+/**
+ * Можно ли сейчас выбрать синтезатор. Всегда 1, кроме SoundFont после неудачной загрузки
+ * (нет SD-карты / файла SNDFNT.SF2 / не хватило памяти). Используется циклом Program Change 127.
+ */
+int SynthEngine_IsAvailable(SynthEngineId id);
+
 /** Текущий активный синтезатор. */
 SynthEngineId SynthEngine_GetCurrent(void);
 

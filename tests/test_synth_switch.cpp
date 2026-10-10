@@ -107,12 +107,31 @@ static void test_program_wraps_modulo() {
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
 }
 
+// Следующий по циклу инструмент, который можно выбрать (SoundFont без SF2 пропускается).
+static SynthEngineId expected_next(SynthEngineId cur) {
+    SynthEngineId next = cur;
+    for (int i = 0; i < SYNTH_ENGINE_COUNT; ++i) {
+        next = static_cast<SynthEngineId>((static_cast<int>(next) + 1) % SYNTH_ENGINE_COUNT);
+        if (SynthEngine_IsAvailable(next)) break;
+    }
+    return next;
+}
+
+static void send_next_and_check() {
+    SynthEngineId want = expected_next(SynthEngine_GetCurrent());
+    send_pc(127);
+    CHECK(SynthEngine_GetCurrent() == want);
+    CHECK(SynthEngine_IsAvailable(SynthEngine_GetCurrent()) == 1);
+}
+
 static void test_program_change_127_cycles_engines() {
     SynthEngine_Init();
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
 
     // Program Change 127 переключает на следующий инструмент по циклу:
-    // E-Piano -> Pluck -> Sine -> Organ -> SoundFont -> E-Piano
+    // E-Piano -> Pluck -> Sine -> Organ -> SoundFont -> E-Piano.
+    // Если SoundFont недоступен (нет SD/файла SNDFNT.SF2), он пропускается:
+    // ... -> Organ -> E-Piano.
     send_pc(127);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
 
@@ -122,18 +141,16 @@ static void test_program_change_127_cycles_engines() {
     send_pc(127);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
 
-    send_pc(127);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
-
-    send_pc(127);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
+    // Дальше — проверяем цикл независимо от того, нашёлся ли SF2.
+    for (int i = 0; i < 3 * SYNTH_ENGINE_COUNT; ++i) {
+        send_next_and_check();
+    }
 
     // Обычные Program Change 0-4 выбирают инструменты напрямую
     send_pc(3);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
 
-    send_pc(127);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
+    send_next_and_check();
 
     send_pc(0);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);

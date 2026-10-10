@@ -98,6 +98,17 @@ void SynthEngine_ProgramChange(uint8_t program)
     SynthEngine_Select((SynthEngineId)(program % SYNTH_ENGINE_COUNT));
 }
 
+int SynthEngine_IsAvailable(SynthEngineId id)
+{
+    if ((unsigned)id >= (unsigned)SYNTH_ENGINE_COUNT) {
+        return 0;
+    }
+    if (id == SYNTH_ENGINE_SOUNDFONT) {
+        return SoundFontSynth_IsAvailable() ? 1 : 0;
+    }
+    return 1;
+}
+
 SynthEngineId SynthEngine_GetCurrent(void)
 {
     const Engine *e = g_active.load(std::memory_order_relaxed);

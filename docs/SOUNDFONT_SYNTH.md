@@ -53,3 +53,16 @@ TinySoundFont is not thread safe (`tsf_note_on()` publishes a voice before its e
 3. Power on the device.
 4. Send a MIDI Program Change `4` (or `9`, `14`, etc.) from a MIDI controller or sequencer.
 5. Play notes on the keyboard and verify polyphonic playback.
+
+## STM32: load at boot, memory and "next instrument"
+
+* The SoundFont is loaded **once at power-up** (`SF2_LOAD_AT_BOOT` in `Core/Src/main.c`); progress is printed to the UART
+  (`[SF2] Loading SoundFont from SD...` / `[SF2] SoundFont ready` / `[SF2] SoundFont NOT available ...`).
+  Loading blocks for a while (SD init + parsing the preset tables), so it must not happen while playing.
+  Hot-plugging the card is not supported: reboot after inserting it.
+* If the load fails, the engine is reported as unavailable (`SynthEngine_IsAvailable()`), and the
+  Program Change 127 ("next instrument") cycle skips it: `... -> organ -> epiano`.
+* TinySoundFont needs roughly 170 KB of heap for the preset tables of a ~27 MB bank. DTCM has only ~20 KB spare,
+  so the newlib heap lives in the `.axi_heap` section of AXI SRAM (`_Axi_Heap_Size` in `STM32H743xx_FLASH.ld`, 320 KB).
+* Program Change 127 repeats closer than `PC_NEXT_REPEAT_GUARD_MS` (300 ms) are ignored: some keyboards send the
+  message twice per button press (press + release).

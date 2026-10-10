@@ -34,6 +34,7 @@ namespace {
 
 tsf  *g_tsf = nullptr;
 bool  g_loaded = false;
+bool  g_init_attempted = false;   /* SoundFontSynth_InitSF2() has been run at least once */
 
 enum EventType : uint8_t { EV_NOTE_ON = 1, EV_NOTE_OFF, EV_CC, EV_PROGRAM };
 
@@ -136,8 +137,10 @@ bool SoundFontSynth_InitSF2(void)
         g_tsf = nullptr;
     }
     g_loaded = false;
+    g_init_attempted = true;
     fifo_reset();
 
+    std::fprintf(stderr, "[SF2] Opening 0:/SNDFNT.SF2 (SD mount + FatFs)...\n");
     if (!SF2Cache_OpenFile("0:/SNDFNT.SF2")) {
         std::fprintf(stderr, "[SF2] Failed to open SoundFont file; see the attempted host paths above.\n");
         return false;
@@ -146,6 +149,7 @@ bool SoundFontSynth_InitSF2(void)
     struct tsf_stream stream;
     SF2Cache_InitStream(&stream);
 
+    std::fprintf(stderr, "[SF2] File opened, parsing presets (tsf_load)...\n");
     g_tsf = tsf_load(&stream);
     if (!g_tsf) {
         std::fprintf(stderr, "[SF2] tsf_load() failed. The file may be invalid, truncated, unsupported, or unreadable.\n");
@@ -169,7 +173,10 @@ bool SoundFontSynth_InitSF2(void)
 
 void SoundFontSynth_Init(void)
 {
-    if (!g_loaded && !g_tsf) {
+    /* Try to load the SoundFont only ONCE. Retrying on every engine selection would block the
+     * main loop (SD init / file parsing) each time the user cycles through the instruments
+     * when the card or the file is missing. */
+    if (!g_loaded && !g_tsf && !g_init_attempted) {
         SoundFontSynth_InitSF2();
     }
 
@@ -247,6 +254,11 @@ void SoundFontSynth_Process(void)
 bool SoundFontSynth_IsLoaded(void)
 {
     return g_loaded;
+}
+
+bool SoundFontSynth_IsAvailable(void)
+{
+    return g_loaded || !g_init_attempted;
 }
 
 } // extern "C"

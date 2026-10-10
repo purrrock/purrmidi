@@ -69,6 +69,9 @@ _sstack = _estack - _Min_Stack_Size;
 /* Generate a link error if heap and stack don't fit into RAM */
 _Min_Heap_Size = 0x1000;      /* required amount of heap  */
 _Min_Stack_Size = 0x2000; /* required amount of stack */
+/* Основная куча newlib (malloc) живёт в AXI SRAM, а не в DTCM: DTCM почти целиком занят .bss
+   (кэш SF2 и т.д.), на кучу там остаётся ~20 КБ, а TinySoundFont для SF2 нужно ~170 КБ. */
+_Axi_Heap_Size = 0x50000; /* 320 КБ */
 
 /* Define output sections */
 SECTIONS
@@ -250,6 +253,15 @@ SECTIONS
     *(.dma_buffer)
     *(.dma_buffer*)
     . = ALIGN(32);
+  } >RAM
+
+  /* Куча malloc() (см. Core/Src/sysmem.c). Не обнуляется при старте. */
+  .axi_heap (NOLOAD) : ALIGN(8)
+  {
+    _axi_heap_start = .;
+    . = . + _Axi_Heap_Size;
+    . = ALIGN(8);
+    _axi_heap_end = .;
   } >RAM
 
   /* Remove information from the standard libraries */
