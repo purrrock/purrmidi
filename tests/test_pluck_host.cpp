@@ -115,14 +115,15 @@ void test_subblock_sustain_event_ordering() {
 void test_fifo_overflow_critical_release_delivery() {
     PluckSynth_Init();
 
-    // 1. Push 40 NoteOn events to FIFO (EVENT_FIFO_SIZE = 32) without rendering in between.
+    // 1. Push 40 NoteOn events to FIFO without rendering in between.
+    // NOTE_ON_FIFO_LIMIT = 28 out of EVENT_FIFO_SIZE = 32.
     for (int i = 0; i < 40; ++i) {
         PluckSynth_NoteOn(60, 100);
     }
 
     uint32_t dropped = PluckSynth_GetDroppedEventsCount();
     std::cout << "Dropped NoteOn events count: " << dropped << std::endl;
-    assert(dropped == 8);
+    assert(dropped == 12); // 28 accepted, 12 dropped out of 40
 
     std::vector<int16_t> buf(48000 * 3 * 2, 0);
     PluckSynth_FillStereoBuffer(buf.data(), 2400); // Render queued events
@@ -137,25 +138,25 @@ void test_fifo_overflow_critical_release_delivery() {
     assert(PluckSynth_IsNoteActive(60) == false);
     std::cout << "Verified: FIFO overflow drops extra NoteOn events cleanly without press count corruption.\n";
 
-    // 2. Critical NoteOff priority delivery when FIFO is full:
+    // 2. Critical NoteOff delivery via reserved slots when NoteOn limit is reached:
     PluckSynth_Init();
     PluckSynth_NoteOn(60, 100);
     PluckSynth_FillStereoBuffer(buf.data(), 100);
 
-    // Fill FIFO completely with 32 NoteOn events for other notes
+    // Fill FIFO up to NoteOn limit (28 accepted out of 32 attempts)
     for (int i = 0; i < 32; ++i) {
         PluckSynth_NoteOn(64 + (i % 8), 100);
     }
 
-    // Now send critical NoteOff for note 60 while FIFO is full!
-    // Priority eviction will evict oldest NoteOn in FIFO and enqueue NoteOff(60).
+    // Send critical NoteOff for note 60 while NoteOn limit is reached.
+    // Reserved capacity allows NoteOff(60) to be enqueued in strict FIFO order.
     PluckSynth_NoteOff(60);
 
     PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5);
     assert(PluckSynth_IsNoteActive(60) == false); // Critical NoteOff delivered! No stuck note!
-    std::cout << "Verified: Critical NoteOff evicts oldest NoteOn when FIFO full and damps note.\n";
+    std::cout << "Verified: Critical NoteOff uses reserved FIFO slots and damps note.\n";
 
-    // 3. Critical CC64=0 (pedal release) priority delivery when FIFO is full:
+    // 3. Critical CC64=0 (pedal release) delivery via reserved slots:
     PluckSynth_Init();
     PluckSynth_ControlChange(64, 127); // Pedal ON
     PluckSynth_NoteOn(60, 100);
@@ -163,17 +164,53 @@ void test_fifo_overflow_critical_release_delivery() {
     PluckSynth_FillStereoBuffer(buf.data(), 2400);
     assert(PluckSynth_IsNoteActive(60) == true);
 
-    // Fill FIFO completely with 32 NoteOn events
+    // Fill FIFO up to NoteOn limit
     for (int i = 0; i < 32; ++i) {
         PluckSynth_NoteOn(64 + (i % 8), 100);
     }
 
-    // Send critical CC64=0 (pedal release) while FIFO is full!
+    // Send critical CC64=0 (pedal release)
     PluckSynth_ControlChange(64, 0);
 
     PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5);
     assert(PluckSynth_IsNoteActive(60) == false); // Critical CC64=0 delivered! No stuck sustain!
-    std::cout << "Verified: Critical CC64=0 evicts oldest NoteOn when FIFO full and releases sustain.\n";
+    std::cout << "Verified: Critical CC64=0 uses reserved FIFO slots and releases sustain.\n";
+
+    // 4. Test full 32-slot FIFO saturation and emergency overflow recovery state machine
+    PluckSynth_Init();
+    PluckSynth_ControlChange(64, 127); // Sustain ON
+    PluckSynth_NoteOn(60, 100);
+    PluckSynth_FillStereoBuffer(buf.data(), 100);
+    assert(PluckSynth_IsNoteActive(60) == true);
+
+    // Completely saturate all 32 FIFO slots with events (28 NoteOn + 4 NoteOff)
+    for (int i = 0; i < 28; ++i) {
+        PluckSynth_NoteOn(64 + (i % 8), 100);
+    }
+    for (int i = 0; i < 4; ++i) {
+        PluckSynth_NoteOff(64 + (i % 8));
+    }
+
+    // Now send critical NoteOff(60) when FIFO is 100% full (32/32 slots used).
+    // This triggers emergency overflow recovery state machine request.
+    PluckSynth_NoteOff(60);
+
+    // Render audio block to trigger emergency state reset in consumer thread
+    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5);
+
+    // Verify emergency recovery released all held notes and sustain pedal
+    assert(PluckSynth_IsNoteActive(60) == false);
+    std::cout << "Verified: Emergency recovery state machine released held notes and sustain pedal on 100% FIFO saturation.\n";
+
+    // 5. Test post-recovery synth functionality (new NoteOn -> NoteOff cycle)
+    PluckSynth_NoteOn(72, 100);
+    PluckSynth_FillStereoBuffer(buf.data(), 2400);
+    assert(PluckSynth_IsNoteActive(72) == true);
+
+    PluckSynth_NoteOff(72);
+    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5);
+    assert(PluckSynth_IsNoteActive(72) == false);
+    std::cout << "Verified: Post-recovery NoteOn -> NoteOff cycle operates normally.\n";
 }
 
 void test_overlapping_same_pitch_notes() {
