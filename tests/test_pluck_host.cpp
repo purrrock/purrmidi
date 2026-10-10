@@ -176,20 +176,30 @@ void test_fifo_overflow_critical_release_delivery() {
     assert(PluckSynth_IsNoteActive(60) == false); // Critical CC64=0 delivered! No stuck sustain!
     std::cout << "Verified: Critical CC64=0 uses reserved FIFO slots and releases sustain.\n";
 
-    // 4. Test full 32-slot FIFO behavior (all slots occupied)
+    // 4. Test full 32-slot FIFO saturation by critical events (Note Off & CC64=0 loss prevention)
     PluckSynth_Init();
+    PluckSynth_ControlChange(64, 127); // Sustain ON
+    PluckSynth_NoteOn(60, 100);
+    PluckSynth_FillStereoBuffer(buf.data(), 100);
+    assert(PluckSynth_IsNoteActive(60) == true);
+
+    // Completely saturate all 32 FIFO slots with events (28 NoteOn + 4 NoteOff)
     for (int i = 0; i < 28; ++i) {
-        PluckSynth_NoteOn(60, 100);
+        PluckSynth_NoteOn(64 + (i % 8), 100);
     }
     for (int i = 0; i < 4; ++i) {
-        PluckSynth_NoteOff(60);
+        PluckSynth_NoteOff(64 + (i % 8));
     }
-    // Attempt 33rd event when all 32 slots are full
+
+    // Now send critical NoteOff(60) and CC64=0 when FIFO is 100% full (32/32 slots used)
     PluckSynth_NoteOff(60);
+    PluckSynth_ControlChange(64, 0);
 
     PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5);
+
+    // Verify fallback mechanism delivered both NoteOff(60) and CC64=0 without stuck note or stuck sustain!
     assert(PluckSynth_IsNoteActive(60) == false);
-    std::cout << "Verified: Full 32-slot FIFO overflow handles 33rd event gracefully without race or corruption.\n";
+    std::cout << "Verified: 100% full FIFO saturation delivers critical NoteOff and CC64=0 via atomic fallback registers.\n";
 }
 
 void test_overlapping_same_pitch_notes() {

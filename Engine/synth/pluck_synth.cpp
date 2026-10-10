@@ -69,6 +69,11 @@ static std::atomic<uint32_t> dropped_note_on_count{0};
 static std::atomic<uint8_t> global_note_press_count[128];
 static bool audio_sustain_pedal = false;
 
+// Атомарные фолбэк-регистры для гарантии доставки релиз-событий при 100% переполнении FIFO
+static std::atomic<uint8_t> fallback_note_off_count[128];
+static std::atomic<bool>    fallback_note_off_any{false};
+static std::atomic<int16_t> fallback_cc64{-1};
+
 // Постановка обычных событий Note On в FIFO
 static bool event_fifo_push_note_on(const PluckEvent& event) {
     uint32_t head = fifo_head.load(std::memory_order_relaxed);
@@ -152,7 +157,10 @@ void PluckSynth_Init(void) {
 
     for (int i = 0; i < 128; i++) {
         global_note_press_count[i].store(0, std::memory_order_relaxed);
+        fallback_note_off_count[i].store(0, std::memory_order_relaxed);
     }
+    fallback_note_off_any.store(false, std::memory_order_relaxed);
+    fallback_cc64.store(-1, std::memory_order_relaxed);
 
     fifo_head.store(0, std::memory_order_relaxed);
     fifo_tail.store(0, std::memory_order_relaxed);
@@ -222,14 +230,9 @@ void PluckSynth_NoteOff(uint8_t midi_note) {
     event.param2 = 0;
 
     if (!event_fifo_push_critical(event)) {
-        // Если FIFO переполнен (все 32 слота заняты), восстанавливаем
-        // global_note_press_count[midi_note] для поддержания согласованности
-        uint8_t cur_count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
-        while (cur_count < 255) {
-            if (global_note_press_count[midi_note].compare_exchange_weak(cur_count, cur_count + 1, std::memory_order_relaxed)) {
-                break;
-            }
-        }
+        // Если FIFO 100% переполнен, фиксируем релиз в фолбэк-регистре
+        fallback_note_off_count[midi_note].fetch_add(1, std::memory_order_release);
+        fallback_note_off_any.store(true, std::memory_order_release);
     }
 }
 
@@ -274,7 +277,10 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
             event.type   = EVENT_CONTROL_CHANGE;
             event.param1 = control;
             event.param2 = value;
-            (void)event_fifo_push_critical(event);
+            if (!event_fifo_push_critical(event)) {
+                // Если FIFO 100% переполнен, фиксируем состояние педали в фолбэк-регистре
+                fallback_cc64.store((int16_t)value, std::memory_order_release);
+            }
             break;
         }
 
@@ -369,7 +375,41 @@ int16_t PluckSynth_NextSample(void) {
         }
     }
 
-    // 2. Вычисление и смешивание сигналов активных голосов
+    // 2. Обработка атомарных фолбэк-событий при 100% переполнении FIFO
+    if (fallback_note_off_any.load(std::memory_order_acquire)) {
+        fallback_note_off_any.store(false, std::memory_order_relaxed);
+        for (int note = 0; note < 128; note++) {
+            uint8_t pending_offs = fallback_note_off_count[note].exchange(0, std::memory_order_acquire);
+            while (pending_offs > 0) {
+                for (int i = 0; i < PLUCK_VOICES; i++) {
+                    if (voices[i].voice_state.load(std::memory_order_relaxed) == (int32_t)note && voices[i].press_count > 0) {
+                        voices[i].press_count--;
+                        if (voices[i].press_count == 0) {
+                            if (audio_sustain_pedal) {
+                                voices[i].sustain_held = true;
+                            } else {
+                                voices[i].sustain_held = false;
+                            }
+                        }
+                    }
+                }
+                pending_offs--;
+            }
+        }
+    }
+
+    int16_t cc64_val = fallback_cc64.exchange(-1, std::memory_order_acquire);
+    if (cc64_val >= 0) {
+        bool pedal_on = (cc64_val >= 64);
+        audio_sustain_pedal = pedal_on;
+        if (!pedal_on) {
+            for (int i = 0; i < PLUCK_VOICES; i++) {
+                voices[i].sustain_held = false;
+            }
+        }
+    }
+
+    // 3. Вычисление и смешивание сигналов активных голосов
     float mix_sum_f = 0.0f;
     uint32_t active_voices_count = 0;
     float current_decay = user_decay.load(std::memory_order_relaxed);
