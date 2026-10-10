@@ -256,6 +256,20 @@ int main(void)
     const char *bench_names[2] = { "organ ", "epiano" };
     const int bench_counts[] = { 0, 1, 3, 6, 10 };
 
+    /* Reference: a loop of exactly 1M iterations (2M instructions: subs + bne). A healthy
+     * Cortex-M7 needs about 1.0-1.1M cycles. Much more = the CPU is being slowed down
+     * (interrupt storm, bus contention, memory attributes). Done with IRQs on and off. */
+    for (int irq_off = 0; irq_off < 2; irq_off++)
+    {
+      uint32_t n = 1000000U;
+      if (irq_off) { __disable_irq(); }
+      uint32_t t0 = DWT->CYCCNT;
+      __asm volatile("1: subs %0, %0, #1\n\t bne 1b" : "+r"(n));
+      uint32_t dt = DWT->CYCCNT - t0;
+      if (irq_off) { __enable_irq(); }
+      printf("[BENCH] spin 1M iterations, IRQ %s: %lu cycles\r\n", irq_off ? "OFF" : "on ", (unsigned long)dt);
+    }
+
     for (int e = 0; e < 2; e++)
     {
       for (unsigned c = 0; c < sizeof(bench_counts) / sizeof(bench_counts[0]); c++)
@@ -272,8 +286,17 @@ int main(void)
         SynthEngine_FillStereoBuffer(bench_buf, 128);
         SynthEngine_FillStereoBuffer(bench_buf, 128);
         uint32_t dt = (DWT->CYCCNT - t0) / 3U;
-        printf("[BENCH] %s n=%2d: %lu us per 128-frame block (%lu cycles)\r\n", bench_names[e],
-               bench_counts[c], (unsigned long)(dt / us), (unsigned long)dt);
+        /* the same again with interrupts masked */
+        __disable_irq();
+        t0 = DWT->CYCCNT;
+        SynthEngine_FillStereoBuffer(bench_buf, 128);
+        SynthEngine_FillStereoBuffer(bench_buf, 128);
+        SynthEngine_FillStereoBuffer(bench_buf, 128);
+        uint32_t dt_noirq = (DWT->CYCCNT - t0) / 3U;
+        __enable_irq();
+        printf("[BENCH] %s n=%2d: %lu us per 128-frame block (%lu cycles), IRQ masked: %lu cycles\r\n",
+               bench_names[e], bench_counts[c], (unsigned long)(dt / us), (unsigned long)dt,
+               (unsigned long)dt_noirq);
       }
     }
     SynthEngine_Select(SYNTH_ENGINE_EPIANO);
