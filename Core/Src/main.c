@@ -98,6 +98,11 @@ extern uint32_t _sitcm_text;   /* linker symbol: start of the code copied to ITC
  * (USB, MIDI, display) forever - this is how the system "hangs" even though nothing crashed. */
 #define AUDIO_DIAG_UART 1
 
+/* 1 = at power-up (before the audio DMA and USB start, so nothing else interferes) time one
+ * 128-frame block of the organ and epiano engines with N sounding notes and print the result:
+ *   [BENCH] organ  n= 0: 123 us per block
+ * This separates "the code itself is slow" from "something steals CPU time while playing". */
+#define BOOT_BENCH 1
 static volatile uint32_t audio_cyc_max = 0;      /* longest fill so far (CPU cycles) */
 static volatile uint32_t audio_cyc_last = 0;
 static volatile uint32_t audio_calls = 0;
@@ -240,6 +245,38 @@ int main(void)
   else
   {
     printf("[SF2] SoundFont NOT available - the soundfont engine will be skipped\r\n");
+  }
+#endif
+#if BOOT_BENCH
+  {
+    static int16_t bench_buf[256];
+    static const uint8_t bench_notes[] = { 48, 52, 55, 60, 64, 67, 72, 76, 79, 84 };
+    const uint32_t us = SystemCoreClock / 1000000U;
+    const SynthEngineId bench_engines[2] = { SYNTH_ENGINE_ORGAN, SYNTH_ENGINE_EPIANO };
+    const char *bench_names[2] = { "organ ", "epiano" };
+    const int bench_counts[] = { 0, 1, 3, 6, 10 };
+
+    for (int e = 0; e < 2; e++)
+    {
+      for (unsigned c = 0; c < sizeof(bench_counts) / sizeof(bench_counts[0]); c++)
+      {
+        SynthEngine_Select(SYNTH_ENGINE_SINE);               /* Select() of the current engine is a no-op, */
+        SynthEngine_Select(bench_engines[e]);                /* so switch away and back to re-initialise it */
+        for (int k = 0; k < bench_counts[c]; k++)
+        {
+          SynthEngine_NoteOn(bench_notes[k], 100);
+        }
+        SynthEngine_FillStereoBuffer(bench_buf, 128);        /* applies the events */
+        uint32_t t0 = DWT->CYCCNT;
+        SynthEngine_FillStereoBuffer(bench_buf, 128);
+        SynthEngine_FillStereoBuffer(bench_buf, 128);
+        SynthEngine_FillStereoBuffer(bench_buf, 128);
+        uint32_t dt = (DWT->CYCCNT - t0) / 3U;
+        printf("[BENCH] %s n=%2d: %lu us per 128-frame block (%lu cycles)\r\n", bench_names[e],
+               bench_counts[c], (unsigned long)(dt / us), (unsigned long)dt);
+      }
+    }
+    SynthEngine_Select(SYNTH_ENGINE_EPIANO);
   }
 #endif
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
