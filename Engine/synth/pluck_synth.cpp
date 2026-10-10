@@ -59,7 +59,7 @@ static std::atomic<uint32_t> fifo_tail{0};
 static std::atomic<uint32_t> dropped_events_count{0};
 
 static std::atomic<bool> sustain_pedal{false};
-static std::atomic<bool> global_note_pressed[128];
+static std::atomic<uint8_t> global_note_press_count[128];
 
 // Lock-free SPSC FIFO для событий NoteOn
 static bool note_event_fifo_push(const NoteOnEvent& event) {
@@ -130,7 +130,7 @@ void PluckSynth_Init(void) {
 
     sustain_pedal.store(false, std::memory_order_relaxed);
     for (int i = 0; i < 128; i++) {
-        global_note_pressed[i].store(false, std::memory_order_relaxed);
+        global_note_press_count[i].store(0, std::memory_order_relaxed);
     }
     
     fifo_head.store(0, std::memory_order_relaxed);
@@ -145,7 +145,7 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     }
 
     if (midi_note < 128) {
-        global_note_pressed[midi_note].store(true, std::memory_order_relaxed);
+        global_note_press_count[midi_note].fetch_add(1, std::memory_order_relaxed);
     }
 
     float freq = mtof((float)midi_note);
@@ -171,7 +171,12 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
 
 void PluckSynth_NoteOff(uint8_t midi_note) {
     if (midi_note < 128) {
-        global_note_pressed[midi_note].store(false, std::memory_order_relaxed);
+        uint8_t count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
+        while (count > 0) {
+            if (global_note_press_count[midi_note].compare_exchange_weak(count, count - 1, std::memory_order_relaxed)) {
+                break;
+            }
+        }
     }
 }
 
@@ -286,14 +291,19 @@ int16_t PluckSynth_NextSample(void) {
 
         if (v.active) {
             if (v.midi_note >= 0 && v.midi_note < 128) {
-                bool is_pressed = global_note_pressed[v.midi_note].load(std::memory_order_relaxed);
+                bool is_pressed = (global_note_press_count[v.midi_note].load(std::memory_order_relaxed) > 0);
 
                 // Переход состояния нажатия клавиши -> отпускания
                 if (v.note_pressed && !is_pressed) {
                     v.note_pressed = false;
                     if (sus_pedal_now) {
-                        v.sustain_held = true; // Захват удержания педалью в момент Note Off
+                        v.sustain_held = true; // Захват удержания педалью в момент отпускания
                     }
+                }
+
+                if (is_pressed) {
+                    v.note_pressed = true;
+                    v.sustain_held = false;
                 }
 
                 // Сброс удержания педалью при отпускании CC64

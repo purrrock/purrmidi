@@ -67,8 +67,52 @@ void test_pluck_render_and_freq() {
     }
 }
 
+void test_noteon_velocity_zero_regression() {
+    PluckSynth_Init();
+    PluckSynth_NoteOn(60, 100);
+
+    std::vector<int16_t> buf(48000 * 3 * 2, 0);
+    PluckSynth_FillStereoBuffer(buf.data(), 2400); // 0.05s render
+
+    // NoteOn with velocity 0 must behave as NoteOff
+    PluckSynth_NoteOn(60, 0);
+    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5); // 2.5s render for full damper decay
+
+    assert(PluckSynth_IsNoteActive(60) == false);
+    std::cout << "Verified: NoteOn with velocity 0 behaves identically to NoteOff.\n";
+}
+
+void test_overlapping_same_pitch_notes() {
+    PluckSynth_Init();
+
+    // Press 1 for Note 60
+    PluckSynth_NoteOn(60, 100);
+    std::vector<int16_t> buf(48000 * 3 * 2, 0);
+    PluckSynth_FillStereoBuffer(buf.data(), 2400);
+
+    // Press 2 for Note 60 (overlapping press)
+    PluckSynth_NoteOn(60, 100);
+    PluckSynth_FillStereoBuffer(buf.data(), 2400);
+
+    // Release Press 1 (NoteOff 60)
+    PluckSynth_NoteOff(60);
+    PluckSynth_FillStereoBuffer(buf.data(), 4800);
+
+    // Note 60 MUST remain held because Press 2 is still active!
+    assert(PluckSynth_IsNoteActive(60) == true);
+    std::cout << "Verified: Overlapping Note On holds note when first Note Off arrives.\n";
+
+    // Release Press 2 (NoteOff 60)
+    PluckSynth_NoteOff(60);
+    PluckSynth_FillStereoBuffer(buf.data(), 48000 * 2.5); // 2.5s render for full damper decay
+
+    // Now Note 60 is fully released and damped
+    assert(PluckSynth_IsNoteActive(60) == false);
+    std::cout << "Verified: Second Note Off releases note completely.\n";
+}
+
 void test_sustain_pedal_and_note_off_isolation() {
-    std::cout << "Subtest 2.1...\n" << std::flush;
+    // 1. Note Off BEFORE sustain pedal press: pressing pedal later does NOT resurrect or sustain note
     PluckSynth_Init();
     PluckSynth_ControlChange(64, 0); // Sustain OFF
     PluckSynth_NoteOn(60, 100);
@@ -84,9 +128,9 @@ void test_sustain_pedal_and_note_off_isolation() {
     PluckSynth_FillStereoBuffer(buf.data(), 24000); // 0.5s render
 
     assert(PluckSynth_IsNoteActive(60) == false);
-    std::cout << "Verified 2.1\n" << std::flush;
+    std::cout << "Verified: Note Off before pedal press is not latched by late pedal press.\n";
 
-    std::cout << "Subtest 2.2...\n" << std::flush;
+    // 2. Note Off DURING sustain pedal press: note is held (sustain_held = true)
     PluckSynth_Init();
     PluckSynth_ControlChange(64, 127); // Sustain ON
     PluckSynth_NoteOn(60, 100);
@@ -95,17 +139,17 @@ void test_sustain_pedal_and_note_off_isolation() {
     PluckSynth_NoteOff(60); // NoteOff sent while pedal is ON
 
     PluckSynth_FillStereoBuffer(buf.data(), 24000); // 0.5s render
-    assert(PluckSynth_IsNoteActive(60) == true);
-    std::cout << "Verified 2.2\n" << std::flush;
+    assert(PluckSynth_IsNoteActive(60) == true);    // Sustained by CC64
+    std::cout << "Verified: Note Off during pedal press latches sustain_held.\n";
 
-    std::cout << "Subtest 2.3...\n" << std::flush;
+    // 3. Releasing pedal (CC64 = 0) initiates damper decay on sustained notes
     PluckSynth_ControlChange(64, 0); // Pedal released!
     PluckSynth_FillStereoBuffer(buf.data(), 24000); // 0.5s render
 
-    assert(PluckSynth_IsNoteActive(60) == false);
-    std::cout << "Verified 2.3\n" << std::flush;
+    assert(PluckSynth_IsNoteActive(60) == false);   // Voice released after damper decay
+    std::cout << "Verified: Releasing pedal clears sustain_held and damps note.\n";
 
-    std::cout << "Subtest 2.4...\n" << std::flush;
+    // 4. Note Off of 1 note in a chord does NOT cut or affect the other notes
     PluckSynth_Init();
     PluckSynth_NoteOn(60, 100);
     PluckSynth_NoteOn(64, 100);
@@ -117,7 +161,6 @@ void test_sustain_pedal_and_note_off_isolation() {
 
     assert(PluckSynth_IsNoteActive(64) == true);
     assert(PluckSynth_IsNoteActive(67) == true);
-    std::cout << "Verified 2.4\n" << std::flush;
 }
 
 void test_reinit_and_control_regressions() {
@@ -278,15 +321,12 @@ void test_polyphony_chords_and_clipping() {
 }
 
 int main() {
-    std::cout << "Starting test 1...\n" << std::flush;
     test_pluck_render_and_freq();
-    std::cout << "Starting test 2...\n" << std::flush;
+    test_noteon_velocity_zero_regression();
+    test_overlapping_same_pitch_notes();
     test_sustain_pedal_and_note_off_isolation();
-    std::cout << "Starting test 3...\n" << std::flush;
     test_reinit_and_control_regressions();
-    std::cout << "Starting test 4...\n" << std::flush;
     test_deterministic_voice_stealing_and_reuse();
-    std::cout << "Starting test 5...\n" << std::flush;
     test_polyphony_chords_and_clipping();
     std::cout << "test_pluck_host passed successfully." << std::endl;
     return 0;
