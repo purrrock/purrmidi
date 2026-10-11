@@ -57,6 +57,55 @@ namespace synth
 			   already has current_register == 0 (reset() / end of release). */
 			}
 
+		uint32_t env_ar::get_level_block(uint8_t *levels,uint32_t n)
+			{
+			uint32_t reg = current_register;
+			env_feature_t st = state;
+			bool running = _is_running;
+			const uint32_t attack_speed = feat_speed[static_cast<uint8_t>(env_feature_t::ATTACK)];
+			const uint32_t release_speed = feat_speed[static_cast<uint8_t>(env_feature_t::RELEASE)];
+			uint32_t i = 0;
+			while(i < n)
+				{
+				uint8_t level = 0;
+				if(running)
+					{
+					level = static_cast<uint8_t>(reg >> 13);
+					// Same state machine as update_registers().
+					if(st == env_feature_t::ATTACK)
+						{
+						reg += attack_speed;
+						if(reg > full_ar_range)
+							{
+							reg = full_ar_range;
+							st = env_feature_t::SUSTAIN;
+							}
+						}
+					else if(st == env_feature_t::RELEASE)
+						{
+						if(reg < release_speed)
+							{
+							reg = 0ul;
+							running = false;
+							}
+						else
+							{
+							reg -= release_speed;
+							}
+						}
+					}
+				levels[i++] = level;
+				if(running == false)
+					{
+					break;
+					}
+				}
+			current_register = reg;
+			state = st;
+			_is_running = running;
+			return i;
+			}
+
 		uint8_t env_ar::peek_level() const
 			{
 			return _is_running ? static_cast<uint8_t>(current_register >> 13) : 0;

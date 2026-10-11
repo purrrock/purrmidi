@@ -63,6 +63,14 @@ namespace synth
 			*/
 			voice::sample_t get_sample() override;
 
+			/**
+			* Renders n samples of this voice and adds them to acc[]. Produces exactly the same values as
+			* n calls of get_sample() with *_phase_counter = counter0, counter0+1, ... but keeps the envelope
+			* and tonewheel state in registers and has no per-sample call overhead or dependent load chains.
+			* Nothing is added once the voice has finished its release.
+			*/
+			void render_block(int64_t *acc,uint32_t n,uint32_t counter0);
+
 			voice_organ();
 
 			void set_attack(uint32_t value);

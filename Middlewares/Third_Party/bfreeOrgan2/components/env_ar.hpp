@@ -47,6 +47,12 @@ namespace synth
 			uint8_t get_level() override;
 			/** Returns the current level (0..127) WITHOUT advancing the envelope. */
 			uint8_t peek_level() const;
+			/**
+			* Produces the next levels[] values, exactly as n consecutive calls of get_level() would,
+			* keeping the envelope state in registers meanwhile. Stops after the sample on which the
+			* envelope stops running (release finished). Returns the number of levels written.
+			*/
+			uint32_t get_level_block(uint8_t *levels,uint32_t n);
 			void attack();
 			void release();
 			void reset();

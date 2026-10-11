@@ -1,0 +1,232 @@
+diff --git a/Engine/synth/organ_synth.cpp b/Engine/synth/organ_synth.cpp
+index 8d0dfc6..65d8ce3 100644
+--- a/Engine/synth/organ_synth.cpp
++++ b/Engine/synth/organ_synth.cpp
+@@ -167,10 +167,18 @@ void OrganSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
+ {
+     process_events();
+ 
+-    for (uint32_t i = 0; i < num_frames; ++i) {
+-        int16_t sample16  = g_organ.synthesize_sample();
+-        buffer[i * 2]     = sample16;
+-        buffer[i * 2 + 1] = sample16;
++    /* Render the mono block, then duplicate it into the stereo buffer. */
++    constexpr uint32_t kChunk = 128;
++    static int16_t mono[kChunk];
++    uint32_t done = 0;
++    while (done < num_frames) {
++        const uint32_t n = (num_frames - done > kChunk) ? kChunk : (num_frames - done);
++        g_organ.synthesize_block(mono, n);
++        for (uint32_t i = 0; i < n; ++i) {
++            buffer[(done + i) * 2]     = mono[i];
++            buffer[(done + i) * 2 + 1] = mono[i];
++        }
++        done += n;
+     }
+ }
+ 
+diff --git a/Middlewares/Third_Party/bfreeOrgan2/components/env_ar.cpp b/Middlewares/Third_Party/bfreeOrgan2/components/env_ar.cpp
+index a188276..46ffa97 100644
+--- a/Middlewares/Third_Party/bfreeOrgan2/components/env_ar.cpp
++++ b/Middlewares/Third_Party/bfreeOrgan2/components/env_ar.cpp
+@@ -57,6 +57,55 @@ namespace synth
+ 			   already has current_register == 0 (reset() / end of release). */
+ 			}
+ 
++		uint32_t env_ar::get_level_block(uint8_t *levels,uint32_t n)
++			{
++			uint32_t reg = current_register;
++			env_feature_t st = state;
++			bool running = _is_running;
++			const uint32_t attack_speed = feat_speed[static_cast<uint8_t>(env_feature_t::ATTACK)];
++			const uint32_t release_speed = feat_speed[static_cast<uint8_t>(env_feature_t::RELEASE)];
++			uint32_t i = 0;
++			while(i < n)
++				{
++				uint8_t level = 0;
++				if(running)
++					{
++					level = static_cast<uint8_t>(reg >> 13);
++					// Same state machine as update_registers().
++					if(st == env_feature_t::ATTACK)
++						{
++						reg += attack_speed;
++						if(reg > full_ar_range)
++							{
++							reg = full_ar_range;
++							st = env_feature_t::SUSTAIN;
++							}
++						}
++					else if(st == env_feature_t::RELEASE)
++						{
++						if(reg < release_speed)
++							{
++							reg = 0ul;
++							running = false;
++							}
++						else
++							{
++							reg -= release_speed;
++							}
++						}
++					}
++				levels[i++] = level;
++				if(running == false)
++					{
++					break;
++					}
++				}
++			current_register = reg;
++			state = st;
++			_is_running = running;
++			return i;
++			}
++
+ 		uint8_t env_ar::peek_level() const
+ 			{
+ 			return _is_running ? static_cast<uint8_t>(current_register >> 13) : 0;
+diff --git a/Middlewares/Third_Party/bfreeOrgan2/components/env_ar.hpp b/Middlewares/Third_Party/bfreeOrgan2/components/env_ar.hpp
+index 49299a4..2edc800 100644
+--- a/Middlewares/Third_Party/bfreeOrgan2/components/env_ar.hpp
++++ b/Middlewares/Third_Party/bfreeOrgan2/components/env_ar.hpp
+@@ -47,6 +47,12 @@ namespace synth
+ 			uint8_t get_level() override;
+ 			/** Returns the current level (0..127) WITHOUT advancing the envelope. */
+ 			uint8_t peek_level() const;
++			/**
++			* Produces the next levels[] values, exactly as n consecutive calls of get_level() would,
++			* keeping the envelope state in registers meanwhile. Stops after the sample on which the
++			* envelope stops running (release finished). Returns the number of levels written.
++			*/
++			uint32_t get_level_block(uint8_t *levels,uint32_t n);
+ 			void attack();
+ 			void release();
+ 			void reset();
+diff --git a/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp b/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp
+index b8fa0e2..1532d5a 100644
+--- a/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp
++++ b/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp
+@@ -152,6 +152,47 @@ namespace synth
+ 			return static_cast<voice::sample_t>(full_sample);
+ 			}
+ 
++		void voice_organ::render_block(int64_t *acc,uint32_t n,uint32_t counter0)
++			{
++			while(n != 0 && _is_active)
++				{
++				uint8_t levels[64];
++				const uint32_t chunk = (n > 64u) ? 64u : n;
++				const uint32_t k = envelope.get_level_block(levels,chunk);
++				_is_active = envelope.is_running();
++
++				const uint32_t s0 = _steps[0], s1 = _steps[1], s2 = _steps[2], s3 = _steps[3], s4 = _steps[4];
++				const uint32_t s5 = _steps[5], s6 = _steps[6], s7 = _steps[7], s8 = _steps[8];
++				// Drawbars only change between blocks (control changes are applied before rendering).
++				const int32_t d0 = static_cast<uint8_t>(_drawbars[0]), d1 = static_cast<uint8_t>(_drawbars[1]);
++				const int32_t d2 = static_cast<uint8_t>(_drawbars[2]), d3 = static_cast<uint8_t>(_drawbars[3]);
++				const int32_t d4 = static_cast<uint8_t>(_drawbars[4]), d5 = static_cast<uint8_t>(_drawbars[5]);
++				const int32_t d6 = static_cast<uint8_t>(_drawbars[6]), d7 = static_cast<uint8_t>(_drawbars[7]);
++				const int32_t d8 = static_cast<uint8_t>(_drawbars[8]);
++				const int16_t *const wave = tables::wave_sine.data();
++
++				for(uint32_t i = 0; i < k; ++i)
++					{
++					const uint32_t c = counter0 + i;
++					#define PURR_W(s) static_cast<int32_t>(wave[tables::phase_to_wave_index(c*(s))])
++					const voice::sample_t sample = PURR_W(s0)*d0 + PURR_W(s1)*d1 + PURR_W(s2)*d2
++												+ PURR_W(s3)*d3 + PURR_W(s4)*d4 + PURR_W(s5)*d5
++												+ PURR_W(s6)*d6 + PURR_W(s7)*d7 + PURR_W(s8)*d8;
++					#undef PURR_W
++					int64_t full_sample = static_cast<int64_t>(sample) * static_cast<int64_t>(levels[i]);
++					if (full_sample > 2147483647LL) {
++						full_sample = 2147483647LL;
++					} else if (full_sample < -2147483648LL) {
++						full_sample = -2147483648LL;
++					}
++					acc[i] += full_sample;
++					}
++				acc += k;
++				counter0 += k;
++				n -= k;
++				}
++			}
++
+ 		inline voice::sample_t voice_organ::get_tonewheel(uint8_t tone)
+ 			{
+ 			const uint8_t tonewheel_note = tables::switchbox[my_note*9 + tone];
+diff --git a/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.hpp b/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.hpp
+index cd046ea..d7e6c9f 100644
+--- a/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.hpp
++++ b/Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.hpp
+@@ -63,6 +63,14 @@ namespace synth
+ 			*/
+ 			voice::sample_t get_sample() override;
+ 
++			/**
++			* Renders n samples of this voice and adds them to acc[]. Produces exactly the same values as
++			* n calls of get_sample() with *_phase_counter = counter0, counter0+1, ... but keeps the envelope
++			* and tonewheel state in registers and has no per-sample call overhead or dependent load chains.
++			* Nothing is added once the voice has finished its release.
++			*/
++			void render_block(int64_t *acc,uint32_t n,uint32_t counter0);
++
+ 			voice_organ();
+ 
+ 			void set_attack(uint32_t value);
+diff --git a/Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp b/Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp
+index ec2681e..3302b9f 100644
+--- a/Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp
++++ b/Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp
+@@ -274,6 +274,34 @@ namespace synth
+ 		return to_external_sample(fx_output);
+ 		}
+ 
++	void synth_organ::synthesize_block(synth::sample_t *out,uint32_t n)
++		{
++		constexpr uint32_t BLOCK = 128;
++		static synth::internal_sample_t acc[BLOCK];
++		while(n != 0)
++			{
++			const uint32_t chunk = (n > BLOCK) ? BLOCK : n;
++			for(uint32_t i = 0; i < chunk; ++i)
++				{
++				acc[i] = 0;
++				}
++			for(auto &osc : oscillators)
++				{
++				if(osc.voice::voice_organ::is_active())
++					{
++					osc.voice::voice_organ::render_block(acc,chunk,phase_counter);
++					}
++				}
++			phase_counter += chunk;
++			for(uint32_t i = 0; i < chunk; ++i)
++				{
++				out[i] = to_external_sample(fx.run_through(acc[i]));
++				}
++			out += chunk;
++			n -= chunk;
++			}
++		}
++
+ 	inline void synth_organ::update_phase_table()
+ 		{
+ 		++phase_counter;
+diff --git a/Middlewares/Third_Party/bfreeOrgan2/synth_organ.hpp b/Middlewares/Third_Party/bfreeOrgan2/synth_organ.hpp
+index f61d7ed..439ac30 100644
+--- a/Middlewares/Third_Party/bfreeOrgan2/synth_organ.hpp
++++ b/Middlewares/Third_Party/bfreeOrgan2/synth_organ.hpp
+@@ -84,6 +84,13 @@ namespace synth
+ 		*/
+ 		synth::sample_t synthesize_sample() override;
+ 
++		/**
++		* Produces n mono samples into out[] (same result as n calls of synthesize_sample()).
++		* @details Voices are rendered one by one over the whole block instead of sample by sample: much
++		* less overhead per sample, which matters in the audio interrupt of the microcontroller.
++		*/
++		void synthesize_block(synth::sample_t *out,uint32_t n);
++
+ 		/**
+ 		* Constructor of the organ synthesizer class.
+ 		*/

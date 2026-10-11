@@ -152,6 +152,47 @@ namespace synth
 			return static_cast<voice::sample_t>(full_sample);
 			}
 
+		void voice_organ::render_block(int64_t *acc,uint32_t n,uint32_t counter0)
+			{
+			while(n != 0 && _is_active)
+				{
+				uint8_t levels[64];
+				const uint32_t chunk = (n > 64u) ? 64u : n;
+				const uint32_t k = envelope.get_level_block(levels,chunk);
+				_is_active = envelope.is_running();
+
+				const uint32_t s0 = _steps[0], s1 = _steps[1], s2 = _steps[2], s3 = _steps[3], s4 = _steps[4];
+				const uint32_t s5 = _steps[5], s6 = _steps[6], s7 = _steps[7], s8 = _steps[8];
+				// Drawbars only change between blocks (control changes are applied before rendering).
+				const int32_t d0 = static_cast<uint8_t>(_drawbars[0]), d1 = static_cast<uint8_t>(_drawbars[1]);
+				const int32_t d2 = static_cast<uint8_t>(_drawbars[2]), d3 = static_cast<uint8_t>(_drawbars[3]);
+				const int32_t d4 = static_cast<uint8_t>(_drawbars[4]), d5 = static_cast<uint8_t>(_drawbars[5]);
+				const int32_t d6 = static_cast<uint8_t>(_drawbars[6]), d7 = static_cast<uint8_t>(_drawbars[7]);
+				const int32_t d8 = static_cast<uint8_t>(_drawbars[8]);
+				const int16_t *const wave = tables::wave_sine.data();
+
+				for(uint32_t i = 0; i < k; ++i)
+					{
+					const uint32_t c = counter0 + i;
+					#define PURR_W(s) static_cast<int32_t>(wave[tables::phase_to_wave_index(c*(s))])
+					const voice::sample_t sample = PURR_W(s0)*d0 + PURR_W(s1)*d1 + PURR_W(s2)*d2
+												+ PURR_W(s3)*d3 + PURR_W(s4)*d4 + PURR_W(s5)*d5
+												+ PURR_W(s6)*d6 + PURR_W(s7)*d7 + PURR_W(s8)*d8;
+					#undef PURR_W
+					int64_t full_sample = static_cast<int64_t>(sample) * static_cast<int64_t>(levels[i]);
+					if (full_sample > 2147483647LL) {
+						full_sample = 2147483647LL;
+					} else if (full_sample < -2147483648LL) {
+						full_sample = -2147483648LL;
+					}
+					acc[i] += full_sample;
+					}
+				acc += k;
+				counter0 += k;
+				n -= k;
+				}
+			}
+
 		inline voice::sample_t voice_organ::get_tonewheel(uint8_t tone)
 			{
 			const uint8_t tonewheel_note = tables::switchbox[my_note*9 + tone];

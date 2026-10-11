@@ -167,10 +167,18 @@ void OrganSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
 {
     process_events();
 
-    for (uint32_t i = 0; i < num_frames; ++i) {
-        int16_t sample16  = g_organ.synthesize_sample();
-        buffer[i * 2]     = sample16;
-        buffer[i * 2 + 1] = sample16;
+    /* Render the mono block, then duplicate it into the stereo buffer. */
+    constexpr uint32_t kChunk = 128;
+    static int16_t mono[kChunk];
+    uint32_t done = 0;
+    while (done < num_frames) {
+        const uint32_t n = (num_frames - done > kChunk) ? kChunk : (num_frames - done);
+        g_organ.synthesize_block(mono, n);
+        for (uint32_t i = 0; i < n; ++i) {
+            buffer[(done + i) * 2]     = mono[i];
+            buffer[(done + i) * 2 + 1] = mono[i];
+        }
+        done += n;
     }
 }
 

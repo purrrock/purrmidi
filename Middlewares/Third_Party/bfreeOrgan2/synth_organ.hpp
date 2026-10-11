@@ -85,6 +85,13 @@ namespace synth
 		synth::sample_t synthesize_sample() override;
 
 		/**
+		* Produces n mono samples into out[] (same result as n calls of synthesize_sample()).
+		* @details Voices are rendered one by one over the whole block instead of sample by sample: much
+		* less overhead per sample, which matters in the audio interrupt of the microcontroller.
+		*/
+		void synthesize_block(synth::sample_t *out,uint32_t n);
+
+		/**
 		* Constructor of the organ synthesizer class.
 		*/
 		synth_organ();

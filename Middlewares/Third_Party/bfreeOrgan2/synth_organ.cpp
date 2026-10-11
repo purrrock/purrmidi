@@ -274,6 +274,34 @@ namespace synth
 		return to_external_sample(fx_output);
 		}
 
+	void synth_organ::synthesize_block(synth::sample_t *out,uint32_t n)
+		{
+		constexpr uint32_t BLOCK = 128;
+		static synth::internal_sample_t acc[BLOCK];
+		while(n != 0)
+			{
+			const uint32_t chunk = (n > BLOCK) ? BLOCK : n;
+			for(uint32_t i = 0; i < chunk; ++i)
+				{
+				acc[i] = 0;
+				}
+			for(auto &osc : oscillators)
+				{
+				if(osc.voice::voice_organ::is_active())
+					{
+					osc.voice::voice_organ::render_block(acc,chunk,phase_counter);
+					}
+				}
+			phase_counter += chunk;
+			for(uint32_t i = 0; i < chunk; ++i)
+				{
+				out[i] = to_external_sample(fx.run_through(acc[i]));
+				}
+			out += chunk;
+			n -= chunk;
+			}
+		}
+
 	inline void synth_organ::update_phase_table()
 		{
 		++phase_counter;
