@@ -32,6 +32,10 @@ namespace synth
 
 		voice_organ::voice_organ()
 			{
+			for(int t=0;t<9;t++)
+				{
+				_steps[t] = 0;
+				}
 			envelope.set_speed(env::env_feature_t::ATTACK,clean_cut_value);
 			envelope.set_speed(env::env_feature_t::RELEASE,clean_cut_value);
 
@@ -57,6 +61,10 @@ namespace synth
 			envelope.attack();
 			_is_active = true;
 			my_note = note;
+			for(int t=0;t<9;t++)
+				{
+				_steps[t] = tables::step_table[tables::switchbox[note*9 + t]];
+				}
 			}
 
 		inline void voice_organ::deactivate()
@@ -106,12 +114,22 @@ namespace synth
 				return static_cast<voice::sample_t>(0ul);
 				}
 
-			int i = 9;
-			voice::sample_t sample = 0;
-			while(i)
-				{
-				sample += get_tonewheel(--i);
-				}
+			// Nine tonewheels, written so that all loads of one stage are independent of each other:
+			//  stage 1: steps and drawbars, stage 2: wave table lookups. The compiler can then issue them back to
+			// back instead of waiting for every single load result (a load-to-use stall is ~20 cycles here).
+			const uint32_t counter = *_phase_counter;
+			const uint32_t *const st = _steps;
+			const cc::value_t *const db = _drawbars;
+			// A macro, not a lambda: at -Os the compiler does not inline lambdas, and 9 calls were slower.
+			#define PURR_WAVE(t) static_cast<int32_t>(tables::wave_sine[tables::phase_to_wave_index(counter*st[t])])
+			const int32_t w0 = PURR_WAVE(0), w1 = PURR_WAVE(1), w2 = PURR_WAVE(2), w3 = PURR_WAVE(3), w4 = PURR_WAVE(4);
+			const int32_t w5 = PURR_WAVE(5), w6 = PURR_WAVE(6), w7 = PURR_WAVE(7), w8 = PURR_WAVE(8);
+			#undef PURR_WAVE
+			voice::sample_t sample = w0*static_cast<uint8_t>(db[0]) + w1*static_cast<uint8_t>(db[1])
+								+ w2*static_cast<uint8_t>(db[2]) + w3*static_cast<uint8_t>(db[3])
+								+ w4*static_cast<uint8_t>(db[4]) + w5*static_cast<uint8_t>(db[5])
+								+ w6*static_cast<uint8_t>(db[6]) + w7*static_cast<uint8_t>(db[7])
+								+ w8*static_cast<uint8_t>(db[8]);
 
 			const uint8_t env_level = static_cast<uint8_t>(envelope.get_level());
 

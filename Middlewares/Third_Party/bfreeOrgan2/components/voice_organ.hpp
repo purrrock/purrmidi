@@ -69,6 +69,13 @@ namespace synth
 			void set_release(uint32_t value);
 
 			private:
+			/**
+			* Phase steps of the 9 tonewheels of the active note, step_table[switchbox[note*9+tone]],
+			* resolved once in activate(). get_sample() runs for every voice on every sample in the audio
+			* interrupt; resolving the two table lookups there created chains of dependent loads
+			* (switchbox -> step_table -> wave_sine) that were very slow on the STM32H7.
+			*/
+			uint32_t _steps[9];
 			#ifdef CLICK_TEST
 			/**
 			* The click generator.

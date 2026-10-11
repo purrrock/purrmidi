@@ -254,9 +254,11 @@ namespace synth
 		synth::internal_sample_t current_sample = 0;
 		for(auto &osc : oscillators)
 			{
-			if(osc.is_active())
+			// Qualified calls: direct (non-virtual) calls. The virtual dispatch read the vtable from flash
+			// (slow, uncached) for every voice and every sample.
+			if(osc.voice::voice_organ::is_active())
 				{
-				current_sample += osc.get_sample();
+				current_sample += osc.voice::voice_organ::get_sample();
 				}
 			}
 
