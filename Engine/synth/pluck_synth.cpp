@@ -59,7 +59,7 @@ static float release_coeff = 0.0f;
 
 // Переменные состояния непрерывных контроллеров (MIDI CC)
 static std::atomic<float> user_decay{0.96f};
-static std::atomic<float> user_damp{0.85f};
+static std::atomic<float> user_damp{0.92f};
 
 static PluckEvent event_fifo[EVENT_FIFO_SIZE];
 static std::atomic<uint32_t> fifo_head{0};
@@ -155,11 +155,11 @@ void PluckSynth_Init(void) {
         voices[i].string_voice.SetFreq(440.0f);
         voices[i].string_voice.SetAmp(0.5f);
         voices[i].string_voice.SetDecay(0.96f);
-        voices[i].string_voice.SetDamp(0.85f);
+        voices[i].string_voice.SetDamp(0.92f);
     }
 
     user_decay.store(0.96f, std::memory_order_relaxed);
-    user_damp.store(0.85f, std::memory_order_relaxed);
+    user_damp.store(0.92f, std::memory_order_relaxed);
 
     for (int i = 0; i < 128; i++) {
         global_note_press_count[i].store(0, std::memory_order_relaxed);

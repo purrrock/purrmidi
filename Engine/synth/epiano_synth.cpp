@@ -86,7 +86,7 @@ uint32_t       g_age_counter = 0;
 
 /* Состояние контроллеров — принадлежит аудиоконтексту */
 bool           g_sustain      = false;
-float          g_brightness   = 1.0f;
+float          g_brightness   = 1.4f;
 float          g_volume       = 1.0f;
 float          g_release_coeff = 0.0f;
 float          g_kill_coeff   = 0.0f;
@@ -299,7 +299,7 @@ void apply_cc(uint8_t control, uint8_t value)
         case 1:
         case 71:
         case 74:
-            g_brightness = 0.3f + 1.4f * norm;      /* 64 -> ~1.0 */
+            g_brightness = 0.7f + 1.4f * norm;      /* 64 -> ~1.0 */
             break;
         case 7:
             g_volume = norm;
@@ -419,7 +419,7 @@ void EPianoSynth_Init(void)
     g_age_counter = 0;
 
     g_sustain       = false;
-    g_brightness    = 1.0f;
+    g_brightness    = 1.4f;
     g_volume        = 1.0f;
     g_release_coeff = t60_to_coeff(EPIANO_DEFAULT_REL_SEC);
     g_kill_coeff    = t60_to_coeff(0.02f);
