@@ -91,6 +91,7 @@ static uint16_t active_note_count = 0;
 #define ENABLE_ICACHE 1
 
 extern uint32_t _sitcm_text;   /* linker symbol: start of the code copied to ITCM */
+void OrganProfile_Run(void);   /* Engine/synth/organ_profile.cpp */
 
 /* 16 independent 32-bit loads per pass, 'reps' passes, pure asm so the compiler adds no stack traffic.
  * Returns elapsed CPU cycles. */
@@ -330,6 +331,8 @@ int main(void)
                (unsigned long)sum);
       }
     }
+
+    OrganProfile_Run();
 
     /* Straight-line load benchmark: separates the cost of the LOAD from the cost of FETCHING the code.
      * rows = where the code runs, columns = where the data is. Value = CPU cycles per load. */

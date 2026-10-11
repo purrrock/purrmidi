@@ -107,6 +107,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Engine/synth/synth_engine.cpp
     Engine/synth/epiano_synth.cpp
     Engine/synth/organ_synth.cpp
+    Engine/synth/organ_profile.cpp
     Engine/synth/pluck_synth.cpp
     Engine/synth/sine_synth.c
     Engine/synth/soundfont_synth.cpp
