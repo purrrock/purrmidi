@@ -1,0 +1,46 @@
+diff --git a/Core/Src/main.c b/Core/Src/main.c
+index cdda063..b95442d 100644
+--- a/Core/Src/main.c
++++ b/Core/Src/main.c
+@@ -270,6 +270,41 @@ int main(void)
+       printf("[BENCH] spin 1M iterations, IRQ %s: %lu cycles\r\n", irq_off ? "OFF" : "on ", (unsigned long)dt);
+     }
+ 
++    /* Where do data accesses go and how fast are they? 1M dependent 32-bit loads from each memory.
++     * Zero-wait TCM = about 1-2 cycles per load. Tens of cycles per load = the CPU reaches that
++     * memory over a slow bus path (TCM interface disabled, wrong memory attributes, ...). */
++    printf("[BENCH] SCB->ITCMCR=0x%08lX DTCMCR=0x%08lX CCR=0x%08lX CACR=0x%08lX\r\n",
++           (unsigned long)SCB->ITCMCR, (unsigned long)SCB->DTCMCR, (unsigned long)SCB->CCR,
++           (unsigned long)SCB->CACR);
++    {
++      static const struct { const char *name; uint32_t addr; } regions[] = {
++        { "ITCM   0x00000400", 0x00000400UL },
++        { "DTCM   0x2001C000", 0x2001C000UL },
++        { "AXI    0x24060000", 0x24060000UL },
++        { "RAM_D2 0x30020000", 0x30020000UL },
++        { "FLASH  0x08010000", 0x08010000UL },
++      };
++      for (unsigned r = 0; r < sizeof(regions) / sizeof(regions[0]); r++)
++      {
++        volatile uint32_t *p = (volatile uint32_t *)regions[r].addr;
++        uint32_t sum = 0;
++        if (regions[r].addr >= 0x20000000UL)
++        {
++          /* RAM has ECC: initialise the test words (full-word writes) before reading them. */
++          for (uint32_t i = 0; i < 256U; i++) { p[i] = i; }
++        }
++        uint32_t t0 = DWT->CYCCNT;
++        for (uint32_t i = 0; i < 100000U; i++)
++        {
++          sum += p[i & 0xFFU];       /* 1 KB working set, 4-byte stride */
++        }
++        uint32_t dt = DWT->CYCCNT - t0;
++        printf("[BENCH] 100k loads from %s: %lu cycles (%lu.%02lu per load) sum=%lu\r\n", regions[r].name,
++               (unsigned long)dt, (unsigned long)(dt / 100000U), (unsigned long)((dt / 1000U) % 100U),
++               (unsigned long)sum);
++      }
++    }
++
+     for (int e = 0; e < 2; e++)
+     {
+       for (unsigned c = 0; c < sizeof(bench_counts) / sizeof(bench_counts[0]); c++)

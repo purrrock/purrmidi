@@ -1,0 +1,268 @@
+diff --git a/Core/Inc/sd_storage.h b/Core/Inc/sd_storage.h
+index d6b74fb..6c7eee2 100644
+--- a/Core/Inc/sd_storage.h
++++ b/Core/Inc/sd_storage.h
+@@ -16,6 +16,7 @@
+ #define SD_STORAGE_H
+ 
+ #include <stdbool.h>
++#include <stdint.h>
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -33,6 +34,28 @@ typedef enum {
+  *  Безопасно вызывать повторно (например, после вставки карты). */
+ SDStorage_Result SDStorage_Mount(void);
+ 
++/** Диагностика последней попытки SDStorage_Mount(): на каком этапе и почему не получилось. */
++typedef struct {
++    SDStorage_Result result;   /* итог последнего SDStorage_Mount() */
++    int      detect_level;     /* сырой уровень SD_DETECT (0/1), -1 если пин не назван SD_DETECT */
++    int      hal_init;         /* результат HAL_SD_Init (HAL_OK=0, HAL_ERROR=1, ...), -1 если не вызывался */
++    int      hal_wide;         /* результат HAL_SD_ConfigWideBusOperation, -1 если не вызывался */
++    uint32_t hal_error;        /* hsd1.ErrorCode (маска HAL_SD_ERROR_*, 0 = нет ошибки) */
++    int      link_ret;         /* результат FATFS_LinkDriver (0 = успех), -1 если не вызывался */
++    int      f_mount_res;      /* FRESULT от f_mount, -1 если не вызывался */
++} SDStorage_Diag;
++
++const SDStorage_Diag *SDStorage_GetDiag(void);
++
++/** Короткое имя результата для логов. */
++const char *SDStorage_ResultName(SDStorage_Result r);
++
++/** Печатает SDStorage_Diag в stderr (UART). */
++void SDStorage_PrintDiag(void);
++
++/** Печатает в stderr содержимое корня тома (до 24 записей): видно, как файл называется на самом деле. */
++void SDStorage_ListRoot(void);
++
+ /** Размонтирует том и выключает SDMMC1. */
+ void SDStorage_Unmount(void);
+ 
+diff --git a/Core/Src/sd_storage.c b/Core/Src/sd_storage.c
+index 3e60075..cf736a1 100644
+--- a/Core/Src/sd_storage.c
++++ b/Core/Src/sd_storage.c
+@@ -17,6 +17,7 @@
+ #include "ff_gen_drv.h"
+ 
+ #include <stdint.h>
++#include <stdio.h>
+ #include <string.h>
+ 
+ /* ----------------------------- настройки ----------------------------------- */
+@@ -48,6 +49,14 @@
+ #define SD_DETECT_ACTIVE_LEVEL  GPIO_PIN_RESET
+ #endif
+ 
++/* 1 = если SD_DETECT показывает "карты нет", SDStorage_Mount() сразу возвращает SDS_ERR_NO_CARD.
++ * 0 (по умолчанию) = датчик только пишется в диагностику, а инициализация карты всё равно
++ * пробуется: HAL_SD_Init сам вернёт ошибку, если карты действительно нет. Датчик на плате
++ * идёт через перемычку SB2, и без подтяжки в gpio.c его уровень может быть произвольным. */
++#ifndef SD_DETECT_ENFORCE
++#define SD_DETECT_ENFORCE       0
++#endif
++
+ #define SD_SECTOR_SIZE          512U
+ 
+ /* AXI SRAM: единственная область, про которую точно известно, что IDMA SDMMC1 её видит. */
+@@ -65,6 +74,7 @@ static volatile uint8_t s_xfer_state;   /* 0 - идёт, 1 - готово, 2 - 
+ static uint8_t s_hw_ready;              /* SDMMC1 + карта инициализированы */
+ static uint8_t s_linked;
+ static uint8_t s_mounted;
++static SDStorage_Diag s_diag = { SDS_OK, -1, -1, -1, 0U, -1, -1 };
+ 
+ /* ----------------------- callbacks HAL (вызываются из IRQ) ------------------ */
+ 
+@@ -259,8 +269,13 @@ static int sd_hw_init(void)
+     hsd1.Init.HardwareFlowControl = SDMMC_HARDWARE_FLOW_CONTROL_DISABLE;
+     hsd1.Init.ClockDiv            = SD_CLOCK_DIV;
+ 
+-    if (HAL_SD_Init(&hsd1) != HAL_OK) return -1;
+-    if (HAL_SD_ConfigWideBusOperation(&hsd1, SDMMC_BUS_WIDE_4B) != HAL_OK) {
++    s_diag.hal_init = (int)HAL_SD_Init(&hsd1);
++    s_diag.hal_error = HAL_SD_GetError(&hsd1);
++    if (s_diag.hal_init != (int)HAL_OK) return -1;
++
++    s_diag.hal_wide = (int)HAL_SD_ConfigWideBusOperation(&hsd1, SDMMC_BUS_WIDE_4B);
++    s_diag.hal_error = HAL_SD_GetError(&hsd1);
++    if (s_diag.hal_wide != (int)HAL_OK) {
+         (void)HAL_SD_DeInit(&hsd1);
+         return -1;
+     }
+@@ -271,30 +286,113 @@ SDStorage_Result SDStorage_Mount(void)
+ {
+     if (s_mounted) return SDS_OK;
+ 
+-    if (!SDStorage_CardPresent()) return SDS_ERR_NO_CARD;
++    s_diag.result       = SDS_OK;
++    s_diag.detect_level = -1;
++    s_diag.hal_init     = -1;
++    s_diag.hal_wide     = -1;
++    s_diag.hal_error    = 0U;
++    s_diag.link_ret     = -1;
++    s_diag.f_mount_res  = -1;
++#ifdef SD_DETECT_Pin
++    s_diag.detect_level = (HAL_GPIO_ReadPin(SD_DETECT_GPIO_Port, SD_DETECT_Pin) == GPIO_PIN_SET) ? 1 : 0;
++#endif
++
++#if SD_DETECT_ENFORCE
++    if (!SDStorage_CardPresent()) {
++        s_diag.result = SDS_ERR_NO_CARD;
++        return SDS_ERR_NO_CARD;
++    }
++#endif
+ 
+-    if (sd_hw_init() != 0) return SDS_ERR_INIT;
++    if (sd_hw_init() != 0) {
++        s_diag.result = SDS_ERR_INIT;
++        return SDS_ERR_INIT;
++    }
+     s_hw_ready = 1;
+ 
+     if (!s_linked) {
+-        if (FATFS_LinkDriver(&s_driver, s_path) != 0U) {
++        s_diag.link_ret = (int)FATFS_LinkDriver(&s_driver, s_path);
++        if (s_diag.link_ret != 0) {
+             s_hw_ready = 0;
+             (void)HAL_SD_DeInit(&hsd1);
++            s_diag.result = SDS_ERR_LINK;
+             return SDS_ERR_LINK;
+         }
+         s_linked = 1;
+     }
+ 
+-    if (f_mount(&s_fs, s_path, 1) != FR_OK) {
++    s_diag.f_mount_res = (int)f_mount(&s_fs, s_path, 1);
++    if (s_diag.f_mount_res != (int)FR_OK) {
+         s_hw_ready = 0;
+         (void)HAL_SD_DeInit(&hsd1);
++        s_diag.result = SDS_ERR_MOUNT;
+         return SDS_ERR_MOUNT;
+     }
+ 
+     s_mounted = 1;
++    s_diag.result = SDS_OK;
+     return SDS_OK;
+ }
+ 
++const SDStorage_Diag *SDStorage_GetDiag(void)
++{
++    return &s_diag;
++}
++
++const char *SDStorage_ResultName(SDStorage_Result r)
++{
++    switch (r) {
++    case SDS_OK:          return "OK";
++    case SDS_ERR_NO_CARD: return "NO_CARD (SD_DETECT)";
++    case SDS_ERR_INIT:    return "INIT (HAL_SD_Init / 4-bit)";
++    case SDS_ERR_LINK:    return "LINK (FATFS_LinkDriver)";
++    case SDS_ERR_MOUNT:   return "MOUNT (f_mount)";
++    default:              return "?";
++    }
++}
++
++void SDStorage_PrintDiag(void)
++{
++    fprintf(stderr, "[SD] result=%s\n", SDStorage_ResultName(s_diag.result));
++    fprintf(stderr, "[SD] SD_DETECT raw level=%d (-1 = pin not named SD_DETECT; present when %d)\n",
++            s_diag.detect_level, (SD_DETECT_ACTIVE_LEVEL == GPIO_PIN_SET) ? 1 : 0);
++    fprintf(stderr, "[SD] HAL_SD_Init=%d wide4b=%d hsd.ErrorCode=0x%08lX link=%d f_mount=%d\n",
++            s_diag.hal_init, s_diag.hal_wide, (unsigned long)s_diag.hal_error,
++            s_diag.link_ret, s_diag.f_mount_res);
++    if (s_hw_ready) {
++        fprintf(stderr, "[SD] card type=%lu blocks=%lu\n",
++                (unsigned long)hsd1.SdCard.CardType, (unsigned long)hsd1.SdCard.LogBlockNbr);
++    }
++}
++
++void SDStorage_ListRoot(void)
++{
++    DIR dir;
++    FILINFO fno;
++    FRESULT fr;
++    unsigned shown = 0U;
++
++    fr = f_opendir(&dir, s_path);
++    if (fr != FR_OK) {
++        fprintf(stderr, "[SD] f_opendir('%s') failed: FRESULT=%d\n", s_path, (int)fr);
++        return;
++    }
++    fprintf(stderr, "[SD] root directory '%s':\n", s_path);
++    for (;;) {
++        fr = f_readdir(&dir, &fno);
++        if (fr != FR_OK || fno.fname[0] == 0) break;
++        const char *name = fno.fname;   /* в этой версии FatFs тут длинное имя (при _USE_LFN != 0) */
++        fprintf(stderr, "[SD]   %s%s  (%lu bytes)\n", name,
++                (fno.fattrib & AM_DIR) ? "/" : "", (unsigned long)fno.fsize);
++        if (++shown >= 24U) {
++            fprintf(stderr, "[SD]   ...\n");
++            break;
++        }
++    }
++    if (shown == 0U) fprintf(stderr, "[SD]   (empty)\n");
++    (void)f_closedir(&dir);
++}
++
+ void SDStorage_Unmount(void)
+ {
+     if (s_mounted) {
+diff --git a/Engine/synth/sf2_cache.cpp b/Engine/synth/sf2_cache.cpp
+index 87a80a1..bb79d81 100644
+--- a/Engine/synth/sf2_cache.cpp
++++ b/Engine/synth/sf2_cache.cpp
+@@ -128,14 +128,22 @@ bool SF2Cache_OpenFile(const char *filepath)
+     return g_host_file != nullptr;
+ #else
+     if (!SDStorage_IsMounted()) {
+-        if (SDStorage_Mount() != SDS_OK) {
++        const SDStorage_Result mr = SDStorage_Mount();
++        if (mr != SDS_OK) {
++            std::fprintf(stderr, "[SF2] SD mount failed: %s\n", SDStorage_ResultName(mr));
++            SDStorage_PrintDiag();
+             return false;
+         }
++        std::fprintf(stderr, "[SF2] SD card mounted\n");
+     }
+-    if (f_open(&g_fatfs_file, filepath, FA_READ) == FR_OK) {
++    const FRESULT fr = f_open(&g_fatfs_file, filepath, FA_READ);
++    if (fr == FR_OK) {
+         g_fatfs_open = true;
+         return true;
+     }
++    std::fprintf(stderr, "[SF2] f_open('%s') failed: FRESULT=%d (4=NO_FILE, 5=NO_PATH, 3=NOT_READY, 1=DISK_ERR, 13=NO_FILESYSTEM)\n",
++                 filepath, (int)fr);
++    SDStorage_ListRoot();
+     return false;
+ #endif
+ }
+diff --git a/README.md b/README.md
+index a0c9830..1069c59 100644
+--- a/README.md
++++ b/README.md
+@@ -212,10 +212,23 @@ GitHub Actions (`.github/workflows/host-ci.yml`) выполняет:
+ 2. **Clock divide factor:** `4` при источнике SDMMC 192 МГц, что даёт частоту SDMMC_CK 24 МГц по формуле `192 МГц / (2 × 4)`.
+ 3. **GPIO:** скорость выводов `Very High`; подтяжки вверх на D0–D3 и CMD, без подтяжки на CLK.
+ 4. **Clock Configuration:** источник тактирования SDMMC — PLL1Q (192 МГц).
+-5. **Middleware → FATFS:** режим `SD Card`, `USE_LFN` — Enabled with static working buffer, `MAX_SS`/`MIN_SS` — 512, `USE_FASTSEEK` — Enabled.
++5. **Middleware → FATFS:** режим `User-defined` (диск-драйвер — `Core/Src/sd_storage.c`, вызовы `MX_SDMMC1_SD_Init` и `MX_FATFS_Init` в CubeMX отключены), `USE_LFN` — Enabled with static working buffer, `MAX_SS`/`MIN_SS` — 512, `USE_FASTSEEK` — Enabled.
+ 
+ Карту следует форматировать в FAT32. Работа SoundFont-движка зависит от наличия и корректности файла банка и конфигурации SDMMC/FatFs.
+ 
++### Диагностика: SD не монтируется / файл не открывается
++При сбое в UART выводятся строки `[SD] ...` и `[SF2] ...`, по ним видно, на каком этапе остановилось:
++
++| Строка в логе | Что означает |
++|---|---|
++| `SD mount failed: NO_CARD` | Включена проверка `SD_DETECT_ENFORCE=1`, и датчик показывает «карты нет». |
++| `SD mount failed: INIT`, `hsd.ErrorCode=0x...` | `HAL_SD_Init` не смог поднять карту: контакт, питание, тактирование, несовместимая карта. Код расшифровывается по маске `HAL_SD_ERROR_*`. |
++| `SD mount failed: LINK` | `FATFS_LinkDriver` не удался: в проекте остался вызов `MX_FATFS_Init` или `_VOLUMES` ≠ 1. |
++| `SD mount failed: MOUNT`, `f_mount=13` | Карта читается, но FatFs не нашёл файловую систему (`FR_NO_FILESYSTEM`). Проверьте разметку и формат. |
++| `f_open(...) failed: FRESULT=4` | Файла с таким именем в корне нет. Следом печатается список корня `[SD] root directory`, там видны реальные имена (частый случай: Windows скрыл расширение, и файл называется `SNDFNT.SF2.sf2`). |
++
++Датчик карты `SD_DETECT` (PD4) по умолчанию только пишется в диагностику (`SD_DETECT_ENFORCE=0`) и не блокирует монтирование: на плате он идёт через перемычку SB2, а в `gpio.c` для PD4 стоит `GPIO_NOPULL`, поэтому уровень может быть произвольным. Чтобы использовать его по назначению, включите для PD4 подтяжку в CubeMX, по логу `SD_DETECT raw level` определите уровень при вставленной карте, задайте `SD_DETECT_ACTIVE_LEVEL` и только потом включайте `SD_DETECT_ENFORCE=1`.
++
+ ## Сборка
+ 
+ ### Инициализация подмодулей

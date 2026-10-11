@@ -1,0 +1,1132 @@
+diff --git a/Core/Inc/display.h b/Core/Inc/display.h
+index d1fd383..2c69244 100644
+--- a/Core/Inc/display.h
++++ b/Core/Inc/display.h
+@@ -8,20 +8,70 @@
+ extern "C" {
+ #endif
+ 
++/*
++ * PurrMidi UI, 160x80, один экран без переключений:
++ *
++ *   y  0..13  шапка: точка статуса USB, имя клавиатуры, SUS, V used/max
++ *             (при ошибке - красная плашка "! E03 MIDI QUEUE FULL")
++ *   y 16..31  номер пресета и название инструмента
++ *   y 34..65  нота / аккорд крупно (+ номер ноты и velocity)
++ *   y 67..79  громкость: полоса и проценты
++ *
++ * Все функции Display_* вызываются ТОЛЬКО из главного цикла (не из ISR).
++ * Сеттеры лишь обновляют состояние и помечают поля "грязными";
++ * реальная отрисовка происходит в Display_Task().
++ */
++
++typedef enum
++{
++    DISPLAY_LINK_NONE = 0,      /* клавиатуры нет            (серая точка)  */
++    DISPLAY_LINK_ENUMERATING,   /* идёт энумерация           (жёлтая точка) */
++    DISPLAY_LINK_READY          /* клавиатура готова         (зелёная точка)*/
++} Display_Link_t;
++
++/* Коды ошибок (красная плашка в шапке) */
++typedef enum
++{
++    DISPLAY_ERR_NONE = 0,
++    DISPLAY_ERR_USB_ENUM,       /* E01 USB ENUM FAIL     - до смены состояния USB-линка */
++    DISPLAY_ERR_AUDIO_DMA,      /* E02 AUDIO DMA ERROR   - гаснет через 3 с             */
++    DISPLAY_ERR_MIDI_QUEUE,     /* E03 MIDI QUEUE FULL   - гаснет через 3 с             */
++    DISPLAY_ERR_USB_RX,         /* E04 USB RX ERROR      - гаснет через 3 с             */
++    DISPLAY_ERR_COUNT
++} Display_Error_t;
++
+ void Display_Init(void);
+ 
+-void Display_SetMidiConnected(bool connected);
++/* Вызывать из главного цикла как можно чаще: рисует не более одного поля за вызов. */
++void Display_Task(void);
+ 
+-void Display_SetLastNote(uint8_t note);
++/* ---- Подключение ---- */
++void Display_SetMidiConnected(bool connected);          /* совместимость со старым API */
++void Display_SetLinkState(Display_Link_t state);
++void Display_SetDeviceName(const char *name);           /* до 12 символов; NULL -> "USB MIDI" */
++void Display_MidiActivity(void);                        /* короткая вспышка точки на каждое MIDI-событие */
+ 
++/* ---- Ноты ---- */
++void Display_SetLastNote(uint8_t note);                 /* совместимость со старым API */
+ void Display_SetNoteState(
+     const uint8_t *active_notes,
+     uint16_t active_note_count,
+-    uint8_t last_note
+-);
++    uint8_t last_note);
++void Display_SetVelocity(uint8_t velocity);             /* 0 = не показывать */
++void Display_SetSustain(bool on);
++
++/* ---- Инструмент и громкость ---- */
++void Display_SetPatch(uint8_t index, const char *name); /* имя до 17 символов, только ASCII */
++void Display_SetVoices(uint8_t used, uint8_t max);      /* max = 0 -> индикатор скрыт */
++void Display_SetVolume(uint8_t percent);                /* 0..100; пока не вызвана - "--%" */
++void Display_SetClip(bool clipping);                    /* полоса громкости краснеет */
++
++/* ---- Ошибки ---- */
++void Display_ShowError(Display_Error_t code);
++void Display_ClearError(Display_Error_t code);
+ 
+ #ifdef __cplusplus
+ }
+ #endif
+ 
+-#endif /* DISPLAY_H */
+\ No newline at end of file
++#endif /* DISPLAY_H */
+diff --git a/Core/Src/display.c b/Core/Src/display.c
+index e269452..dfea0b0 100644
+--- a/Core/Src/display.c
++++ b/Core/Src/display.c
+@@ -10,6 +10,10 @@
+ #include <stdio.h>
+ #include <string.h>
+ 
++/* ------------------------------------------------------------------------- */
++/* Hardware                                                                  */
++/* ------------------------------------------------------------------------- */
++
+ #define DISPLAY_WIDTH   160U
+ #define DISPLAY_HEIGHT   80U
+ 
+@@ -26,22 +30,122 @@
+ #define LCD_BL_ON        GPIO_PIN_RESET
+ #define LCD_BL_OFF       GPIO_PIN_SET
+ 
+-#define COLOR_BLACK      0x0000U
+-#define COLOR_WHITE      0xFFFFU
+-
+-/* Максимальный размер глифа (шрифт 16 -> 8x16) */
+-#define GLYPH_MAX_W      8U
+-#define GLYPH_MAX_H      16U
+-
+ extern SPI_HandleTypeDef hspi4;
+ 
+ static ST7735_Object_t st7735;
+ static ST7735_Ctx_t st7735_ctx;
+-
+-static bool midi_connected = false;
+-static uint8_t last_note = 0;
+-static bool have_last_note = false;
+ static bool display_ready = false;   /* true только после успешной инициализации */
++
++/* ------------------------------------------------------------------------- */
++/* Layout / palette                                                          */
++/* ------------------------------------------------------------------------- */
++
++#define HDR_Y        0U
++#define HDR_H       14U
++#define INS_Y       16U
++#define INS_H       16U
++#define NOTE_Y      34U
++#define NOTE_H      32U
++#define VOL_Y       67U
++#define VOL_H       13U
++
++#define DOT_X        3U
++#define DOT_Y        3U
++#define DOT_SIZE     7U
++
++#define MIN_DRAW_INTERVAL_MS   10U   /* пауза между отрисовками полей        */
++#define ERROR_TIMEOUT_MS     3000U   /* время показа "временной" ошибки      */
++#define ACTIVITY_FLASH_MS      60U   /* длительность вспышки MIDI-точки      */
++
++#define RGB565(r, g, b) \
++    ((uint16_t)((((r) & 0xF8U) << 8) | (((g) & 0xFCU) << 3) | (((b) & 0xFFU) >> 3)))
++
++#define C_BLACK     RGB565(  0,   0,   0)
++#define C_WHITE     RGB565(240, 240, 240)
++#define C_DIM       RGB565(105, 110, 125)
++#define C_GRAY      RGB565( 90,  90, 100)
++#define C_IDLE      RGB565( 70,  70,  80)
++#define C_HDR       RGB565( 22,  27,  42)
++#define C_CYAN      RGB565(  0, 200, 230)
++#define C_AMBER     RGB565(255, 190,  40)
++#define C_MINT      RGB565(120, 255, 160)
++#define C_RED       RGB565(225,  45,  45)
++#define C_GREEN     RGB565( 40, 220,  80)
++#define C_GREEN_HI  RGB565(190, 255, 200)
++#define C_YELLOW    RGB565(240, 210,  40)
++
++/* Поля, которые можно перерисовать независимо */
++#define F_HEADER    (1U << 0)
++#define F_DOT       (1U << 1)
++#define F_INSTR     (1U << 2)
++#define F_NOTE      (1U << 3)
++#define F_VOLUME    (1U << 4)
++#define F_ALL       (F_HEADER | F_DOT | F_INSTR | F_NOTE | F_VOLUME)
++
++/* ------------------------------------------------------------------------- */
++/* UI state                                                                  */
++/* ------------------------------------------------------------------------- */
++
++typedef enum { NOTE_KIND_NONE = 0, NOTE_KIND_SINGLE, NOTE_KIND_CHORD } NoteKind_t;
++
++typedef struct
++{
++    bool     active;
++    uint32_t expire;      /* tick, когда временная ошибка гаснет */
++    uint32_t stamp;       /* порядковый номер появления          */
++} ErrorSlot_t;
++
++static const struct
++{
++    const char *text;
++    bool        sticky;
++} error_info[DISPLAY_ERR_COUNT] =
++{
++    [DISPLAY_ERR_NONE]       = { "",                 false },
++    [DISPLAY_ERR_USB_ENUM]   = { "USB ENUM FAIL",    true  },
++    [DISPLAY_ERR_AUDIO_DMA]  = { "AUDIO DMA ERROR",  false },
++    [DISPLAY_ERR_MIDI_QUEUE] = { "MIDI QUEUE FULL",  false },
++    [DISPLAY_ERR_USB_RX]     = { "USB RX ERROR",     false },
++};
++
++static struct
++{
++    Display_Link_t link;
++    char           device[13];
++    bool           flash_on;
++    uint32_t       flash_until;
++
++    NoteKind_t     kind;
++    bool           note_live;        /* клавиши сейчас нажаты; иначе - серая "последняя" */
++    uint8_t        note;
++    uint16_t       key_count;
++    char           chord[16];
++    uint8_t        velocity;
++    bool           sustain;
++
++    uint8_t        patch_index;
++    char           patch_name[18];
++
++    uint8_t        voices_used;
++    uint8_t        voices_max;
++
++    bool           volume_valid;
++    uint8_t        volume;
++    bool           clip;
++
++    ErrorSlot_t    errors[DISPLAY_ERR_COUNT];
++    uint32_t       error_stamp;
++
++    uint32_t       dirty;
++    uint32_t       last_draw_tick;
++} ui =
++{
++    .link        = DISPLAY_LINK_NONE,
++    .patch_index = 1,
++    .patch_name  = "Pluck",
++    .dirty       = F_ALL,
++};
++
+ static const char * const note_names[12] =
+ {
+     "C", "C#", "D", "D#", "E", "F",
+@@ -114,144 +218,405 @@ static ST7735_IO_t st7735_io =
+ };
+ 
+ /* ------------------------------------------------------------------------- */
+-/* Text rendering                                                            */
++/* Canvas: поле рисуется целиком в RAM и уходит на экран одним блитом        */
++/* (нет мерцания "стёрли -> нарисовали", меньше SPI-команд)                  */
+ /* ------------------------------------------------------------------------- */
+ 
++#define CANVAS_MAX_W   DISPLAY_WIDTH
++#define CANVAS_MAX_H   32U
++
++static uint16_t canvas[CANVAS_MAX_W * CANVAS_MAX_H];
++static uint16_t canvas_w;
++static uint16_t canvas_h;
++
++/*
++ * ST7735_FillRGBRect() отправляет байты в порядке памяти (на Cortex-M это
++ * младший байт первым), а панель ждёт старший первым. Поэтому в буфере
++ * хранится цвет с переставленными байтами. (FillRect/DrawHLine меняют байты
++ * сами - с ними такой проблемы нет.)
++ */
++static inline uint16_t Swap16(uint16_t c)
++{
++    return (uint16_t)((c << 8) | (c >> 8));
++}
++
++static void Canvas_Begin(uint16_t w, uint16_t h, uint16_t bg)
++{
++    canvas_w = w;
++    canvas_h = h;
++
++    const uint16_t v = Swap16(bg);
++    for (uint32_t i = 0; i < (uint32_t)w * h; i++)
++    {
++        canvas[i] = v;
++    }
++}
++
++static void Canvas_Rect(int x, int y, int w, int h, uint16_t color)
++{
++    const uint16_t v = Swap16(color);
++
++    for (int yy = y; yy < y + h; yy++)
++    {
++        if (yy < 0 || yy >= (int)canvas_h) { continue; }
++
++        for (int xx = x; xx < x + w; xx++)
++        {
++            if (xx >= 0 && xx < (int)canvas_w)
++            {
++                canvas[yy * canvas_w + xx] = v;
++            }
++        }
++    }
++}
++
+ /*
+  * Формат шрифта asc2_1206 / asc2_1608: глиф хранится по столбцам слева
+  * направо, каждый столбец занимает (size + 7) / 8 байт, внутри байта
+- * старший бит - верхняя строка.
++ * старший бит - верхняя строка. Рисуются только "включённые" пиксели,
++ * фон уже залит Canvas_Begin().
+  */
+-static void Display_DrawChar(
+-    uint16_t x,
+-    uint16_t y,
+-    char c,
+-    uint8_t size)
++static void Canvas_Char(int x, int y, char c, uint8_t size, uint8_t scale, uint16_t color)
+ {
+     if (c < ' ' || c > '~' || (size != 12U && size != 16U))
+     {
+         return;
+     }
+ 
+-    const uint8_t width     = size / 2U;            /* 6 или 8 */
+-    const uint8_t col_bytes = (size + 7U) / 8U;     /* 2 для обоих шрифтов */
++    const uint8_t width     = size / 2U;
++    const uint8_t col_bytes = (size + 7U) / 8U;
+     const uint8_t *glyph    = (size == 12U) ? asc2_1206[c - ' ']
+                                             : asc2_1608[c - ' '];
+ 
+-    uint16_t pixels[GLYPH_MAX_W * GLYPH_MAX_H];
+-    memset(pixels, 0, (size_t)width * size * sizeof(pixels[0]));
+-
+     for (uint8_t col = 0; col < width; col++)
+     {
+         for (uint8_t row = 0; row < size; row++)
+         {
+-            uint8_t bits = glyph[col * col_bytes + (row >> 3)];
++            const uint8_t bits = glyph[col * col_bytes + (row >> 3)];
+ 
+             if (bits & (0x80U >> (row & 7U)))
+             {
+-                pixels[row * width + col] = COLOR_WHITE;
++                Canvas_Rect(x + col * scale, y + row * scale, scale, scale, color);
+             }
+         }
+     }
++}
+ 
+-    ST7735_FillRGBRect(&st7735, x, y, (uint8_t *)pixels, width, size);
++/* Возвращает X сразу за последним символом */
++static int Canvas_Text(int x, int y, const char *text, uint8_t size, uint8_t scale, uint16_t color)
++{
++    for (; *text != '\0'; text++)
++    {
++        Canvas_Char(x, y, *text, size, scale, color);
++        x += (size / 2) * scale;
++    }
++    return x;
+ }
+ 
+-/*
+- * Каждый символ рисуется вместе с чёрным фоном, поэтому текст сам стирает
+- * то, что было под ним. Если новая строка короче прежней, её нужно
+- * дополнить пробелами - иначе останется "хвост" от старой.
+- */
+-static void Display_DrawString(
+-    uint16_t x,
+-    uint16_t y,
+-    uint8_t size,
+-    const char *text)
++static void Canvas_Flush(uint16_t x, uint16_t y)
+ {
+     if (!display_ready) { return; }
+-	
+-    const uint16_t char_width = size / 2U;
+ 
+-    for (; *text != '\0' && x + char_width <= DISPLAY_WIDTH; text++)
++    ST7735_FillRGBRect(&st7735, x, y, (uint8_t *)canvas, canvas_w, canvas_h);
++}
++
++/* ------------------------------------------------------------------------- */
++/* Helpers                                                                   */
++/* ------------------------------------------------------------------------- */
++
++static void CopyText(char *dst, size_t dst_size, const char *src)
++{
++    if (src == NULL) { src = ""; }
++
++    size_t i = 0;
++    for (; i + 1 < dst_size && src[i] != '\0'; i++)
++    {
++        /* шрифт только ASCII */
++        dst[i] = (src[i] >= ' ' && src[i] <= '~') ? src[i] : '?';
++    }
++    dst[i] = '\0';
++}
++
++static void MarkDirty(uint32_t fields)
++{
++    ui.dirty |= fields;
++}
++
++/* Какую ошибку показывать: липкая важнее временной, среди равных - более новая */
++static Display_Error_t Error_Pick(uint8_t *extra)
++{
++    Display_Error_t best = DISPLAY_ERR_NONE;
++    uint8_t count = 0;
++
++    for (uint8_t i = 1; i < DISPLAY_ERR_COUNT; i++)
+     {
+-        Display_DrawChar(x, y, *text, size);
+-        x += char_width;
++        if (!ui.errors[i].active) { continue; }
++        count++;
++
++        if (best == DISPLAY_ERR_NONE)
++        {
++            best = (Display_Error_t)i;
++            continue;
++        }
++
++        const bool best_sticky = error_info[best].sticky;
++        const bool cur_sticky  = error_info[i].sticky;
++
++        if ((cur_sticky && !best_sticky) ||
++            (cur_sticky == best_sticky && ui.errors[i].stamp > ui.errors[best].stamp))
++        {
++            best = (Display_Error_t)i;
++        }
+     }
++
++    if (extra != NULL) { *extra = (count > 0) ? (uint8_t)(count - 1) : 0; }
++    return best;
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+-/* Screen contents (перерисовываются по частям, без очистки всего экрана)    */
++/* Field renderers                                                           */
+ /* ------------------------------------------------------------------------- */
+ 
+-static void Display_DrawStatus(void)
++static uint16_t Dot_Color(void)
+ {
+-    /* Обе строки по 18 символов, чтобы одна полностью затирала другую */
+-    Display_DrawString(
+-        2, 15, 12,
+-        midi_connected ? "MIDI: connected   " : "MIDI: disconnected");
++    if (ui.errors[DISPLAY_ERR_USB_ENUM].active) { return C_RED; }
++
++    switch (ui.link)
++    {
++        case DISPLAY_LINK_READY:
++            return ui.flash_on ? C_GREEN_HI : C_GREEN;
++        case DISPLAY_LINK_ENUMERATING:
++            return C_YELLOW;
++        default:
++            return C_GRAY;
++    }
+ }
+ 
+-static void Display_DrawNoteState(
+-    const uint8_t *active_notes,
+-    uint16_t active_note_count,
+-    uint8_t note_val)
++static void Canvas_Dot(int x, int y, uint16_t color)
+ {
+-    char text[20];
++    /* Круг 7x7; бит 6 - левый столбец */
++    static const uint8_t mask[DOT_SIZE] = { 0x1C, 0x3E, 0x7F, 0x7F, 0x7F, 0x3E, 0x1C };
+ 
+-    if (active_note_count == 0)
++    for (int row = 0; row < (int)DOT_SIZE; row++)
+     {
+-        /* Затираем область текстом из 18 пробелов (18 * 8px = 144px > DISPLAY_WIDTH) */
+-        Display_DrawString(2, 32, 16, "                  ");
+-        return;
++        for (int col = 0; col < (int)DOT_SIZE; col++)
++        {
++            if (mask[row] & (0x40U >> col))
++            {
++                Canvas_Rect(x + col, y + row, 1, 1, color);
++            }
++        }
+     }
++}
+ 
+-    if (active_note_count < 3)
+-    {
+-        /* Нота 0..11 -> октава -1, поэтому знаковый int, а не uint8_t */
+-        const int octave = (int)(note_val / 12U) - 1;
++static void Draw_Dot(void)
++{
++    Canvas_Begin(DOT_SIZE, DOT_SIZE, C_HDR);
++    Canvas_Dot(0, 0, Dot_Color());
++    Canvas_Flush(DOT_X, DOT_Y);
++}
++
++static void Draw_Header(void)
++{
++    uint8_t extra = 0;
++    const Display_Error_t err = Error_Pick(&extra);
+ 
+-        snprintf(
+-            text,
+-            sizeof(text),
+-            "%s%d",
+-            note_names[note_val % 12U],
+-            octave);
++    if (err != DISPLAY_ERR_NONE)
++    {
++        /* Красная плашка вместо шапки: "! E03 MIDI QUEUE FULL +1" (до 26 символов) */
++        char text[32];
++        snprintf(text, sizeof(text), "! E%02u %s", (unsigned)err, error_info[err].text);
+ 
+-        /* Дополняем пробелами до 18 символов для гарантированной очистки старого текста */
+-        size_t len = strlen(text);
+-        while (len < 18 && len < sizeof(text) - 1)
++        if (extra > 0)
+         {
+-            text[len++] = ' ';
++            size_t len = strlen(text);
++            if (len > 22) { len = 22; }
++            snprintf(&text[len], sizeof(text) - len, " +%u", (unsigned)extra);
+         }
+-        text[len] = '\0';
++        text[26] = '\0';
+ 
+-        Display_DrawString(2, 32, 16, text);
++        Canvas_Begin(DISPLAY_WIDTH, HDR_H, C_RED);
++        Canvas_Text(2, 1, text, 12, 1, C_WHITE);
++        Canvas_Flush(0, HDR_Y);
++        return;
+     }
+-    else
++
++    Canvas_Begin(DISPLAY_WIDTH, HDR_H, C_HDR);
++    Canvas_Dot(DOT_X, DOT_Y, Dot_Color());
++
++    const char *name;
++    uint16_t name_color = C_DIM;
++
++    switch (ui.link)
+     {
+-        char chord_name[16];
+-        if (ChordDetector_Detect(active_notes, active_note_count, chord_name, sizeof(chord_name)))
++        case DISPLAY_LINK_READY:
++            name = (ui.device[0] != '\0') ? ui.device : "USB MIDI";
++            name_color = C_WHITE;
++            break;
++        case DISPLAY_LINK_ENUMERATING:
++            name = "connecting...";
++            break;
++        default:
++            name = "no keyboard";
++            break;
++    }
++    Canvas_Text(14, 1, name, 12, 1, name_color);
++
++    /* Правая часть: [SUS] [V used/max], выравнивание по правому краю */
++    int right = (int)DISPLAY_WIDTH - 2;
++
++    if (ui.voices_max > 0)
++    {
++        char voices[10];
++        snprintf(voices, sizeof(voices), "V%u/%u", (unsigned)ui.voices_used, (unsigned)ui.voices_max);
++        right -= (int)strlen(voices) * 6;
++        Canvas_Text(right, 1, voices, 12, 1, C_DIM);
++        right -= 6;
++    }
++
++    if (ui.sustain)
++    {
++        right -= 18;
++        Canvas_Text(right, 1, "SUS", 12, 1, C_AMBER);
++    }
++
++    Canvas_Flush(0, HDR_Y);
++}
++
++static void Draw_Instrument(void)
++{
++    char number[4];
++    snprintf(number, sizeof(number), "%02u", (unsigned)(ui.patch_index % 100U));
++
++    Canvas_Begin(DISPLAY_WIDTH, INS_H, C_BLACK);
++    Canvas_Text(2, 0, number, 16, 1, C_DIM);
++    Canvas_Text(24, 0, ui.patch_name, 16, 1, C_CYAN);
++    Canvas_Flush(0, INS_Y);
++}
++
++static void Draw_Note(void)
++{
++    Canvas_Begin(DISPLAY_WIDTH, NOTE_H, C_BLACK);
++
++    if (ui.kind != NOTE_KIND_NONE)
++    {
++        char text[16];
++        uint16_t color;
++
++        if (ui.kind == NOTE_KIND_SINGLE)
+         {
+-            snprintf(text, sizeof(text), "ch %s", chord_name);
++            /* Нота 0..11 -> октава -1, поэтому знаковый int */
++            const int octave = (int)(ui.note / 12U) - 1;
++            snprintf(text, sizeof(text), "%s%d", note_names[ui.note % 12U], octave);
++            color = ui.note_live ? C_AMBER : C_IDLE;
+         }
+         else
+         {
+-            snprintf(text, sizeof(text), "ch ???");
++            snprintf(text, sizeof(text), "%s", ui.chord);
++            color = ui.note_live ? C_MINT : C_IDLE;
+         }
+ 
+-        size_t len = strlen(text);
+-        while (len < 18 && len < sizeof(text) - 1)
++        const int len = (int)strlen(text);
++
++        /* Крупно (16x32), если помещается в 160 px, иначе обычным 8x16 */
++        const uint8_t scale = (len * 16 + 2 <= (int)DISPLAY_WIDTH) ? 2 : 1;
++        const int y = (scale == 2) ? 0 : 8;
++        const int end_x = Canvas_Text(2, y, text, 16, scale, color);
++
++        char side[12];
++
++        if (ui.kind == NOTE_KIND_SINGLE && ui.note_live)
+         {
+-            text[len++] = ' ';
++            snprintf(side, sizeof(side), "NOTE %3u", (unsigned)ui.note);
++            Canvas_Text(70, 1, side, 12, 1, C_DIM);
++
++            if (ui.velocity > 0)
++            {
++                snprintf(side, sizeof(side), "VEL  %3u", (unsigned)ui.velocity);
++                Canvas_Text(70, 16, side, 12, 1, C_DIM);
++            }
+         }
+-        text[len] = '\0';
++        else if (end_x + 4 <= 124)
++        {
++            if (ui.note_live)
++            {
++                snprintf(side, sizeof(side), "x%u", (unsigned)ui.key_count);
++                Canvas_Text(124, 18, side, 12, 1, C_DIM);
++            }
++            else
++            {
++                Canvas_Text(124, 18, "last", 12, 1, C_GRAY);
++            }
++        }
++    }
++
++    Canvas_Flush(0, NOTE_Y);
++}
++
++static void Draw_Volume(void)
++{
++    Canvas_Begin(DISPLAY_WIDTH, VOL_H, C_BLACK);
++
++    Canvas_Text(2, 0, "VOL", 12, 1, C_DIM);
++
++    /* Рамка 102x10 и внутренняя область 100x8 */
++    Canvas_Rect(26, 2, 102, 10, C_GRAY);
++    Canvas_Rect(27, 3, 100, 8, C_BLACK);
+ 
+-        Display_DrawString(2, 32, 16, text);
++    char text[8];
++
++    if (ui.volume_valid)
++    {
++        Canvas_Rect(27, 3, ui.volume, 8, ui.clip ? C_RED : C_GREEN);
++        snprintf(text, sizeof(text), "%3u%%", (unsigned)ui.volume);
++        Canvas_Text(132, 0, text, 12, 1, C_WHITE);
++    }
++    else
++    {
++        Canvas_Text(132, 0, " --%", 12, 1, C_DIM);
++    }
++
++    Canvas_Flush(0, VOL_Y);
++}
++
++/* Рисует одно "грязное" поле; возвращает true, если что-то нарисовано */
++static bool Draw_NextField(void)
++{
++    if (ui.dirty & F_HEADER)
++    {
++        ui.dirty &= ~(F_HEADER | F_DOT);   /* точка входит в шапку */
++        Draw_Header();
++    }
++    else if (ui.dirty & F_DOT)
++    {
++        ui.dirty &= ~F_DOT;
++        Draw_Dot();
++    }
++    else if (ui.dirty & F_NOTE)
++    {
++        ui.dirty &= ~F_NOTE;
++        Draw_Note();
++    }
++    else if (ui.dirty & F_INSTR)
++    {
++        ui.dirty &= ~F_INSTR;
++        Draw_Instrument();
++    }
++    else if (ui.dirty & F_VOLUME)
++    {
++        ui.dirty &= ~F_VOLUME;
++        Draw_Volume();
+     }
++    else
++    {
++        return false;
++    }
++
++    return true;
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+-/* Public API                                                                */
++/* Public API: lifecycle                                                     */
+ /* ------------------------------------------------------------------------- */
+ 
+ void Display_Init(void)
+@@ -268,8 +633,8 @@ void Display_Init(void)
+ 
+     if (ST7735_RegisterBusIO(&st7735, &st7735_io) != ST7735_OK)
+     {
+-		printf("Display: ST7735_RegisterBusIO failed, continuing without display\r\n");
+-		return;
++        printf("Display: ST7735_RegisterBusIO failed, continuing without display\r\n");
++        return;
+     }
+ 
+     if (ST7735_Init(&st7735, ST7735_FORMAT_RBG565, &st7735_ctx) != ST7735_OK)
+@@ -277,37 +642,126 @@ void Display_Init(void)
+         printf("Display: ST7735_Init failed, continuing without display\r\n");
+         return;
+     }
+-	display_ready = true;
+-	
+-    /* Единственная полная очистка экрана + статичный заголовок */
+-    ST7735_FillRect(&st7735, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, COLOR_BLACK);
+-    Display_DrawString(2, 1, 12, "PurrMidi");
+-    Display_DrawStatus();
+-    if (have_last_note)
+-    {
+-        Display_DrawNoteState(NULL, 1, last_note);
+-    }
++    display_ready = true;
++
++    /* Единственная полная очистка экрана, дальше поля перекрывают друг друга сами */
++    ST7735_FillRect(&st7735, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, C_BLACK);
++
++    /* Первая отрисовка - синхронно, без ограничения по частоте */
++    MarkDirty(F_ALL);
++    while (Draw_NextField()) { }
++    ui.last_draw_tick = HAL_GetTick();
+ 
+     ST7735_DisplayOn(&st7735);
+     HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, LCD_BL_ON); // включаем подсветку
+ }
+ 
+-void Display_SetMidiConnected(bool connected)
++void Display_Task(void)
+ {
+-    if (midi_connected == connected)
++    if (!display_ready) { return; }
++
++    const uint32_t now = HAL_GetTick();
++
++    /* Гасим временные ошибки */
++    for (uint8_t i = 1; i < DISPLAY_ERR_COUNT; i++)
++    {
++        if (ui.errors[i].active && !error_info[i].sticky &&
++            (int32_t)(now - ui.errors[i].expire) >= 0)
++        {
++            ui.errors[i].active = false;
++            MarkDirty(F_HEADER);
++        }
++    }
++
++    /* Конец вспышки MIDI-точки */
++    if (ui.flash_on && (int32_t)(now - ui.flash_until) >= 0)
++    {
++        ui.flash_on = false;
++        MarkDirty(F_DOT);
++    }
++
++    if (ui.dirty == 0U || (now - ui.last_draw_tick) < MIN_DRAW_INTERVAL_MS)
+     {
+         return;
+     }
+ 
+-    midi_connected = connected;
+-    Display_DrawStatus();
++    /* Не больше одного поля за вызов, чтобы не задерживать USB/MIDI */
++    Draw_NextField();
++    ui.last_draw_tick = HAL_GetTick();
++}
++
++/* ------------------------------------------------------------------------- */
++/* Public API: connection                                                    */
++/* ------------------------------------------------------------------------- */
++
++void Display_SetLinkState(Display_Link_t state)
++{
++    if (ui.link == state) { return; }
++
++    ui.link = state;
++    ui.errors[DISPLAY_ERR_USB_ENUM].active = false;   /* новое состояние линка - ошибка устарела */
++
++    if (state != DISPLAY_LINK_READY)
++    {
++        /* Клавиатуры нет: сбрасываем всё, что от неё зависело */
++        ui.flash_on    = false;
++        ui.sustain     = false;
++        ui.voices_used = 0;
++
++        if (ui.note_live)
++        {
++            ui.note_live = false;
++            MarkDirty(F_NOTE);
++        }
++    }
++    MarkDirty(F_HEADER);
++}
++
++void Display_SetMidiConnected(bool connected)
++{
++    if (connected)
++    {
++        Display_SetLinkState(DISPLAY_LINK_READY);
++    }
++    else if (ui.link == DISPLAY_LINK_READY)
++    {
++        /* Идущую энумерацию не затираем: ею управляет USB-колбэк */
++        Display_SetLinkState(DISPLAY_LINK_NONE);
++    }
++}
++
++void Display_SetDeviceName(const char *name)
++{
++    char tmp[sizeof(ui.device)];
++    CopyText(tmp, sizeof(tmp), name);
++
++    if (strcmp(tmp, ui.device) != 0)
++    {
++        memcpy(ui.device, tmp, sizeof(ui.device));
++        MarkDirty(F_HEADER);
++    }
++}
++
++void Display_MidiActivity(void)
++{
++    if (ui.link != DISPLAY_LINK_READY) { return; }
++
++    ui.flash_until = HAL_GetTick() + ACTIVITY_FLASH_MS;
++
++    if (!ui.flash_on)
++    {
++        ui.flash_on = true;
++        MarkDirty(F_DOT);
++    }
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/* Public API: notes                                                         */
++/* ------------------------------------------------------------------------- */
++
+ void Display_SetLastNote(uint8_t note)
+ {
+-    last_note = note;
+-    have_last_note = true;
+-    Display_DrawNoteState(NULL, 1, note);
++    Display_SetNoteState(NULL, 1, note);
+ }
+ 
+ void Display_SetNoteState(
+@@ -315,7 +769,136 @@ void Display_SetNoteState(
+     uint16_t active_note_count,
+     uint8_t note_val)
+ {
+-    last_note = note_val;
+-    have_last_note = (active_note_count > 0);
+-    Display_DrawNoteState(active_notes, active_note_count, note_val);
++    if (active_note_count == 0)
++    {
++        /* Клавиши отпущены: оставляем последнюю ноту/аккорд серым */
++        if (ui.kind != NOTE_KIND_NONE && ui.note_live)
++        {
++            ui.note_live = false;
++            MarkDirty(F_NOTE);
++        }
++        return;
++    }
++
++    NoteKind_t kind = NOTE_KIND_SINGLE;
++    char chord[sizeof(ui.chord)] = "";
++
++    if (active_note_count >= 3 && active_notes != NULL)
++    {
++        kind = NOTE_KIND_CHORD;
++
++        /* Имя считаем сразу: active_notes действителен только на время вызова */
++        if (!ChordDetector_Detect(active_notes, active_note_count, chord, sizeof(chord)))
++        {
++            snprintf(chord, sizeof(chord), "???");
++        }
++    }
++
++    if (ui.kind == kind && ui.note_live && ui.note == note_val &&
++        ui.key_count == active_note_count && strcmp(ui.chord, chord) == 0)
++    {
++        return;   /* ничего не изменилось */
++    }
++
++    ui.kind      = kind;
++    ui.note_live = true;
++    ui.note      = note_val;
++    ui.key_count = active_note_count;
++    memcpy(ui.chord, chord, sizeof(ui.chord));
++    MarkDirty(F_NOTE);
++}
++
++void Display_SetVelocity(uint8_t velocity)
++{
++    if (ui.velocity == velocity) { return; }
++
++    ui.velocity = velocity;
++    if (ui.note_live && ui.kind == NOTE_KIND_SINGLE)
++    {
++        MarkDirty(F_NOTE);
++    }
++}
++
++void Display_SetSustain(bool on)
++{
++    if (ui.sustain == on) { return; }
++
++    ui.sustain = on;
++    MarkDirty(F_HEADER);
++}
++
++/* ------------------------------------------------------------------------- */
++/* Public API: instrument, voices, volume                                    */
++/* ------------------------------------------------------------------------- */
++
++void Display_SetPatch(uint8_t index, const char *name)
++{
++    char tmp[sizeof(ui.patch_name)];
++    CopyText(tmp, sizeof(tmp), name);
++
++    if (ui.patch_index == index && strcmp(tmp, ui.patch_name) == 0) { return; }
++
++    ui.patch_index = index;
++    memcpy(ui.patch_name, tmp, sizeof(ui.patch_name));
++    MarkDirty(F_INSTR);
++}
++
++void Display_SetVoices(uint8_t used, uint8_t max)
++{
++    if (ui.voices_used == used && ui.voices_max == max) { return; }
++
++    ui.voices_used = used;
++    ui.voices_max  = max;
++    MarkDirty(F_HEADER);
++}
++
++void Display_SetVolume(uint8_t percent)
++{
++    if (percent > 100U) { percent = 100U; }
++
++    if (ui.volume_valid && ui.volume == percent) { return; }
++
++    ui.volume_valid = true;
++    ui.volume       = percent;
++    MarkDirty(F_VOLUME);
++}
++
++void Display_SetClip(bool clipping)
++{
++    if (ui.clip == clipping) { return; }
++
++    ui.clip = clipping;
++    MarkDirty(F_VOLUME);
++}
++
++/* ------------------------------------------------------------------------- */
++/* Public API: errors                                                        */
++/* ------------------------------------------------------------------------- */
++
++void Display_ShowError(Display_Error_t code)
++{
++    if (code <= DISPLAY_ERR_NONE || code >= DISPLAY_ERR_COUNT) { return; }
++
++    ErrorSlot_t *slot = &ui.errors[code];
++
++    slot->expire = HAL_GetTick() + ERROR_TIMEOUT_MS;
++
++    if (!slot->active)
++    {
++        slot->active = true;
++        slot->stamp  = ++ui.error_stamp;
++        MarkDirty(F_HEADER);
++    }
++    /* Повторная ошибка только продлевает показ, без перерисовки */
++}
++
++void Display_ClearError(Display_Error_t code)
++{
++    if (code <= DISPLAY_ERR_NONE || code >= DISPLAY_ERR_COUNT) { return; }
++
++    if (ui.errors[code].active)
++    {
++        ui.errors[code].active = false;
++        MarkDirty(F_HEADER);
++    }
+ }
+diff --git a/Core/Src/main.c b/Core/Src/main.c
+index 5c9680b..4c8e715 100644
+--- a/Core/Src/main.c
++++ b/Core/Src/main.c
+@@ -63,6 +63,9 @@ extern USBH_HandleTypeDef hUsbHostFS;
+ static volatile uint32_t note_on_count = 0;
+ static volatile uint32_t note_off_count = 0;
+ 
++/* Ошибки SAI/DMA (underrun и т.п.): растёт в ISR, главный цикл показывает E02 на дисплее */
++static volatile uint32_t sai_error_count = 0;
++
+ static uint8_t active_notes[128];
+ static uint8_t active_note_stack[128];
+ static uint16_t active_note_count = 0;
+@@ -200,6 +203,10 @@ int main(void)
+   /* Infinite loop */
+   /* USER CODE BEGIN WHILE */
+ 
++  uint32_t seen_queue_overruns = MIDI_Queue_GetOverrunCount();
++  uint32_t seen_rx_errors      = MIDI_USB_GetReceiveErrorsCount();
++  uint32_t seen_sai_errors     = sai_error_count;
++
+ #if USB_DIAG_UART
+   uint32_t prev_loop_tick = HAL_GetTick();
+   uint32_t max_loop_dt = 0;
+@@ -241,6 +248,7 @@ int main(void)
+         //        event.status, event.data1, event.data2);
+ 
+         MIDI_Dispatch(&event);   /* Note On/Off, CC -> PluckSynth (lock-free FIFO to the audio ISR) */
++        Display_MidiActivity();  /* вспышка точки статуса */
+ 
+         uint8_t command = event.status & MIDI_STATUS_MASK;
+         uint8_t note = event.data1;
+@@ -263,6 +271,7 @@ int main(void)
+             );
+ 
+             uint8_t last_active_note = (active_note_count > 0) ? active_note_stack[active_note_count - 1] : 0;
++            Display_SetVelocity(event.data2);
+             Display_SetNoteState(active_notes, active_note_count, last_active_note);
+         }
+         else if (command == MIDI_STATUS_NOTE_OFF ||
+@@ -305,8 +314,36 @@ int main(void)
+                 );
+             }
+         }
++        else if (command == MIDI_STATUS_CONTROL_CHANGE && event.data1 == 64U)
++        {
++            Display_SetSustain(event.data2 >= 64U);
++        }
++    }
++
++    /* Новые ошибки -> красная плашка на дисплее (гаснет сама через 3 с) */
++    uint32_t queue_overruns = MIDI_Queue_GetOverrunCount();
++    if (queue_overruns != seen_queue_overruns)
++    {
++        seen_queue_overruns = queue_overruns;
++        Display_ShowError(DISPLAY_ERR_MIDI_QUEUE);
++    }
++
++    uint32_t rx_errors = MIDI_USB_GetReceiveErrorsCount();
++    if (rx_errors != seen_rx_errors)
++    {
++        seen_rx_errors = rx_errors;
++        Display_ShowError(DISPLAY_ERR_USB_RX);
+     }
+ 
++    uint32_t sai_errors = sai_error_count;
++    if (sai_errors != seen_sai_errors)
++    {
++        seen_sai_errors = sai_errors;
++        Display_ShowError(DISPLAY_ERR_AUDIO_DMA);
++    }
++
++    Display_Task();   /* рисует не более одного "грязного" поля за вызов */
++
+ #if USB_DIAG_UART
+     uint32_t now = HAL_GetTick();
+     uint32_t silence_ms = now - MIDI_USB_GetLastPacketTick();
+@@ -420,6 +457,14 @@ void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai)
+     }
+ }
+ 
++/* Ошибка SAI/DMA (ISR): только счётчик, на дисплей выводит главный цикл */
++void HAL_SAI_ErrorCallback(SAI_HandleTypeDef *hsai)
++{
++    if (hsai->Instance == SAI1_Block_A) {
++        sai_error_count++;
++    }
++}
++
+ /* USER CODE END 4 */
+ 
+  /* MPU Configuration */
+diff --git a/USB_HOST/App/usb_host.c b/USB_HOST/App/usb_host.c
+index 6f5a8b3..0c7bd4c 100644
+--- a/USB_HOST/App/usb_host.c
++++ b/USB_HOST/App/usb_host.c
+@@ -30,6 +30,7 @@
+ 
+ /* USER CODE BEGIN Includes */
+ #include "usbh_midi.h"
++#include "display.h"
+ #include <stdio.h>
+ /* USER CODE END Includes */
+ 
+@@ -151,6 +152,7 @@ switch(id)
+ 
+   case HOST_USER_DISCONNECTION:
+     Appli_state = APPLICATION_DISCONNECT;
++    Display_SetLinkState(DISPLAY_LINK_NONE);        /* заодно снимает E01 */
+     printf("[USB] Device Disconnected!\r\n");
+     break;
+ 
+@@ -162,9 +164,15 @@ switch(id)
+ 
+   case HOST_USER_CONNECTION:
+     Appli_state = APPLICATION_START;
++    Display_SetLinkState(DISPLAY_LINK_ENUMERATING);
+     printf("[USB] Device Attached. Enumerating...\r\n");
+     break;
+ 
++  case HOST_USER_UNRECOVERED_ERROR:
++    Display_ShowError(DISPLAY_ERR_USB_ENUM);        /* липкая, до смены состояния линка */
++    printf("[USB] Unrecovered error\r\n");
++    break;
++
+   default:
+     break;
+   }

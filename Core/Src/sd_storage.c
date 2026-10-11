@@ -17,6 +17,7 @@
 #include "ff_gen_drv.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 /* ----------------------------- настройки ----------------------------------- */
@@ -48,6 +49,14 @@
 #define SD_DETECT_ACTIVE_LEVEL  GPIO_PIN_RESET
 #endif
 
+/* 1 = если SD_DETECT показывает "карты нет", SDStorage_Mount() сразу возвращает SDS_ERR_NO_CARD.
+ * 0 (по умолчанию) = датчик только пишется в диагностику, а инициализация карты всё равно
+ * пробуется: HAL_SD_Init сам вернёт ошибку, если карты действительно нет. Датчик на плате
+ * идёт через перемычку SB2, и без подтяжки в gpio.c его уровень может быть произвольным. */
+#ifndef SD_DETECT_ENFORCE
+#define SD_DETECT_ENFORCE       0
+#endif
+
 #define SD_SECTOR_SIZE          512U
 
 /* AXI SRAM: единственная область, про которую точно известно, что IDMA SDMMC1 её видит. */
@@ -65,6 +74,7 @@ static volatile uint8_t s_xfer_state;   /* 0 - идёт, 1 - готово, 2 - �
 static uint8_t s_hw_ready;              /* SDMMC1 + карта инициализированы */
 static uint8_t s_linked;
 static uint8_t s_mounted;
+static SDStorage_Diag s_diag = { SDS_OK, -1, -1, -1, 0U, -1, -1 };
 
 /* ----------------------- callbacks HAL (вызываются из IRQ) ------------------ */
 
@@ -259,8 +269,13 @@ static int sd_hw_init(void)
     hsd1.Init.HardwareFlowControl = SDMMC_HARDWARE_FLOW_CONTROL_DISABLE;
     hsd1.Init.ClockDiv            = SD_CLOCK_DIV;
 
-    if (HAL_SD_Init(&hsd1) != HAL_OK) return -1;
-    if (HAL_SD_ConfigWideBusOperation(&hsd1, SDMMC_BUS_WIDE_4B) != HAL_OK) {
+    s_diag.hal_init = (int)HAL_SD_Init(&hsd1);
+    s_diag.hal_error = HAL_SD_GetError(&hsd1);
+    if (s_diag.hal_init != (int)HAL_OK) return -1;
+
+    s_diag.hal_wide = (int)HAL_SD_ConfigWideBusOperation(&hsd1, SDMMC_BUS_WIDE_4B);
+    s_diag.hal_error = HAL_SD_GetError(&hsd1);
+    if (s_diag.hal_wide != (int)HAL_OK) {
         (void)HAL_SD_DeInit(&hsd1);
         return -1;
     }
@@ -271,28 +286,111 @@ SDStorage_Result SDStorage_Mount(void)
 {
     if (s_mounted) return SDS_OK;
 
-    if (!SDStorage_CardPresent()) return SDS_ERR_NO_CARD;
+    s_diag.result       = SDS_OK;
+    s_diag.detect_level = -1;
+    s_diag.hal_init     = -1;
+    s_diag.hal_wide     = -1;
+    s_diag.hal_error    = 0U;
+    s_diag.link_ret     = -1;
+    s_diag.f_mount_res  = -1;
+#ifdef SD_DETECT_Pin
+    s_diag.detect_level = (HAL_GPIO_ReadPin(SD_DETECT_GPIO_Port, SD_DETECT_Pin) == GPIO_PIN_SET) ? 1 : 0;
+#endif
 
-    if (sd_hw_init() != 0) return SDS_ERR_INIT;
+#if SD_DETECT_ENFORCE
+    if (!SDStorage_CardPresent()) {
+        s_diag.result = SDS_ERR_NO_CARD;
+        return SDS_ERR_NO_CARD;
+    }
+#endif
+
+    if (sd_hw_init() != 0) {
+        s_diag.result = SDS_ERR_INIT;
+        return SDS_ERR_INIT;
+    }
     s_hw_ready = 1;
 
     if (!s_linked) {
-        if (FATFS_LinkDriver(&s_driver, s_path) != 0U) {
+        s_diag.link_ret = (int)FATFS_LinkDriver(&s_driver, s_path);
+        if (s_diag.link_ret != 0) {
             s_hw_ready = 0;
             (void)HAL_SD_DeInit(&hsd1);
+            s_diag.result = SDS_ERR_LINK;
             return SDS_ERR_LINK;
         }
         s_linked = 1;
     }
 
-    if (f_mount(&s_fs, s_path, 1) != FR_OK) {
+    s_diag.f_mount_res = (int)f_mount(&s_fs, s_path, 1);
+    if (s_diag.f_mount_res != (int)FR_OK) {
         s_hw_ready = 0;
         (void)HAL_SD_DeInit(&hsd1);
+        s_diag.result = SDS_ERR_MOUNT;
         return SDS_ERR_MOUNT;
     }
 
     s_mounted = 1;
+    s_diag.result = SDS_OK;
     return SDS_OK;
+}
+
+const SDStorage_Diag *SDStorage_GetDiag(void)
+{
+    return &s_diag;
+}
+
+const char *SDStorage_ResultName(SDStorage_Result r)
+{
+    switch (r) {
+    case SDS_OK:          return "OK";
+    case SDS_ERR_NO_CARD: return "NO_CARD (SD_DETECT)";
+    case SDS_ERR_INIT:    return "INIT (HAL_SD_Init / 4-bit)";
+    case SDS_ERR_LINK:    return "LINK (FATFS_LinkDriver)";
+    case SDS_ERR_MOUNT:   return "MOUNT (f_mount)";
+    default:              return "?";
+    }
+}
+
+void SDStorage_PrintDiag(void)
+{
+    fprintf(stderr, "[SD] result=%s\n", SDStorage_ResultName(s_diag.result));
+    fprintf(stderr, "[SD] SD_DETECT raw level=%d (-1 = pin not named SD_DETECT; present when %d)\n",
+            s_diag.detect_level, (SD_DETECT_ACTIVE_LEVEL == GPIO_PIN_SET) ? 1 : 0);
+    fprintf(stderr, "[SD] HAL_SD_Init=%d wide4b=%d hsd.ErrorCode=0x%08lX link=%d f_mount=%d\n",
+            s_diag.hal_init, s_diag.hal_wide, (unsigned long)s_diag.hal_error,
+            s_diag.link_ret, s_diag.f_mount_res);
+    if (s_hw_ready) {
+        fprintf(stderr, "[SD] card type=%lu blocks=%lu\n",
+                (unsigned long)hsd1.SdCard.CardType, (unsigned long)hsd1.SdCard.LogBlockNbr);
+    }
+}
+
+void SDStorage_ListRoot(void)
+{
+    DIR dir;
+    FILINFO fno;
+    FRESULT fr;
+    unsigned shown = 0U;
+
+    fr = f_opendir(&dir, s_path);
+    if (fr != FR_OK) {
+        fprintf(stderr, "[SD] f_opendir('%s') failed: FRESULT=%d\n", s_path, (int)fr);
+        return;
+    }
+    fprintf(stderr, "[SD] root directory '%s':\n", s_path);
+    for (;;) {
+        fr = f_readdir(&dir, &fno);
+        if (fr != FR_OK || fno.fname[0] == 0) break;
+        const char *name = fno.fname;   /* в этой версии FatFs тут длинное имя (при _USE_LFN != 0) */
+        fprintf(stderr, "[SD]   %s%s  (%lu bytes)\n", name,
+                (fno.fattrib & AM_DIR) ? "/" : "", (unsigned long)fno.fsize);
+        if (++shown >= 24U) {
+            fprintf(stderr, "[SD]   ...\n");
+            break;
+        }
+    }
+    if (shown == 0U) fprintf(stderr, "[SD]   (empty)\n");
+    (void)f_closedir(&dir);
 }
 
 void SDStorage_Unmount(void)

@@ -16,6 +16,7 @@
 #define SD_STORAGE_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,6 +33,28 @@ typedef enum {
 /** Инициализирует SDMMC1, подключает диск-драйвер и монтирует том.
  *  Безопасно вызывать повторно (например, после вставки карты). */
 SDStorage_Result SDStorage_Mount(void);
+
+/** Диагностика последней попытки SDStorage_Mount(): на каком этапе и почему не получилось. */
+typedef struct {
+    SDStorage_Result result;   /* итог последнего SDStorage_Mount() */
+    int      detect_level;     /* сырой уровень SD_DETECT (0/1), -1 если пин не назван SD_DETECT */
+    int      hal_init;         /* результат HAL_SD_Init (HAL_OK=0, HAL_ERROR=1, ...), -1 если не вызывался */
+    int      hal_wide;         /* результат HAL_SD_ConfigWideBusOperation, -1 если не вызывался */
+    uint32_t hal_error;        /* hsd1.ErrorCode (маска HAL_SD_ERROR_*, 0 = нет ошибки) */
+    int      link_ret;         /* результат FATFS_LinkDriver (0 = успех), -1 если не вызывался */
+    int      f_mount_res;      /* FRESULT от f_mount, -1 если не вызывался */
+} SDStorage_Diag;
+
+const SDStorage_Diag *SDStorage_GetDiag(void);
+
+/** Короткое имя результата для логов. */
+const char *SDStorage_ResultName(SDStorage_Result r);
+
+/** Печатает SDStorage_Diag в stderr (UART). */
+void SDStorage_PrintDiag(void);
+
+/** Печатает в stderr содержимое корня тома (до 24 записей): видно, как файл называется на самом деле. */
+void SDStorage_ListRoot(void);
 
 /** Размонтирует том и выключает SDMMC1. */
 void SDStorage_Unmount(void);

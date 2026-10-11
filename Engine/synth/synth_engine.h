@@ -50,6 +50,22 @@ typedef enum {
     SYNTH_ENGINE_COUNT
 } SynthEngineId;
 
+/*
+ * Общая громкость с MIDI-клавиатуры: Control Change SYNTH_MASTER_VOLUME_CC (по умолчанию CC7 —
+ * «Channel Volume», его шлют ползунки/ручки громкости большинства клавиатур). Канал не учитывается.
+ * У PCM5102A нет аппаратной регулировки громкости, поэтому коэффициент применяется программно
+ * к выходному буферу в SynthEngine_FillStereoBuffer(), для любого движка. Кривая квадратичная
+ * (уровень 127 -> 1.0, 64 -> ≈0.25, 0 -> тишина). Переопределяется через -D при сборке.
+ */
+#ifndef SYNTH_MASTER_VOLUME_CC
+#define SYNTH_MASTER_VOLUME_CC 7
+#endif
+
+/* Уровень громкости после включения питания (0..127). 127 = без ослабления, как было до появления регулировки. */
+#ifndef SYNTH_MASTER_VOLUME_DEFAULT
+#define SYNTH_MASTER_VOLUME_DEFAULT 127
+#endif
+
 /* Синтезатор, который звучит после включения питания. */
 #define SYNTH_ENGINE_DEFAULT SYNTH_ENGINE_EPIANO
 
@@ -77,6 +93,12 @@ int SynthEngine_Select(SynthEngineId id);
  * (нет SD-карты / файла SNDFNT.SF2 / не хватило памяти). Используется циклом Program Change 127.
  */
 int SynthEngine_IsAvailable(SynthEngineId id);
+
+/** Общая громкость 0..127 (значения выше 127 ограничиваются). Можно вызывать из main. */
+void SynthEngine_SetMasterVolume(uint8_t level);
+
+/** Текущий уровень общей громкости 0..127. */
+uint8_t SynthEngine_GetMasterVolume(void);
 
 /** Текущий активный синтезатор. */
 SynthEngineId SynthEngine_GetCurrent(void);

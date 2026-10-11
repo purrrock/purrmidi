@@ -244,6 +244,53 @@ static void test_switch_while_audio_running() {
     CHECK(static_cast<int>(SynthEngine_GetCurrent()) < SYNTH_ENGINE_COUNT);
 }
 
+static void send_cc(uint8_t cc, uint8_t value, uint8_t channel = 0) {
+    MIDI_Event_t e = {static_cast<uint8_t>(MIDI_STATUS_CONTROL_CHANGE | channel), cc, value};
+    MIDI_Dispatch(&e);
+}
+
+// Общая громкость: CC7 с клавиатуры масштабирует выход любого движка (программно, т.к. у PCM5102A нет регулировки).
+static void test_master_volume_cc7() {
+    SynthEngine_Init();
+    CHECK(SynthEngine_GetMasterVolume() == SYNTH_MASTER_VOLUME_DEFAULT);
+
+    // Берём движок Sine: стабильная амплитуда, удобно сравнивать пики.
+    send_pc(2);
+    send_note_on(69, 127);
+    render_peak(2400);                       // даём прогреться и применить события
+    const int full = render_peak(4800);
+    CHECK(full > 0);
+
+    send_cc(SYNTH_MASTER_VOLUME_CC, 64);
+    CHECK(SynthEngine_GetMasterVolume() == 64);
+    render_peak(480);                        // блок с плавным переходом
+    const int half = render_peak(4800);
+    CHECK(half > 0);
+    CHECK(half < full / 2);                  // квадратичная кривая: 64/127 -> ≈0.25
+    CHECK(half > full / 8);
+
+    send_cc(SYNTH_MASTER_VOLUME_CC, 0);
+    render_peak(480);
+    CHECK(render_peak(4800) == 0);           // полная тишина
+
+    send_cc(SYNTH_MASTER_VOLUME_CC, 127, 5); // канал не важен, возврат к полному уровню
+    render_peak(480);
+    const int back = render_peak(4800);
+    CHECK(back >= full - full / 20 && back <= full + full / 20);
+
+    // Громкость не сбрасывается при смене движка.
+    send_cc(SYNTH_MASTER_VOLUME_CC, 40);
+    send_pc(0);
+    CHECK(SynthEngine_GetMasterVolume() == 40);
+
+    // Прямой API ограничивает значение сверху.
+    SynthEngine_SetMasterVolume(200);
+    CHECK(SynthEngine_GetMasterVolume() == 127);
+
+    SynthEngine_Init();                      // Init возвращает значение по умолчанию
+    CHECK(SynthEngine_GetMasterVolume() == SYNTH_MASTER_VOLUME_DEFAULT);
+}
+
 int main() {
     test_default_is_epiano();
     test_program_change_selects_engine();
@@ -254,6 +301,7 @@ int main() {
     test_switch_silences_old_engine();
     test_select_api();
     test_switch_while_audio_running();
+    test_master_volume_cc7();
 
     if (g_failures != 0) {
         std::cerr << "test_synth_switch: " << g_failures << " check(s) failed" << std::endl;

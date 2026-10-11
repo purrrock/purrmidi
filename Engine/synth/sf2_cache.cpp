@@ -128,14 +128,22 @@ bool SF2Cache_OpenFile(const char *filepath)
     return g_host_file != nullptr;
 #else
     if (!SDStorage_IsMounted()) {
-        if (SDStorage_Mount() != SDS_OK) {
+        const SDStorage_Result mr = SDStorage_Mount();
+        if (mr != SDS_OK) {
+            std::fprintf(stderr, "[SF2] SD mount failed: %s\n", SDStorage_ResultName(mr));
+            SDStorage_PrintDiag();
             return false;
         }
+        std::fprintf(stderr, "[SF2] SD card mounted\n");
     }
-    if (f_open(&g_fatfs_file, filepath, FA_READ) == FR_OK) {
+    const FRESULT fr = f_open(&g_fatfs_file, filepath, FA_READ);
+    if (fr == FR_OK) {
         g_fatfs_open = true;
         return true;
     }
+    std::fprintf(stderr, "[SF2] f_open('%s') failed: FRESULT=%d (4=NO_FILE, 5=NO_PATH, 3=NOT_READY, 1=DISK_ERR, 13=NO_FILESYSTEM)\n",
+                 filepath, (int)fr);
+    SDStorage_ListRoot();
     return false;
 #endif
 }

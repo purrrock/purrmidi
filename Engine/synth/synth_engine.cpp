@@ -26,6 +26,7 @@
 
 #include <atomic>
 #include <cstring>
+#include <cstdint>
 
 namespace {
 
@@ -60,6 +61,44 @@ const Engine kEngines[SYNTH_ENGINE_COUNT] = {
 std::atomic<const Engine *> g_active{nullptr};   /* nullptr до первого SynthEngine_Init() */
 std::atomic_flag            g_busy = ATOMIC_FLAG_INIT;
 
+/*
+ * Общая (master) громкость. PCM5102A не имеет регистров громкости (у него нет ни I2C, ни SPI),
+ * поэтому громкость регулируется программно: после рендера активного движка выходные
+ * отсчёты умножаются на коэффициент. Значение — MIDI-уровень 0..127 (CC SYNTH_MASTER_VOLUME_CC).
+ * Пишется из main, читается из аудио-контекста; атомарно, без замков.
+ */
+std::atomic<uint8_t> g_master_vol{SYNTH_MASTER_VOLUME_DEFAULT};
+float                g_master_gain_applied = 1.0f;   /* коэффициент в конце прошлого блока (только аудио-контекст) */
+
+/* Уровень 0..127 -> линейный коэффициент. Квадратичная кривая ≈ естественная для слуха; 127 -> 1.0, 0 -> 0. */
+float volume_to_gain(uint8_t v)
+{
+    const float n = (float)v * (1.0f / 127.0f);
+    return n * n;
+}
+
+/* Применяет master-громкость к блоку. Коэффициент линейно меняется от прошлого значения к новому
+ * внутри блока, поэтому при вращении ручки нет «ступенек» и щелчков. */
+void apply_master_volume(int16_t *buffer, uint32_t num_frames)
+{
+    const float target = volume_to_gain(g_master_vol.load(std::memory_order_relaxed));
+    float       g      = g_master_gain_applied;
+
+    if (g == target && target == 1.0f) {
+        return;   /* единичное усиление: ничего не делаем */
+    }
+
+    const float step = (num_frames > 0U) ? (target - g) / (float)num_frames : 0.0f;
+    for (uint32_t i = 0; i < num_frames; i++) {
+        g += step;
+        const int32_t l = (int32_t)((float)buffer[2U * i]      * g);
+        const int32_t r = (int32_t)((float)buffer[2U * i + 1U] * g);
+        buffer[2U * i]      = (int16_t)(l > 32767 ? 32767 : (l < -32768 ? -32768 : l));
+        buffer[2U * i + 1U] = (int16_t)(r > 32767 ? 32767 : (r < -32768 ? -32768 : r));
+    }
+    g_master_gain_applied = target;
+}
+
 /* Включает движок: сбрасывает его состояние и делает активным. Только из main-контекста. */
 void activate(SynthEngineId id)
 {
@@ -79,7 +118,19 @@ extern "C" {
 
 void SynthEngine_Init(void)
 {
+    g_master_vol.store(SYNTH_MASTER_VOLUME_DEFAULT, std::memory_order_relaxed);
+    g_master_gain_applied = volume_to_gain(SYNTH_MASTER_VOLUME_DEFAULT);
     activate(SYNTH_ENGINE_DEFAULT);
+}
+
+void SynthEngine_SetMasterVolume(uint8_t level)
+{
+    g_master_vol.store(level > 127U ? (uint8_t)127U : level, std::memory_order_relaxed);
+}
+
+uint8_t SynthEngine_GetMasterVolume(void)
+{
+    return g_master_vol.load(std::memory_order_relaxed);
 }
 
 int SynthEngine_Select(SynthEngineId id)
@@ -143,6 +194,12 @@ void SynthEngine_NoteOff(uint8_t midi_note)
 
 void SynthEngine_ControlChange(uint8_t control, uint8_t value)
 {
+    if (control == SYNTH_MASTER_VOLUME_CC) {
+        /* Общая громкость обрабатывается здесь и в движки не передаётся (чтобы не применялась дважды). */
+        SynthEngine_SetMasterVolume(value);
+        return;
+    }
+
     const Engine *e = g_active.load(std::memory_order_relaxed);
     if (e) {
         e->control_change(control, value);
@@ -160,6 +217,7 @@ void SynthEngine_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
     const Engine *e = g_active.load(std::memory_order_relaxed);
     if (e) {
         e->fill(buffer, num_frames);
+        apply_master_volume(buffer, num_frames);
     } else {
         std::memset(buffer, 0, (size_t)num_frames * 2U * sizeof(int16_t));
     }
