@@ -40,6 +40,16 @@ bool SoundFontSynth_IsLoaded(void);
  */
 bool SoundFontSynth_IsAvailable(void);
 
+/** Prints one line with the cache statistics (hits / misses / cycles / SD read times) to stderr (UART). */
+void SoundFontSynth_PrintStats(void);
+
+/**
+ * Firmware only: boot-time profiler. Measures the cost of atomic operations and of SF2Cache_GetSample()
+ * (hint hit / search hit / miss) and simulates "a chord + the main loop servicing the cache".
+ * Must run before the audio DMA starts. Prints [SF2PROF] lines. No-op on host builds.
+ */
+void SoundFontSynth_Profile(void);
+
 #ifdef __cplusplus
 }
 #endif

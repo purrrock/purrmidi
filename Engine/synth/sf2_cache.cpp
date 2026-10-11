@@ -11,6 +11,10 @@
 #if !SF2_HOST_MODE
 #include "ff.h"
 #include "sd_storage.h"
+#include "stm32h7xx.h"
+#define SF2_NOW() (DWT->CYCCNT)
+#else
+#define SF2_NOW() 0U
 #endif
 
 namespace {
@@ -44,6 +48,8 @@ ReqQueue   g_req_queue;
 std::atomic<uint32_t> g_lru_clock{0};
 uint32_t g_smpl_file_offset = 0;
 uint32_t g_smpl_total_samples = 0;
+
+SF2Profile g_prof;   /* diagnostics, see sf2_cache.h */
 
 std::atomic<uint32_t> g_stat_miss_samples{0};
 std::atomic<uint32_t> g_stat_blocks_loaded{0};
@@ -357,6 +363,7 @@ static LoadResult load_block(uint32_t block_idx)
     std::memset(g_cache[slot].samples, 0, sizeof(g_cache[slot].samples));
 
     bool read_success = false;
+    const uint32_t t_read = SF2_NOW();
 
 #if SF2_HOST_MODE
     if (g_host_file) {
@@ -381,6 +388,13 @@ static LoadResult load_block(uint32_t block_idx)
     }
 #endif
 
+    {
+        const uint32_t d = SF2_NOW() - t_read;
+        g_prof.read_calls++;
+        g_prof.read_cycles_total += d;
+        if (d > g_prof.read_cycles_max) g_prof.read_cycles_max = d;
+    }
+
     if (read_success) {
         g_cache[slot].block_index.store(block_idx, std::memory_order_release);
         g_cache[slot].last_used_tick.store(g_lru_clock.load(std::memory_order_relaxed), std::memory_order_relaxed);
@@ -399,6 +413,7 @@ void SF2Cache_ProcessRequests(void)
 {
     if (!SF2Cache_IsFileOpen()) return;
 
+    const uint32_t t_proc = SF2_NOW();
     uint32_t budget = SF2_MAX_BLOCKS_PER_PROCESS;
 
     /*
@@ -457,6 +472,13 @@ void SF2Cache_ProcessRequests(void)
             }
         }
     }
+
+    {
+        const uint32_t d = SF2_NOW() - t_proc;
+        g_prof.proc_calls++;
+        g_prof.proc_cycles_total += d;
+        if (d > g_prof.proc_cycles_max) g_prof.proc_cycles_max = d;
+    }
 }
 
 bool SF2Cache_PreloadBlock(uint32_t block_index)
@@ -473,6 +495,7 @@ short SF2Cache_GetSample(tsf *f, uint32_t sample_index, int *last_slot_hint)
         return 0;
     }
 
+    const uint32_t t_start = SF2_NOW();
     uint32_t block_idx = sample_index / SF2_BLOCK_SAMPLES;
     uint32_t sample_offset = sample_index % SF2_BLOCK_SAMPLES;
     uint32_t tick = g_lru_clock.fetch_add(1, std::memory_order_relaxed);
@@ -483,6 +506,11 @@ short SF2Cache_GetSample(tsf *f, uint32_t sample_index, int *last_slot_hint)
     if (last_slot_hint && *last_slot_hint >= 0 && *last_slot_hint < (int)SF2_CACHE_BLOCKS) {
         uint32_t slot = (uint32_t)*last_slot_hint;
         if (try_read_slot(slot, block_idx, sample_offset, tick, &sample)) {
+            const uint32_t d = SF2_NOW() - t_start;
+            g_prof.calls++;
+            g_prof.hint_hits++;
+            g_prof.cycles_hint += d;
+            if (d > g_prof.max_cycles) g_prof.max_cycles = d;
             return sample;
         }
     }
@@ -493,6 +521,12 @@ short SF2Cache_GetSample(tsf *f, uint32_t sample_index, int *last_slot_hint)
             if (last_slot_hint) {
                 *last_slot_hint = (int)i;
             }
+            const uint32_t d = SF2_NOW() - t_start;
+            g_prof.calls++;
+            g_prof.search_hits++;
+            g_prof.search_slots += i + 1U;
+            g_prof.cycles_search += d;
+            if (d > g_prof.max_cycles) g_prof.max_cycles = d;
             return sample;
         }
     }
@@ -502,6 +536,12 @@ short SF2Cache_GetSample(tsf *f, uint32_t sample_index, int *last_slot_hint)
     SF2Cache_RequestBlock(block_idx);
     SF2Cache_RequestBlock(block_idx + 1);
 
+    const uint32_t d = SF2_NOW() - t_start;
+    g_prof.calls++;
+    g_prof.misses++;
+    g_prof.search_slots += SF2_CACHE_BLOCKS;
+    g_prof.cycles_miss += d;
+    if (d > g_prof.max_cycles) g_prof.max_cycles = d;
     return 0;
 }
 
@@ -522,6 +562,17 @@ void SF2Cache_GetStats(SF2CacheStats *out)
     out->miss_samples  = g_stat_miss_samples.load(std::memory_order_relaxed);
     out->blocks_loaded = g_stat_blocks_loaded.load(std::memory_order_relaxed);
     out->load_errors   = g_stat_load_errors.load(std::memory_order_relaxed);
+}
+
+void SF2Cache_GetProfile(SF2Profile *out)
+{
+    if (!out) return;
+    *out = g_prof;
+}
+
+void SF2Cache_ResetProfile(void)
+{
+    std::memset(&g_prof, 0, sizeof(g_prof));
 }
 
 void SF2Cache_ResetStats(void)

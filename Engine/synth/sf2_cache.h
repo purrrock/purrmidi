@@ -85,6 +85,31 @@ typedef struct {
 } SF2CacheStats;
 
 /** Open SF2 file using platform file backend (FatFs on firmware, stdio on host). */
+/**
+ * Diagnostics (cycle counts are CPU cycles of the DWT counter on the firmware, 0 on host builds).
+ * Written by the audio interrupt (GetSample) and by the main loop (ProcessRequests / reads).
+ */
+typedef struct {
+    uint32_t calls;              /**< SF2Cache_GetSample() calls that reached the cache                  */
+    uint32_t hint_hits;          /**< served from the voice's remembered slot                            */
+    uint32_t search_hits;        /**< served after a linear search over the slots                        */
+    uint32_t misses;             /**< not resident: silence returned and blocks requested                */
+    uint32_t search_slots;       /**< slots examined by all linear searches (hits and misses)            */
+    uint32_t cycles_hint;        /**< total cycles spent in hint hits                                    */
+    uint32_t cycles_search;      /**< total cycles spent in search hits                                  */
+    uint32_t cycles_miss;        /**< total cycles spent in misses (includes the two RequestBlock calls) */
+    uint32_t max_cycles;         /**< longest single call                                                */
+    uint32_t proc_calls;         /**< SF2Cache_ProcessRequests() calls                                   */
+    uint32_t proc_cycles_total;
+    uint32_t proc_cycles_max;
+    uint32_t read_calls;         /**< block reads from the card                                          */
+    uint32_t read_cycles_total;
+    uint32_t read_cycles_max;
+} SF2Profile;
+
+void SF2Cache_GetProfile(SF2Profile *out);
+void SF2Cache_ResetProfile(void);
+
 bool SF2Cache_OpenFile(const char *filepath);
 
 /** Close open file and reset cache. */

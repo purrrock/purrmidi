@@ -39,6 +39,7 @@
 #include "usbh_midi.h"
 #include "midi_dispatch.h"
 #include "soundfont_synth.h"
+#include "sf2_cache.h"
 #include "diag.h"
 #include "organ_synth.h"
 /* USER CODE END Includes */
@@ -333,6 +334,10 @@ int main(void)
     }
 
     OrganProfile_Run();
+    if (SoundFontSynth_IsLoaded())
+    {
+      SoundFontSynth_Profile();
+    }
 
     /* Straight-line load benchmark: separates the cost of the LOAD from the cost of FETCHING the code.
      * rows = where the code runs, columns = where the data is. Value = CPU cycles per load. */
@@ -545,11 +550,15 @@ int main(void)
         static uint32_t reported_max = 0;
         static uint32_t reported_over80 = 0;
         static uint32_t reported_shed = 0;
+        static uint32_t last_sf2_print = 0;
+        static uint32_t sf2_last_calls = 0;
         uint32_t t_now = HAL_GetTick();
 
         if (audio_reset_stats)
         {
             audio_reset_stats = false;
+            SF2Cache_ResetProfile();
+            sf2_last_calls = 0;
             audio_cyc_max = 0;
             audio_over80 = 0;
             audio_over100 = 0;
@@ -574,6 +583,19 @@ int main(void)
                 reported_max = m;
                 reported_over80 = o80;
                 reported_shed = audio_shed_total;
+            }
+        }
+
+        /* SoundFont cache statistics: at most once a second, only while the cache is being read. */
+        if (SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT && (t_now - last_sf2_print) >= 1000U)
+        {
+            SF2Profile sp;
+            SF2Cache_GetProfile(&sp);
+            if (sp.calls != sf2_last_calls)
+            {
+                sf2_last_calls = sp.calls;
+                last_sf2_print = t_now;
+                SoundFontSynth_PrintStats();
             }
         }
     }
