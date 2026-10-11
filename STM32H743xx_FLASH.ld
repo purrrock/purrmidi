@@ -98,6 +98,7 @@ SECTIONS
     *voice_organ.cpp.obj(.text._Z*)
     *env_ar.cpp.obj(.text._Z*)
     *efx_chorus.cpp.obj(.text._Z*)
+    *(.itcm_code .itcm_code.*)   /* explicit: functions tagged __attribute__((section(".itcm_code"))) */
     . = ALIGN(4);
     _eitcm_text = .;
   } >ITCMRAM AT> FLASH

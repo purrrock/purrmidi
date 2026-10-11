@@ -92,6 +92,30 @@ static uint16_t active_note_count = 0;
 
 extern uint32_t _sitcm_text;   /* linker symbol: start of the code copied to ITCM */
 
+/* 16 independent 32-bit loads per pass, 'reps' passes, pure asm so the compiler adds no stack traffic.
+ * Returns elapsed CPU cycles. */
+#define BENCH_LOADS_BODY                                                                       \
+    uint32_t t0 = DWT->CYCCNT;                                                                 \
+    __asm volatile(                                                                            \
+        "1:\n\t"                                                                               \
+        "ldr r2, [%1, #0]\n\t  ldr r3, [%1, #4]\n\t  ldr r4, [%1, #8]\n\t  ldr r5, [%1, #12]\n\t" \
+        "ldr r6, [%1, #16]\n\t ldr r8, [%1, #20]\n\t ldr r9, [%1, #24]\n\t ldr r10, [%1, #28]\n\t" \
+        "ldr r2, [%1, #32]\n\t ldr r3, [%1, #36]\n\t ldr r4, [%1, #40]\n\t ldr r5, [%1, #44]\n\t" \
+        "ldr r6, [%1, #48]\n\t ldr r8, [%1, #52]\n\t ldr r9, [%1, #56]\n\t ldr r10, [%1, #60]\n\t" \
+        "subs %0, %0, #1\n\t"                                                                  \
+        "bne 1b\n\t"                                                                           \
+        : "+r"(reps) : "r"(p) : "r2", "r3", "r4", "r5", "r6", "r8", "r9", "r10", "memory", "cc"); \
+    uint32_t dt = DWT->CYCCNT - t0;                                                            \
+    *sink = 0;                                                                                 \
+    return dt;
+
+/* The same function twice: once linked into ITCM RAM, once in flash. */
+__attribute__((noinline, section(".itcm_code")))
+static uint32_t bench_loads_itcm(volatile uint32_t *p, uint32_t reps, uint32_t *sink) { BENCH_LOADS_BODY }
+
+__attribute__((noinline))
+static uint32_t bench_loads_flash(volatile uint32_t *p, uint32_t reps, uint32_t *sink) { BENCH_LOADS_BODY }
+
 /* 1 = time every audio DMA interrupt with the DWT cycle counter and report it on the UART:
  *   [AUDIO] organ: isr max=NNN us (NN% of 2666 us budget) ...
  * An interrupt that takes longer than its budget (one DMA half-buffer) starves the main loop
@@ -109,6 +133,8 @@ static volatile uint32_t audio_calls = 0;
 static volatile uint32_t audio_over80 = 0;       /* fills that used > 80% of the budget */
 static volatile uint32_t audio_over100 = 0;      /* fills that used > 100% of the budget */
 static volatile bool     audio_reset_stats = false;
+static volatile uint32_t audio_shed_blocks = 0;  /* blocks still to be output as silence (CPU load shedding) */
+static volatile uint32_t audio_shed_total = 0;   /* blocks dropped so far */
 /* Audio: 48 kHz, stereo, 16 bit. Circular DMA ring split into two halves.
  * It must NOT be placed in DTCM (DMA2 cannot reach it): own section in AXI SRAM,
  * see .dma_buffer in the linker script. D-Cache is off, so no cache maintenance needed. */
@@ -305,6 +331,38 @@ int main(void)
       }
     }
 
+    /* Straight-line load benchmark: separates the cost of the LOAD from the cost of FETCHING the code.
+     * rows = where the code runs, columns = where the data is. Value = CPU cycles per load. */
+    {
+      static const struct { const char *name; uint32_t addr; } data_regions[] = {
+        { "DTCM", 0x2001C000UL }, { "AXI", 0x24060000UL }, { "FLASH", 0x08010000UL },
+      };
+      const uint32_t reps = 5000U;
+      uint32_t sink = 0;
+      printf("[BENCH2] cycles per 32-bit load (16 loads x %lu passes)\r\n", (unsigned long)reps);
+      for (int mode = 0; mode < 3; mode++)
+      {
+        const char *code_name = (mode == 0) ? "code in ITCM         " :
+                                (mode == 1) ? "code in flash, ICache" : "code in flash, no IC ";
+        if (mode == 2) { SCB_DisableICache(); }
+        printf("[BENCH2] %s:", code_name);
+        for (unsigned r = 0; r < 3; r++)
+        {
+          volatile uint32_t *p = (volatile uint32_t *)data_regions[r].addr;
+          if (data_regions[r].addr >= 0x20000000UL)
+          {
+            for (uint32_t i = 0; i < 16U; i++) { p[i] = i; }
+          }
+          uint32_t dt = (mode == 0) ? bench_loads_itcm(p, reps, &sink) : bench_loads_flash(p, reps, &sink);
+          uint32_t x100 = (uint32_t)(((uint64_t)dt * 100U) / (16U * reps));
+          printf("  %s=%lu.%02lu", data_regions[r].name, (unsigned long)(x100 / 100U), (unsigned long)(x100 % 100U));
+        }
+        printf("\r\n");
+        if (mode == 2) { SCB_EnableICache(); }
+      }
+      (void)sink;
+    }
+
     for (int e = 0; e < 2; e++)
     {
       for (unsigned c = 0; c < sizeof(bench_counts) / sizeof(bench_counts[0]); c++)
@@ -483,6 +541,7 @@ int main(void)
         static uint32_t last_audio_report = 0;
         static uint32_t reported_max = 0;
         static uint32_t reported_over80 = 0;
+        static uint32_t reported_shed = 0;
         uint32_t t_now = HAL_GetTick();
 
         if (audio_reset_stats)
@@ -499,17 +558,19 @@ int main(void)
             last_audio_report = t_now;
             uint32_t m = audio_cyc_max;
             uint32_t o80 = audio_over80;
-            if (m > reported_max + reported_max / 8U || o80 != reported_over80)
+            if (m > reported_max + reported_max / 8U || o80 != reported_over80 || audio_shed_total != reported_shed)
             {
                 const uint32_t us = SystemCoreClock / 1000000U;
                 const uint32_t budget = (SystemCoreClock / 48000U) * (AUDIO_BUFFER_FRAMES / 2U);
-                printf("[AUDIO] %s: isr last=%lu us max=%lu us (%lu%% of %lu us) >80%%: %lu >100%%: %lu calls=%lu\r\n",
+                printf("[AUDIO] %s: isr last=%lu us max=%lu us (%lu%% of %lu us) >80%%: %lu >100%%: %lu shed=%lu calls=%lu\r\n",
                        SynthEngine_GetName(),
                        (unsigned long)(audio_cyc_last / us), (unsigned long)(m / us),
                        (unsigned long)(m / (budget / 100U)), (unsigned long)(budget / us),
-                       (unsigned long)o80, (unsigned long)audio_over100, (unsigned long)audio_calls);
+                       (unsigned long)o80, (unsigned long)audio_over100, (unsigned long)audio_shed_total,
+                       (unsigned long)audio_calls);
                 reported_max = m;
                 reported_over80 = o80;
+                reported_shed = audio_shed_total;
             }
         }
     }
@@ -615,6 +676,19 @@ void SystemClock_Config(void)
 static void audio_fill(int16_t *dst)
 {
     const uint32_t frames = AUDIO_BUFFER_FRAMES / 2U;
+
+    /* Load shedding. If a fill took longer than one block period, the next DMA interrupt is already
+     * pending when this one returns, so the main loop (USB, MIDI, SD/SoundFont cache loader, display)
+     * would never run again and the system would look frozen. Output silence for a few blocks instead:
+     * the audio drops out, but main gets the CPU time it needs and can recover. */
+    if (audio_shed_blocks != 0U)
+    {
+        audio_shed_blocks--;
+        audio_shed_total++;
+        memset(dst, 0, frames * 2U * sizeof(int16_t));
+        return;
+    }
+
     const uint32_t t0 = DWT->CYCCNT;
     SynthEngine_FillStereoBuffer(dst, frames);
     const uint32_t dt = DWT->CYCCNT - t0;
@@ -629,6 +703,7 @@ static void audio_fill(int16_t *dst)
         audio_over80++;
     }
     if (dt > budget) {
+        audio_shed_blocks = dt / budget;      /* 1 block for 100..199%, 2 blocks for 200..299%, ... */
         if (audio_over100++ == 0U) {
             /* Last gasp: the main loop is probably starved from now on, so report right here. */
             const uint32_t us = SystemCoreClock / 1000000U;
