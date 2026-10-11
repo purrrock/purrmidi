@@ -58,7 +58,7 @@ typedef enum {
  * (уровень 127 -> 1.0, 64 -> ≈0.25, 0 -> тишина). Переопределяется через -D при сборке.
  */
 #ifndef SYNTH_MASTER_VOLUME_CC
-#define SYNTH_MASTER_VOLUME_CC 11
+#define SYNTH_MASTER_VOLUME_CC 7
 #endif
 
 /* Уровень громкости после включения питания (0..127). 127 = без ослабления, как было до появления регулировки. */
