@@ -492,7 +492,7 @@ int main(void)
                 DEBUG_LED_Pin,
                 GPIO_PIN_SET
             );
-
+            Display_SetVelocity(event.data2);
             uint8_t last_active_note = (active_note_count > 0) ? active_note_stack[active_note_count - 1] : 0;
             Display_SetNoteState(active_notes, active_note_count, last_active_note);
         }
@@ -578,6 +578,8 @@ int main(void)
         }
     }
 #endif
+
+    Display_Task();   /* рисует не более одного "грязного" поля за вызов */
 
 #if USB_DIAG_UART
     uint32_t now = HAL_GetTick();
