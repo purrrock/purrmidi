@@ -1,10 +1,10 @@
 #ifndef WAV_RECORDER_H
 #define WAV_RECORDER_H
 
-#include <atomic>
 #include <stdint.h>
 #include <string>
 #include <vector>
+#include <atomic>
 
 /**
  * @file    wav_recorder.h

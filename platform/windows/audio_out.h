@@ -1,10 +1,10 @@
 #ifndef AUDIO_OUT_H
 #define AUDIO_OUT_H
 
-#include <memory>
 #include <stdint.h>
 #include <string>
 #include <vector>
+#include <memory>
 #include "wav_recorder.h"
 
 /**

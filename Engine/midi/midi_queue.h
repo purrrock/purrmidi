@@ -1,8 +1,8 @@
 #ifndef MIDI_QUEUE_H
 #define MIDI_QUEUE_H
 
-#include <stdbool.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include "midi_event.h"
 
 /**
@@ -19,7 +19,7 @@ void MIDI_Queue_Init(void);
 /**
  * Помещение события в очередь.
  * @param event Указатель на помещаемое MIDI-событие.
- * @return true — событие успешное добавлено; false — очередь переполнена.
+ * @return true — событие успешно добавлено; false — очередь переполнена.
  */
 bool MIDI_Queue_Push(const MIDI_Event_t *event);
 

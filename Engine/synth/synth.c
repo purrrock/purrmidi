@@ -1,7 +1,7 @@
 #include "synth.h"
+#include <stdint.h>
 #include <math.h>
 #include <stdbool.h>
-#include <stdint.h>
 
 #define SYNTH_SAMPLE_RATE   48000
 #define SYNTH_MAX_FREQUENCY 20000.0f

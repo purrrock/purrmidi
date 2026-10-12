@@ -6,16 +6,18 @@
 
 /**
  * @file    display.h
- * @brief   Интерфейс отрисовки UI на цветном дисплее ST7735 (160x80 px).
+ * @brief   Интерфейс пользовательского интерфейса (UI) PurrMidi (дисплей 160x80 px).
  *
- * Одноэкранный UI без переключений:
- *   y  0..13  Шапка: статус USB, имя устройства, индикатор SUS, счетчик голосов
- *             (при ошибках — красная предупреждающая плашка)
- *   y 16..31  Номер пресета и название текущего синтезатора
- *   y 34..65  Название ноты или аккорда крупно (+ номер ноты и velocity)
- *   y 67..79  Шкала громкости и процентное значение
+ * Единый экран без переключений режимов:
+ *   y  0..13  Шапка: индикатор USB, имя клавиатуры, сустейн (SUS), счётчик голосов (used/max)
+ *             (при возникновении ошибки — красная плашка, например "! E03 MIDI QUEUE FULL")
+ *   y 16..31  Номер пресета и название текущего инструмента
+ *   y 34..65  Крупное наименование ноты или аккорда (+ номер ноты и velocity)
+ *   y 67..79  Громкость: шкала и значение в процентах
  *
- * Все функции Display_* вызываются ИСКЛЮЧИТЕЛЬНО из главного цикла (main context).
+ * Все функции Display_* вызываются ТОЛЬКО из главного цикла (не из прерываний ISR).
+ * Функции-сеттеры лишь обновляют внутреннее состояние и помечают поля «грязными»;
+ * фактическая отрисовка выполняется в Display_Task().
  */
 
 #ifdef __cplusplus
@@ -29,44 +31,46 @@ typedef enum
     DISPLAY_LINK_READY          /* Клавиатура готова         (зелёная точка)*/
 } Display_Link_t;
 
-/* Коды системных ошибок (отображаются в шапке) */
+/* Коды ошибок (отображаются в виде красной плашки в шапке) */
 typedef enum
 {
     DISPLAY_ERR_NONE = 0,
-    DISPLAY_ERR_USB_ENUM,       /* E01 USB ENUM FAIL     - сбой энумерации USB */
-    DISPLAY_ERR_AUDIO_DMA,      /* E02 AUDIO DMA ERROR   - ошибка драйвера SAI/DMA */
-    DISPLAY_ERR_MIDI_QUEUE,     /* E03 MIDI QUEUE FULL   - переполнение очереди MIDI-событий */
-    DISPLAY_ERR_USB_RX,         /* E04 USB RX ERROR      - ошибка приёма USB */
-    DISPLAY_ERR_AUDIO_OVERLOAD, /* E05 AUDIO OVERLOAD    - пропуск аудио-блоков (load shedding) */
-    DISPLAY_ERR_SF2,            /* E06 SF2 NOT LOADED    - SoundFont2 не загружен */
+    DISPLAY_ERR_USB_ENUM,       /* E01 USB ENUM FAIL     — энумерация > 5 с; до смены состояния USB-линка */
+    DISPLAY_ERR_AUDIO_DMA,      /* E02 AUDIO DMA ERROR   — ошибка SAI/DMA; гаснет автоматически через 3 с */
+    DISPLAY_ERR_MIDI_QUEUE,     /* E03 MIDI QUEUE FULL   — переполнение очереди; гаснет через 3 с       */
+    DISPLAY_ERR_USB_RX,         /* E04 USB RX ERROR      — ошибка приёма USB; гаснет через 3 с          */
+    DISPLAY_ERR_AUDIO_OVERLOAD, /* E05 AUDIO OVERLOAD    — пропуск аудио-блоков (load shedding); 3 с    */
+    DISPLAY_ERR_SF2,            /* E06 SF2 NOT LOADED    — выбран SoundFont, а загрузка не удалась; 3 с  */
     DISPLAY_ERR_COUNT
 } Display_Error_t;
 
-/** Инициализация контроллера дисплея и UI. */
 void Display_Init(void);
 
-/** Периодическая задача отрисовки "грязных" областей (вызывается из главного цикла). */
+/**
+ * Вызывать из главного цикла как можно чаще: отрисовывает не более одного «грязного» поля за вызов
+ * для предотвращения задержек в главном цикле.
+ */
 void Display_Task(void);
 
 /* ---- Статус подключения ---- */
-void Display_SetMidiConnected(bool connected);
+void Display_SetMidiConnected(bool connected);          /* Для совместимости со старым API */
 void Display_SetLinkState(Display_Link_t state);
-void Display_SetDeviceName(const char *name);
+void Display_SetDeviceName(const char *name);           /* До 12 символов; NULL -> "USB MIDI" */
 
 /* ---- Отображение нот и аккордов ---- */
-void Display_SetLastNote(uint8_t note);
+void Display_SetLastNote(uint8_t note);                 /* Для совместимости со старым API */
 void Display_SetNoteState(
     const uint8_t *active_notes,
     uint16_t active_note_count,
     uint8_t last_note);
-void Display_SetVelocity(uint8_t velocity);
+void Display_SetVelocity(uint8_t velocity);             /* 0 = не показывать значение velocity */
 void Display_SetSustain(bool on);
 
 /* ---- Выбранный патч и громкость ---- */
-void Display_SetPatch(uint8_t index, const char *name);
-void Display_SetVoices(uint8_t used, uint8_t max);
-void Display_SetVolume(uint8_t percent);
-void Display_SetClip(bool clipping);
+void Display_SetPatch(uint8_t index, const char *name); /* Имя инструмента до 17 символов, только ASCII */
+void Display_SetVoices(uint8_t used, uint8_t max);      /* max = 0 -> индикатор голосов скрыт */
+void Display_SetVolume(uint8_t percent);                /* 0..100; пока не вызвана — показывает "--%" */
+void Display_SetClip(bool clipping);                    /* Индикатор перегрузки: шкала громкости краснеет */
 
 /* ---- Обработка ошибок ---- */
 void Display_ShowError(Display_Error_t code);

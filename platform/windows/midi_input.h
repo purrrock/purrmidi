@@ -1,12 +1,12 @@
 #ifndef MIDI_INPUT_H
 #define MIDI_INPUT_H
 
-#include <RtMidi.h>
-#include <functional>
-#include <memory>
 #include <stdint.h>
 #include <string>
 #include <vector>
+#include <functional>
+#include <memory>
+#include <RtMidi.h>
 #include "midi_event.h"
 
 /**
