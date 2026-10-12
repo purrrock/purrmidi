@@ -5,9 +5,9 @@
 
 /**
  * @file    epiano_synth.h
- * @brief   Полифоническое FM-электропиано (похожее на Fender Rhodes / DX7 "E.PIANO 1").
+ * @brief   Полифоническое FM-электропиано (в духе Rhodes / DX7 "E.PIANO 1").
  *
- * Архитектура голоса (две параллельные FM-пары "модулятор -> несущая"):
+ * Архитектура голоса (две параллельные FM-пары "модулятор -> несущая", все операторы — синусы):
  *
  *     BODY (основное тело звука): модулятор 1:1 -> несущая 1:1.
  *          Индекс FM-модуляции зависит от динамики нажатия (velocity) и плавно
@@ -41,7 +41,7 @@ extern "C" {
 /** Инициализация движка FM-электропиано и сброс его состояния. */
 void EPianoSynth_Init(void);
 
-/** Обработка события Note On (velocity 0 эквивалентен Note Off). */
+/** Обработка события Note On (velocity 0 трактуется как NoteOff). */
 void EPianoSynth_NoteOn(uint8_t midi_note, uint8_t velocity);
 
 /** Обработка события Note Off. */
@@ -52,7 +52,7 @@ void EPianoSynth_ControlChange(uint8_t control, uint8_t value);
 
 /**
  * Блочное заполнение стереобуфера (L, R, L, R...), 48 кГц, signed 16-bit PCM.
- * Вызывается из аудиопрерывания (DMA) или аудиопотока.
+ * Вызывается из прерывания DMA (STM32) или аудио-потока (ПК).
  */
 void EPianoSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames);
 
