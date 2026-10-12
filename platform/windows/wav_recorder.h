@@ -6,6 +6,11 @@
 #include <vector>
 #include <atomic>
 
+/**
+ * @file    wav_recorder.h
+ * @brief   Запись выходящего аудиопотока в WAV-файл для хостовой Windows/Linux сборки.
+ */
+
 namespace purrmidi {
 
 class WavRecorder {
@@ -15,8 +20,8 @@ public:
 
     void Init(uint32_t seconds, uint32_t sample_rate = 48000, uint16_t num_channels = 2);
     bool IsEnabled() const { return enabled_; }
-    void WriteSamples(const int16_t* buffer, uint32_t num_frames);
-    bool SaveToFile(const std::string& filename);
+    void WriteSamples(const int16_t *buffer, uint32_t num_frames);
+    bool SaveToFile(const std::string &filename);
 
 private:
     bool enabled_{false};

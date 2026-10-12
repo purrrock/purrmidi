@@ -7,6 +7,11 @@
 #include <memory>
 #include "wav_recorder.h"
 
+/**
+ * @file    audio_out.h
+ * @brief   Аудиовывод WASAPI/waveOut для эмулятора PurrMidi на ОС Windows.
+ */
+
 namespace purrmidi {
 
 struct AudioDeviceInfo {
@@ -22,7 +27,7 @@ public:
 
     static std::vector<AudioDeviceInfo> ListDevices();
 
-    bool Init(uint32_t buffer_frames = 256, float gain = 1.0f, WavRecorder* recorder = nullptr);
+    bool Init(uint32_t buffer_frames = 256, float gain = 1.0f, WavRecorder *recorder = nullptr);
     bool Start();
     void Stop();
 

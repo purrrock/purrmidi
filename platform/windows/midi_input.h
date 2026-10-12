@@ -9,6 +9,11 @@
 #include <RtMidi.h>
 #include "midi_event.h"
 
+/**
+ * @file    midi_input.h
+ * @brief   Приём MIDI-сообщений через RtMidi для хостовой сборки Windows/Linux.
+ */
+
 namespace purrmidi {
 
 struct MidiPortInfo {
@@ -16,7 +21,7 @@ struct MidiPortInfo {
     std::string name;
 };
 
-using MidiMonitorCallback = std::function<void(double timeStamp, const std::vector<uint8_t>& message)>;
+using MidiMonitorCallback = std::function<void(double timeStamp, const std::vector<uint8_t> &message)>;
 
 class MidiInput {
 public:
@@ -31,7 +36,7 @@ public:
     void SetMonitorCallback(MidiMonitorCallback cb) { monitor_cb_ = cb; }
 
 private:
-    static void RtMidiCallback(double timeStamp, std::vector<unsigned char>* message, void* userData);
+    static void RtMidiCallback(double timeStamp, std::vector<unsigned char> *message, void *userData);
 
     std::unique_ptr<RtMidiIn> rt_midi_;
     MidiMonitorCallback monitor_cb_;

@@ -11,6 +11,7 @@ void MIDI_Dispatch(const MIDI_Event_t *e)
 
     switch (cmd) {
         case MIDI_STATUS_NOTE_ON:
+            /* В MIDI-протоколе Note On с velocity == 0 эквивалентен Note Off */
             if (e->data2 > 0) {
                 SynthEngine_NoteOn(e->data1, e->data2);
             } else {
@@ -27,7 +28,7 @@ void MIDI_Dispatch(const MIDI_Event_t *e)
             break;
 
         case MIDI_STATUS_PROGRAM_CHANGE:
-            /* data1 = номер программы -> выбор синтезатора */
+            /* data1 = номер программы; спец-номер 127 циклически переключает движок */
             if (e->data1 == 127) {
                 SynthEngine_SelectNext();
             } else {

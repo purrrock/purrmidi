@@ -3,14 +3,11 @@
 
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/*
- * Полифоническое FM-электропиано (в духе Rhodes / DX7 "E.PIANO 1").
+/**
+ * @file    epiano_synth.h
+ * @brief   Полифоническое FM-электропиано (в духе Rhodes / DX7 "E.PIANO 1").
  *
- * Архитектура голоса (две пары "модулятор -> несущая", все операторы — синусы):
+ * Архитектура голоса (две параллельные FM-пары "модулятор -> несущая", все операторы — синусы):
  *
  *     BODY  (корпус звука): модулятор 1:1 -> несущая 1:1.
  *           Индекс модуляции зависит от velocity и затухает ("bark" —
@@ -24,9 +21,9 @@ extern "C" {
  * зависит от высоты ноты (басы звучат дольше), демпфер при отпускании клавиши,
  * педаль сустейна, лёгкая стереопанорама по положению клавиши, мягкий лимитер.
  *
- * Все вычисления — float, без динамической памяти, без блокировок: события
- * из основного цикла передаются в аудиопоток через lock-free SPSC FIFO и
- * применяются в начале каждого вызова EPianoSynth_FillStereoBuffer().
+ * Все вычисления — float, без использования динамической памяти (malloc) и без блокировок.
+ * Входящие MIDI-события из основного цикла передаются в аудиопоток через lock-free SPSC FIFO
+ * и применяются к состояниям голосов в самом начале каждого вызова EPianoSynth_FillStereoBuffer().
  *
  * Поддерживаемые MIDI CC:
  *     CC1, CC71, CC74  яркость (индекс FM-модуляции), 64 = штатная
@@ -36,15 +33,24 @@ extern "C" {
  *     CC120, CC123     All Sound Off / All Notes Off
  */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/** Инициализация движка FM-электропиано и сброс его состояния. */
 void EPianoSynth_Init(void);
 
-/** velocity 0 трактуется как NoteOff */
+/** Обработка события Note On (velocity 0 трактуется как NoteOff). */
 void EPianoSynth_NoteOn(uint8_t midi_note, uint8_t velocity);
+
+/** Обработка события Note Off. */
 void EPianoSynth_NoteOff(uint8_t midi_note);
+
+/** Обработка событий MIDI Control Change. */
 void EPianoSynth_ControlChange(uint8_t control, uint8_t value);
 
 /**
- * Блочное заполнение стереобуфера (L, R, L, R...), 48 кГц, int16.
+ * Блочное заполнение стереобуфера (L, R, L, R...), 48 кГц, signed 16-bit PCM.
  * Вызывается из прерывания DMA (STM32) или аудио-потока (ПК).
  */
 void EPianoSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames);

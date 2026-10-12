@@ -1,6 +1,10 @@
 #include "midi_queue.h"
 #include <assert.h>
 
+/**
+ * Размер очереди должен быть строгой степенью двойки для быстрого
+ * взятия остатка по модулю с помощью битовой маски (MIDI_QUEUE_SIZE - 1U).
+ */
 #define MIDI_QUEUE_SIZE 256U
 
 _Static_assert((MIDI_QUEUE_SIZE != 0U) && ((MIDI_QUEUE_SIZE & (MIDI_QUEUE_SIZE - 1U)) == 0U),
