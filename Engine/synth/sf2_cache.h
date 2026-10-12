@@ -57,12 +57,12 @@ extern "C" {
 #endif
 #endif
 
-/* Сколько блоков после читаемого аудиопотоком блока загружается упреждающе. */
+/* Количество блоков, загружаемых с опережением (read-ahead) */
 #ifndef SF2_READAHEAD_BLOCKS
 #define SF2_READAHEAD_BLOCKS 3U
 #endif
 
-/* Верхняя граница считываний из файла за один вызов SF2Cache_ProcessRequests(). */
+/* Максимальное количество блоков, считываемых за один вызов SF2Cache_ProcessRequests() */
 #ifndef SF2_MAX_BLOCKS_PER_PROCESS
 #if SF2_HOST_MODE
 #define SF2_MAX_BLOCKS_PER_PROCESS 64U
@@ -159,7 +159,7 @@ void SF2Cache_SetSmplFileOffset(uint32_t file_offset, uint32_t total_samples);
 /** Копирование диагностических счётчиков. */
 void SF2Cache_GetStats(SF2CacheStats *out);
 
-/** Сброс диагностических счётчиков. */
+/** Обнуление диагностических счётчиков. */
 void SF2Cache_ResetStats(void);
 
 #ifdef __cplusplus
