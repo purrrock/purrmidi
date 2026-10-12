@@ -3,24 +3,24 @@
 #include <stdbool.h>
 
 #define SINE_SAMPLE_RATE      48000.0f
-#define SINE_ATTACK_SEC       0.005f      /* линейная атака  */
-#define SINE_RELEASE_SEC      0.050f      /* линейный релиз  */
+#define SINE_ATTACK_SEC       0.005f      /* Линейная атака  */
+#define SINE_RELEASE_SEC      0.050f      /* Линейный релиз  */
 #define SINE_ATTACK_STEP      (1.0f / (SINE_SAMPLE_RATE * SINE_ATTACK_SEC))
 #define SINE_RELEASE_STEP     (1.0f / (SINE_SAMPLE_RATE * SINE_RELEASE_SEC))
-#define SINE_MAX_AMPLITUDE    0.5f        /* запас по громкости */
+#define SINE_MAX_AMPLITUDE    0.5f        /* Запас по амплитуде */
 
-/* Параметры пишутся из main, читаются в прерывании DMA: все — 32-битные volatile. */
+/* Параметры меняются из главного цикла и читаются в аудио-прерывании DMA (32-битные volatile) */
 static volatile int16_t  g_note        = -1;
 static volatile bool     g_gate        = false;
 static volatile bool     g_sustain     = false;
 static volatile float    g_volume      = 1.0f;
 
-/* Состояние только аудиоконтекста */
+/* Состояние огибающей (только в контексте аудиовывода) */
 static float g_env = 0.0f;
 
 static inline float midi_to_freq(uint8_t note)
 {
-    /* 440 * 2^((n - 69) / 12) без powf: таблица полутонов в пределах октавы + сдвиг по степеням 2 */
+    /* 440 * 2^((n - 69) / 12) без вызова powf: таблица полутонов в рамках октавы и битовые сдвиги */
     static const float semitone[12] = {
         1.0f, 1.059463094f, 1.122462048f, 1.189207115f, 1.259921050f, 1.334839854f,
         1.414213562f, 1.498307077f, 1.587401052f, 1.681792831f, 1.781797436f, 1.887748625f
@@ -75,14 +75,14 @@ void SineSynth_NoteOff(uint8_t midi_note)
 void SineSynth_ControlChange(uint8_t control, uint8_t value)
 {
     switch (control) {
-        case 7:   /* Channel volume */
+        case 7:   /* Громкость канала */
             g_volume = (float)value * (1.0f / 127.0f);
             break;
-        case 64:  /* Sustain pedal */
+        case 64:  /* Педаль сустейна */
             g_sustain = (value >= 64);
             break;
-        case 120: /* All sound off */
-        case 123: /* All notes off */
+        case 120: /* Сброс всех звуков */
+        case 123: /* Сброс всех нот */
             g_gate = false;
             g_sustain = false;
             break;

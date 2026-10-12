@@ -1,52 +1,65 @@
-/**
- * @file    soundfont_synth.h
- * @brief   TinySoundFont-based SoundFont synthesizer engine for PurrMidi.
- */
 #ifndef SOUNDFONT_SYNTH_H
 #define SOUNDFONT_SYNTH_H
 
 #include <stdbool.h>
 #include <stdint.h>
 
+/**
+ * @file    soundfont_synth.h
+ * @brief   Синтезатор SoundFont2 на базе библиотеки TinySoundFont и кэша сэмплов SF2Cache.
+ */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/** Load 0:/SNDFNT.SF2 and initialize SoundFont engine. Returns true on success. */
+/** Загрузка файла 0:/SNDFNT.SF2 с SD-карты и инициализация SoundFont. Возвращает true при успехе. */
 bool SoundFontSynth_InitSF2(void);
 
-/** Reset voices and channel state. Safe to call from main context. */
+/** Сброс голосов и состояния каналов. Безопасно вызывать из основного контекста (main). */
 void SoundFontSynth_Init(void);
 
+/** Обработка события Note On. */
 void SoundFontSynth_NoteOn(uint8_t note, uint8_t velocity);
+
+/** Обработка события Note Off. */
 void SoundFontSynth_NoteOff(uint8_t note);
+
+/** Обработка события MIDI Control Change. */
 void SoundFontSynth_ControlChange(uint8_t control, uint8_t value);
+
+/** Обработка события MIDI Program Change. */
 void SoundFontSynth_ProgramChange(uint8_t program);
 
-/** Fill stereo buffer with 48 kHz 16-bit PCM audio (non-blocking). */
+/**
+ * Заполнение стереобуфера 48 кГц 16-бит PCM аудио.
+ * Неблокирующий вызов для аудио-прерывания или аудио-потока.
+ */
 void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames);
 
-/** Process pending PCM block requests from SD card. Called from main loop. */
+/** Фоновая обработка запросов к кэшу SF2 с SD-карты. Вызывается из основного цикла. */
 void SoundFontSynth_Process(void);
 
-/** Returns true if SoundFont file was successfully loaded. */
+/** Возвращает true, если файл SoundFont2 успешно загружен. */
 bool SoundFontSynth_IsLoaded(void);
 
 /**
- * Returns false only if loading the SoundFont was already attempted and failed
- * (no SD card / no file / out of memory). Before the first attempt it returns true,
- * because the file is loaded lazily on the first engine selection.
- * Used by the Program Change 127 "next instrument" cycle to skip a dead engine.
+ * Проверка доступности синтезатора SoundFont для цикла переключения Program Change 127.
+ * Возвращает false только если загрузка SoundFont уже вызвалась и завершилась ошибкой
+ * (отсутствует SD-карта, нет файла 0:/SNDFNT.SF2 или не хватило памяти). До первой
+ * попытки загрузки возвращает true, так как файл загружается лениво (lazy load)
+ * при первом явном выборе движка.
  */
 bool SoundFontSynth_IsAvailable(void);
 
-/** Prints one line with the cache statistics (hits / misses / cycles / SD read times) to stderr (UART). */
+/** Вывод одной строки со статистикой кэша (попадания, промахи, такты, время чтения SD) в stderr (UART). */
 void SoundFontSynth_PrintStats(void);
 
 /**
- * Firmware only: boot-time profiler. Measures the cost of atomic operations and of SF2Cache_GetSample()
- * (hint hit / search hit / miss) and simulates "a chord + the main loop servicing the cache".
- * Must run before the audio DMA starts. Prints [SF2PROF] lines. No-op on host builds.
+ * Только для прошивки STM32: профилирование при запуске системы. Измеряет стоимость
+ * атомарных операций, работы SF2Cache_GetSample() (попадания по подсказке/поиску, промахи)
+ * и симулирует аккорд с фоновым обслуживанием кэша в главном цикле.
+ * Должен запускаться до старта аудио DMA. Выводит строки [SF2PROF]. Пустая заглушка в хостовой сборке.
  */
 void SoundFontSynth_Profile(void);
 

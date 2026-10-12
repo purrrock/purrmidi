@@ -5,12 +5,17 @@
 #include <string>
 #include <vector>
 
+/**
+ * @file    midi_decode.h
+ * @brief   Форматирование и декодирование сырых MIDI-пакетов в текст для логов.
+ */
+
 namespace purrmidi {
 
 std::string NoteNumberToName(uint8_t note);
 std::string GetCCName(uint8_t cc);
-std::string DecodeMidiMessage(const std::vector<uint8_t>& message);
-std::string FormatMidiLine(double timestamp_sec, const std::vector<uint8_t>& message);
+std::string DecodeMidiMessage(const std::vector<uint8_t> &message);
+std::string FormatMidiLine(double timestamp_sec, const std::vector<uint8_t> &message);
 
 } // namespace purrmidi
 

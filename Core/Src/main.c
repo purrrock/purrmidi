@@ -30,7 +30,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
-#include "synth_engine.h" // синтезаторы epiano / pluck / sine; переключаются по MIDI Program Change
+#include "synth_engine.h" /* Синтезаторы epiano / pluck / sine / organ / soundfont */
 #include "display.h"
 #include "midi_event.h"
 #include "midi_queue.h"
@@ -159,7 +159,7 @@ void MX_USB_HOST_Process(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-// Перенаправление printf в UART
+/* Перенаправление вывода printf в UART3 */
 int _write(int file, char *ptr, int len) {
     (void)file;
     uint32_t timeout = (uint32_t)((len * 10U) / 115U) + 20U;
