@@ -68,6 +68,9 @@ extern USBH_HandleTypeDef hUsbHostFS;
 static volatile uint32_t note_on_count = 0;
 static volatile uint32_t note_off_count = 0;
 
+/* Ошибки SAI/DMA: растёт в ISR, главный цикл показывает E02 на дисплее */
+static volatile uint32_t sai_error_count = 0;
+
 static uint8_t active_notes[128];
 static uint8_t active_note_stack[128];
 static uint16_t active_note_count = 0;
@@ -244,6 +247,25 @@ static void Print_USB_Diag(uint32_t max_loop_dt)
 }
 #endif /* USB_DIAG_UART */
 
+/* Названия инструментов для дисплея (только ASCII, до 17 символов). Порядок = SynthEngineId. */
+static const char * const display_patch_names[SYNTH_ENGINE_COUNT] =
+{
+    "E-Piano", "Pluck", "Sine", "Organ", "SoundFont"
+};
+
+/* Номер на дисплее 1-based (как на большинстве клавиатур): Program Change 0 -> "01" */
+static void Display_SyncPatch(void)
+{
+    const SynthEngineId id = SynthEngine_GetCurrent();
+    Display_SetPatch((uint8_t)(id + 1U), display_patch_names[id]);
+}
+
+/* Уровень CC 0..127 -> проценты для полосы громкости */
+static void Display_SyncVolume(void)
+{
+    Display_SetVolume((uint8_t)(((uint32_t)SynthEngine_GetMasterVolume() * 100U + 63U) / 127U));
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -293,8 +315,9 @@ int main(void)
   MIDI_USB_Init();
   // SDStorage_Mount()
   SynthEngine_Init(); // Включает синтезатор по умолчанию (E-Piano); дальше выбор — по Program Change
-  Display_SetPatch((uint8_t)SynthEngine_GetCurrent(), SynthEngine_GetName());
   printf("Synth engine: %s\r\n", SynthEngine_GetName());
+  Display_SyncPatch();
+  Display_SyncVolume();
   printf("[SYS] organ code at %p (0x0000xxxx = ITCM, 0x0800xxxx = flash), sample table at %p\r\n",
          (void *)OrganSynth_FillStereoBuffer, (void *)&_sitcm_text);
   printf("[SYS] SYSCLK=%lu Hz, I-cache %s, audio budget %lu us per %u frames\r\n",
@@ -437,7 +460,7 @@ int main(void)
       }
     }
     SynthEngine_Select(SYNTH_ENGINE_EPIANO);
-    Display_SetPatch((uint8_t)SynthEngine_GetCurrent(), SynthEngine_GetName());
+    Display_SyncPatch();
   }
 #endif
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
@@ -452,6 +475,12 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
+  uint32_t seen_queue_overruns = MIDI_Queue_GetOverrunCount();
+  uint32_t seen_rx_errors      = MIDI_USB_GetReceiveErrorsCount();
+  uint32_t seen_sai_errors     = sai_error_count;
+  uint32_t seen_audio_shed     = audio_shed_total;
+  bool     sf2_missing_shown   = false;
 
 #if USB_DIAG_UART
   uint32_t prev_loop_tick = HAL_GetTick();
@@ -517,7 +546,18 @@ int main(void)
         {
             printf("[PC] ch=%u program %u -> %s\r\n", event.status & 0x0FU, event.data1, SynthEngine_GetName());
             audio_reset_stats = true;   /* separate timing statistics for every engine */
-            Display_SetPatch((uint8_t)SynthEngine_GetCurrent(), SynthEngine_GetName());
+            Display_SyncPatch();
+        }
+        else if (command == MIDI_STATUS_CONTROL_CHANGE)
+        {
+            if (event.data1 == SYNTH_MASTER_VOLUME_CC)
+            {
+                Display_SyncVolume();
+            }
+            else if (event.data1 == 64U)
+            {
+                Display_SetSustain(event.data2 >= 64U);
+            }
         }
 
         if (command == MIDI_STATUS_NOTE_ON && event.data2 != 0)
@@ -639,6 +679,47 @@ int main(void)
         }
     }
 #endif
+
+    /* Новые ошибки -> красная плашка на дисплее (гаснет сама через 3 с) */
+    {
+        const uint32_t queue_overruns = MIDI_Queue_GetOverrunCount();
+        if (queue_overruns != seen_queue_overruns)
+        {
+            seen_queue_overruns = queue_overruns;
+            Display_ShowError(DISPLAY_ERR_MIDI_QUEUE);
+        }
+
+        const uint32_t rx_errors = MIDI_USB_GetReceiveErrorsCount();
+        if (rx_errors != seen_rx_errors)
+        {
+            seen_rx_errors = rx_errors;
+            Display_ShowError(DISPLAY_ERR_USB_RX);
+        }
+
+        const uint32_t sai_errors = sai_error_count;
+        if (sai_errors != seen_sai_errors)
+        {
+            seen_sai_errors = sai_errors;
+            Display_ShowError(DISPLAY_ERR_AUDIO_DMA);
+        }
+
+        /* Load shedding: блоки заменены тишиной, т.е. звук реально пропал (счётчик не сбрасывается) */
+        const uint32_t shed = audio_shed_total;
+        if (shed != seen_audio_shed)
+        {
+            seen_audio_shed = shed;
+            Display_ShowError(DISPLAY_ERR_AUDIO_OVERLOAD);
+        }
+
+        /* SoundFont выбран, но загрузка не удалась (нет SD / файла / памяти): один раз на выбор */
+        const bool sf2_missing = (SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT) &&
+                                 !SynthEngine_IsAvailable(SYNTH_ENGINE_SOUNDFONT);
+        if (sf2_missing && !sf2_missing_shown)
+        {
+            Display_ShowError(DISPLAY_ERR_SF2);
+        }
+        sf2_missing_shown = sf2_missing;
+    }
 
     Display_Task();   /* рисует не более одного "грязного" поля за вызов */
 
@@ -795,6 +876,14 @@ void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai)
 {
     if (hsai->Instance == SAI1_Block_A) {
         audio_fill(&audio_buffer[AUDIO_BUFFER_SIZE / 2]);
+    }
+}
+
+/* Ошибка SAI/DMA (ISR): только счётчик, на дисплей выводит главный цикл */
+void HAL_SAI_ErrorCallback(SAI_HandleTypeDef *hsai)
+{
+    if (hsai->Instance == SAI1_Block_A) {
+        sai_error_count++;
     }
 }
 

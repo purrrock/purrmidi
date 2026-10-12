@@ -30,6 +30,7 @@
 
 /* USER CODE BEGIN Includes */
 #include "usbh_midi.h"
+#include "display.h"
 #include <stdio.h>
 /* USER CODE END Includes */
 
@@ -151,6 +152,7 @@ switch(id)
 
   case HOST_USER_DISCONNECTION:
     Appli_state = APPLICATION_DISCONNECT;
+    Display_SetLinkState(DISPLAY_LINK_NONE);   /* заодно снимает E01 */
     printf("[USB] Device Disconnected!\r\n");
     break;
 
@@ -162,6 +164,7 @@ switch(id)
 
   case HOST_USER_CONNECTION:
     Appli_state = APPLICATION_START;
+    Display_SetLinkState(DISPLAY_LINK_ENUMERATING);   /* через 5 с без готовности -> E01 */
     printf("[USB] Device Attached. Enumerating...\r\n");
     break;
 

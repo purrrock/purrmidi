@@ -55,7 +55,7 @@ static bool display_ready = false;   /* true только после успеш�
 
 #define MIN_DRAW_INTERVAL_MS   10U   /* пауза между отрисовками полей        */
 #define ERROR_TIMEOUT_MS     3000U   /* время показа "временной" ошибки      */
-#define ACTIVITY_FLASH_MS      60U   /* длительность вспышки MIDI-точки      */
+#define ENUM_TIMEOUT_MS      5000U   /* энумерация дольше этого -> E01       */
 
 #define RGB565(r, g, b) \
     ((uint16_t)((((r) & 0xF8U) << 8) | (((g) & 0xFCU) << 3) | (((b) & 0xFFU) >> 3)))
@@ -71,16 +71,14 @@ static bool display_ready = false;   /* true только после успеш�
 #define C_MINT      RGB565(120, 255, 160)
 #define C_RED       RGB565(225,  45,  45)
 #define C_GREEN     RGB565( 40, 220,  80)
-#define C_GREEN_HI  RGB565(190, 255, 200)
 #define C_YELLOW    RGB565(240, 210,  40)
 
 /* Поля, которые можно перерисовать независимо */
 #define F_HEADER    (1U << 0)
-#define F_DOT       (1U << 1)
 #define F_INSTR     (1U << 2)
 #define F_NOTE      (1U << 3)
 #define F_VOLUME    (1U << 4)
-#define F_ALL       (F_HEADER | F_DOT | F_INSTR | F_NOTE | F_VOLUME)
+#define F_ALL       (F_HEADER | F_INSTR | F_NOTE | F_VOLUME)
 
 /* ------------------------------------------------------------------------- */
 /* UI state                                                                  */
@@ -106,14 +104,15 @@ static const struct
     [DISPLAY_ERR_AUDIO_DMA]  = { "AUDIO DMA ERROR",  false },
     [DISPLAY_ERR_MIDI_QUEUE] = { "MIDI QUEUE FULL",  false },
     [DISPLAY_ERR_USB_RX]     = { "USB RX ERROR",     false },
+    [DISPLAY_ERR_AUDIO_OVERLOAD] = { "AUDIO OVERLOAD", false },
+    [DISPLAY_ERR_SF2]        = { "SF2 NOT LOADED",   false },
 };
 
 static struct
 {
     Display_Link_t link;
+    uint32_t       link_since;       /* tick последней смены состояния линка */
     char           device[13];
-    bool           flash_on;
-    uint32_t       flash_until;
 
     NoteKind_t     kind;
     bool           note_live;        /* клавиши сейчас нажаты; иначе - серая "последняя" */
@@ -384,7 +383,7 @@ static uint16_t Dot_Color(void)
     switch (ui.link)
     {
         case DISPLAY_LINK_READY:
-            return ui.flash_on ? C_GREEN_HI : C_GREEN;
+            return C_GREEN;
         case DISPLAY_LINK_ENUMERATING:
             return C_YELLOW;
         default:
@@ -407,13 +406,6 @@ static void Canvas_Dot(int x, int y, uint16_t color)
             }
         }
     }
-}
-
-static void Draw_Dot(void)
-{
-    Canvas_Begin(DOT_SIZE, DOT_SIZE, C_HDR);
-    Canvas_Dot(0, 0, Dot_Color());
-    Canvas_Flush(DOT_X, DOT_Y);
 }
 
 static void Draw_Header(void)
@@ -584,13 +576,8 @@ static bool Draw_NextField(void)
 {
     if (ui.dirty & F_HEADER)
     {
-        ui.dirty &= ~(F_HEADER | F_DOT);   /* точка входит в шапку */
+        ui.dirty &= ~F_HEADER;
         Draw_Header();
-    }
-    else if (ui.dirty & F_DOT)
-    {
-        ui.dirty &= ~F_DOT;
-        Draw_Dot();
     }
     else if (ui.dirty & F_NOTE)
     {
@@ -673,11 +660,11 @@ void Display_Task(void)
         }
     }
 
-    /* Конец вспышки MIDI-точки */
-    if (ui.flash_on && (int32_t)(now - ui.flash_until) >= 0)
+    /* Энумерация затянулась: библиотека USB-хоста сама об этом не сообщает */
+    if (ui.link == DISPLAY_LINK_ENUMERATING && !ui.errors[DISPLAY_ERR_USB_ENUM].active &&
+        (now - ui.link_since) >= ENUM_TIMEOUT_MS)
     {
-        ui.flash_on = false;
-        MarkDirty(F_DOT);
+        Display_ShowError(DISPLAY_ERR_USB_ENUM);
     }
 
     if (ui.dirty == 0U || (now - ui.last_draw_tick) < MIN_DRAW_INTERVAL_MS)
@@ -698,13 +685,13 @@ void Display_SetLinkState(Display_Link_t state)
 {
     if (ui.link == state) { return; }
 
-    ui.link = state;
+    ui.link       = state;
+    ui.link_since = HAL_GetTick();
     ui.errors[DISPLAY_ERR_USB_ENUM].active = false;   /* новое состояние линка - ошибка устарела */
 
     if (state != DISPLAY_LINK_READY)
     {
         /* Клавиатуры нет: сбрасываем всё, что от неё зависело */
-        ui.flash_on    = false;
         ui.sustain     = false;
         ui.voices_used = 0;
 
@@ -739,19 +726,6 @@ void Display_SetDeviceName(const char *name)
     {
         memcpy(ui.device, tmp, sizeof(ui.device));
         MarkDirty(F_HEADER);
-    }
-}
-
-void Display_MidiActivity(void)
-{
-    if (ui.link != DISPLAY_LINK_READY) { return; }
-
-    ui.flash_until = HAL_GetTick() + ACTIVITY_FLASH_MS;
-
-    if (!ui.flash_on)
-    {
-        ui.flash_on = true;
-        MarkDirty(F_DOT);
     }
 }
 

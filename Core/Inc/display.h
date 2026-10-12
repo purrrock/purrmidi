@@ -33,10 +33,12 @@ typedef enum
 typedef enum
 {
     DISPLAY_ERR_NONE = 0,
-    DISPLAY_ERR_USB_ENUM,       /* E01 USB ENUM FAIL     - до смены состояния USB-линка */
-    DISPLAY_ERR_AUDIO_DMA,      /* E02 AUDIO DMA ERROR   - гаснет через 3 с             */
-    DISPLAY_ERR_MIDI_QUEUE,     /* E03 MIDI QUEUE FULL   - гаснет через 3 с             */
-    DISPLAY_ERR_USB_RX,         /* E04 USB RX ERROR      - гаснет через 3 с             */
+    DISPLAY_ERR_USB_ENUM,       /* E01 USB ENUM FAIL     - энумерация > 5 с; до смены состояния USB-линка */
+    DISPLAY_ERR_AUDIO_DMA,      /* E02 AUDIO DMA ERROR   - ошибка SAI/DMA;        гаснет через 3 с       */
+    DISPLAY_ERR_MIDI_QUEUE,     /* E03 MIDI QUEUE FULL   - переполнение очереди;  гаснет через 3 с       */
+    DISPLAY_ERR_USB_RX,         /* E04 USB RX ERROR      - ошибка приёма USB;     гаснет через 3 с       */
+    DISPLAY_ERR_AUDIO_OVERLOAD, /* E05 AUDIO OVERLOAD    - блоки заменены тишиной (load shedding); 3 с   */
+    DISPLAY_ERR_SF2,            /* E06 SF2 NOT LOADED    - выбран SoundFont, а загрузка не удалась; 3 с  */
     DISPLAY_ERR_COUNT
 } Display_Error_t;
 
@@ -49,7 +51,6 @@ void Display_Task(void);
 void Display_SetMidiConnected(bool connected);          /* совместимость со старым API */
 void Display_SetLinkState(Display_Link_t state);
 void Display_SetDeviceName(const char *name);           /* до 12 символов; NULL -> "USB MIDI" */
-void Display_MidiActivity(void);                        /* короткая вспышка точки на каждое MIDI-событие */
 
 /* ---- Ноты ---- */
 void Display_SetLastNote(uint8_t note);                 /* совместимость со старым API */
