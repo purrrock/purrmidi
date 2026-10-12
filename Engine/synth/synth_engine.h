@@ -89,6 +89,13 @@ void SynthEngine_ProgramChange(uint8_t program);
 int SynthEngine_Select(SynthEngineId id);
 
 /**
+ * Переключение на следующий доступный синтезатор по циклу (как Program Change 127).
+ * Пропускает недоступные движки (например, SoundFont без SF2).
+ * @return Выбранный синтезатор.
+ */
+SynthEngineId SynthEngine_SelectNext(void);
+
+/**
  * Можно ли сейчас выбрать синтезатор. Всегда 1, кроме SoundFont после неудачной загрузки
  * (нет SD-карты / файла SNDFNT.SF2 / не хватило памяти). Используется циклом Program Change 127.
  */

@@ -29,17 +29,7 @@ void MIDI_Dispatch(const MIDI_Event_t *e)
         case MIDI_STATUS_PROGRAM_CHANGE:
             /* data1 = номер программы -> выбор синтезатора */
             if (e->data1 == 127) {
-                /* "Следующий инструмент": пропускаем недоступные (SoundFont без SD/файла). */
-                SynthEngineId cur = SynthEngine_GetCurrent();
-                SynthEngineId next = cur;
-                uint32_t i;
-                for (i = 0; i < (uint32_t)SYNTH_ENGINE_COUNT; i++) {
-                    next = (SynthEngineId)(((uint32_t)next + 1U) % SYNTH_ENGINE_COUNT);
-                    if (SynthEngine_IsAvailable(next)) {
-                        break;
-                    }
-                }
-                SynthEngine_Select(next);
+                SynthEngine_SelectNext();
             } else {
                 SynthEngine_ProgramChange(e->data1);
             }

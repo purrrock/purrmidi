@@ -166,6 +166,41 @@ int _write(int file, char *ptr, int len) {
     return 0;
 }
 
+/* Обработка кнопки K1 (PC13) с неблокирующим программным дребезгом (50 ms) */
+static void Button_K1_Process(void)
+{
+    static bool button_debounced_state = false;
+    static bool button_last_raw = false;
+    static uint32_t button_change_tick = 0;
+
+    bool raw_state = (HAL_GPIO_ReadPin(USER_KEY_K1_GPIO_Port, USER_KEY_K1_Pin) == GPIO_PIN_SET);
+    uint32_t now = HAL_GetTick();
+
+    if (raw_state != button_last_raw)
+    {
+        button_last_raw = raw_state;
+        button_change_tick = now;
+    }
+
+    if ((now - button_change_tick) >= 50U)
+    {
+        if (button_debounced_state != button_last_raw)
+        {
+            button_debounced_state = button_last_raw;
+            if (button_debounced_state)
+            {
+                /* Нажатие K1: отправка Program Change 127 */
+                MIDI_Event_t evt = {
+                    .status = MIDI_STATUS_PROGRAM_CHANGE,
+                    .data1 = 127,
+                    .data2 = 0
+                };
+                MIDI_Queue_Push(&evt);
+            }
+        }
+    }
+}
+
 #if USB_DIAG_UART
 static void Print_USB_Diag(uint32_t max_loop_dt)
 {
@@ -258,6 +293,7 @@ int main(void)
   MIDI_USB_Init();
   // SDStorage_Mount()
   SynthEngine_Init(); // Включает синтезатор по умолчанию (E-Piano); дальше выбор — по Program Change
+  Display_SetPatch((uint8_t)SynthEngine_GetCurrent(), SynthEngine_GetName());
   printf("Synth engine: %s\r\n", SynthEngine_GetName());
   printf("[SYS] organ code at %p (0x0000xxxx = ITCM, 0x0800xxxx = flash), sample table at %p\r\n",
          (void *)OrganSynth_FillStereoBuffer, (void *)&_sitcm_text);
@@ -401,6 +437,7 @@ int main(void)
       }
     }
     SynthEngine_Select(SYNTH_ENGINE_EPIANO);
+    Display_SetPatch((uint8_t)SynthEngine_GetCurrent(), SynthEngine_GetName());
   }
 #endif
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
@@ -439,6 +476,7 @@ int main(void)
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
+    Button_K1_Process();
     USB_PortLostRecover(&hUsbHostFS);   /* port silently disabled by HW -> re-enumerate */
     MIDI_USB_Process();
     SoundFontSynth_Process();
@@ -479,6 +517,7 @@ int main(void)
         {
             printf("[PC] ch=%u program %u -> %s\r\n", event.status & 0x0FU, event.data1, SynthEngine_GetName());
             audio_reset_stats = true;   /* separate timing statistics for every engine */
+            Display_SetPatch((uint8_t)SynthEngine_GetCurrent(), SynthEngine_GetName());
         }
 
         if (command == MIDI_STATUS_NOTE_ON && event.data2 != 0)
