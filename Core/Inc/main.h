@@ -59,6 +59,8 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define DEBUG_LED_Pin GPIO_PIN_3
 #define DEBUG_LED_GPIO_Port GPIOE
+#define USER_KEY_K1_Pin GPIO_PIN_13
+#define USER_KEY_K1_GPIO_Port GPIOC
 #define LCD_BL_Pin GPIO_PIN_10
 #define LCD_BL_GPIO_Port GPIOE
 #define LCD_CS_Pin GPIO_PIN_11
