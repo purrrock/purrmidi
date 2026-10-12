@@ -108,6 +108,12 @@ typedef struct {
 } SF2Profile;
 
 void SF2Cache_GetProfile(SF2Profile *out);
+
+/**
+ * Call once at the start of every audio block, before the first SF2Cache_GetSample() of that block.
+ * It advances the LRU clock and invalidates the per-block "known missing" memo.
+ */
+void SF2Cache_BeginAudioBlock(void);
 void SF2Cache_ResetProfile(void);
 
 bool SF2Cache_OpenFile(const char *filepath);

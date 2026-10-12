@@ -98,6 +98,10 @@ target_compile_definitions(DaisySP PUBLIC USE_DAISYSP_LGPL)
 
 target_compile_features(DaisySP PUBLIC cxx_std_17)
 
+# Pluck (струна) целиком считается в DaisySP на каждом сэмпле в аудио-прерывании: скорость важнее размера.
+# Только Release (в Debug остаётся -O0 -g3). Подробности - в блоке "Оптимизация по скорости" ниже.
+target_compile_options(DaisySP PRIVATE $<$<CONFIG:Release>:-O2>)
+
 # ---------------------------------------------------------------------------
 # Application sources
 # ---------------------------------------------------------------------------
@@ -133,6 +137,36 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/st7735.c
     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/st7735_reg.c
 )
+
+# ---------------------------------------------------------------------------
+# Оптимизация по скорости для горячего аудио-кода
+# ---------------------------------------------------------------------------
+# Весь проект собирается с -Os (размер). Для кода, который выполняется в аудио-прерывании на каждом
+# блоке/сэмпле, важнее скорость. Измерено на Cortex-M7 (число инструкций на блок из 128 кадров):
+#   орган, 12 голосов: -Os 172 тыс. -> -O2 131 тыс. (-24%);  epiano, 8 голосов: 111 тыс. -> 91 тыс. (-18%);
+#   -O3 почти ничего не добавляет к -O2, но раздувает код (epiano +2,2 КБ).
+# Только Release: Debug остаётся -O0 -g3. Опция -O2 попадает в командную строку после -Os и перекрывает её.
+# Не включать сюда файлы, привязанные к ITCM по имени объекта в линкер-скрипте, при переходе на LTO:
+# LTO меняет имена объектных файлов (см. секцию .itcm_text).
+set(PURRMIDI_AUDIO_HOT_SOURCES
+    Engine/synth/synth_engine.cpp
+    Engine/synth/epiano_synth.cpp
+    Engine/synth/organ_synth.cpp
+    Engine/synth/pluck_synth.cpp
+    Engine/synth/sine_synth.c
+    Engine/synth/soundfont_synth.cpp
+    Engine/synth/sf2_cache.cpp
+    Engine/synth/tinysoundfont_impl.cpp
+    Engine/synth/synth.c
+
+    Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp
+    Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp
+    Middlewares/Third_Party/bfreeOrgan2/components/efx_chorus.cpp
+    Middlewares/Third_Party/bfreeOrgan2/components/env_ar.cpp
+    Middlewares/Third_Party/bfreeOrgan2/components/env_click.cpp
+)
+set_source_files_properties(${PURRMIDI_AUDIO_HOT_SOURCES}
+    PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Release>:-O2>")
 
 # SD-карта (SDMMC1 + FatFs): модуль собирается только после того, как CubeMX
 # сгенерировал sdmmc.h и FatFs (см. README, раздел "Работа с SD-картой").

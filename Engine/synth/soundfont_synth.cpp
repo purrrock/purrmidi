@@ -248,6 +248,7 @@ void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
         apply_event(ev);
     }
 
+    SF2Cache_BeginAudioBlock();
     tsf_render_short(g_tsf, buffer, (int)num_frames, 0);
 }
 
@@ -387,14 +388,16 @@ void profile_getsample(void)
     uint32_t tm = 0;
     for (uint32_t k = 0; k < 8U; ++k) {
         int h = -1;
+        SF2Cache_BeginAudioBlock();            /* a new audio block: the "already missed" memo is empty */
         const uint32_t t1 = now_cycles();
         sink = SF2Cache_GetSample(g_tsf, (total_blocks / 2U + k * 7U) * SF2_BLOCK_SAMPLES + 5U, &h);
         tm += now_cycles() - t1;
     }
     print_x10("GetSample miss, new block (+requests)", (uint32_t)(((uint64_t)tm * 10U) / 8U));
+    SF2Cache_BeginAudioBlock();
     t0 = now_cycles();
     for (uint32_t i = 0; i < M; ++i) { int h = -1; sink = SF2Cache_GetSample(g_tsf, (total_blocks / 2U) * SF2_BLOCK_SAMPLES + 5U, &h); }
-    print_x10("GetSample miss, block already requested", (uint32_t)(((uint64_t)(now_cycles() - t0) * 10U) / M));
+    print_x10("GetSample miss, repeated in same block", (uint32_t)(((uint64_t)(now_cycles() - t0) * 10U) / M));
     (void)sink;
 
     SF2Cache_Reset();

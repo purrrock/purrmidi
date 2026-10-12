@@ -8,6 +8,17 @@
 #include <cstdio>
 #include <cstring>
 
+/*
+ * SF2_FASTPATH = 1: lock-free hit path for a single-core MCU where the only reader (the audio interrupt)
+ * can never be pre-empted by the only writer (the main loop). Then the per-sample reader counter and the
+ * double checks of the general protocol are unnecessary, and on the STM32H7 every load whose result is
+ * used immediately costs tens of cycles (the SoundFont hit path took ~735 cycles).
+ * SF2_FASTPATH = 0: the general protocol, required when reader and writer are real threads (host builds).
+ */
+#ifndef SF2_FASTPATH
+#define SF2_FASTPATH (!SF2_HOST_MODE)
+#endif
+
 #if !SF2_HOST_MODE
 #include "ff.h"
 #include "sd_storage.h"
@@ -27,6 +38,10 @@ struct CacheBlock {
     std::atomic<uint32_t> last_used_tick{0};   /* written by audio, read by main (LRU) */
     int16_t samples[SF2_BLOCK_SAMPLES];
 };
+
+#ifndef SF2_CLMT_ENTRIES
+#define SF2_CLMT_ENTRIES 512U   /* DWORDs of the FatFs cluster link map: 2 per file fragment + 2 */
+#endif
 
 #if !SF2_HOST_MODE
 /* Keep the large PCM cache in DMA-accessible SRAM_D2, not the limited DTCM. */
@@ -50,6 +65,15 @@ uint32_t g_smpl_file_offset = 0;
 uint32_t g_smpl_total_samples = 0;
 
 SF2Profile g_prof;   /* diagnostics, see sf2_cache.h */
+
+#if SF2_FASTPATH
+/* Blocks that already missed during the CURRENT audio block: nothing can load them before the next
+ * block (the main loop cannot run meanwhile), so repeated lookups are answered at once. */
+constexpr uint32_t NEG_ENTRIES = 4;
+uint32_t g_neg_block[NEG_ENTRIES] = {0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU};
+uint32_t g_neg_tick[NEG_ENTRIES]  = {0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU};
+uint32_t g_neg_next = 0;
+#endif
 
 std::atomic<uint32_t> g_stat_miss_samples{0};
 std::atomic<uint32_t> g_stat_blocks_loaded{0};
@@ -145,6 +169,24 @@ bool SF2Cache_OpenFile(const char *filepath)
     const FRESULT fr = f_open(&g_fatfs_file, filepath, FA_READ);
     if (fr == FR_OK) {
         g_fatfs_open = true;
+#if _USE_FASTSEEK
+        /* Without a cluster link map every f_lseek() walks the FAT chain from the start of the file
+         * (several card reads): 5-8 ms per 2 KB block, and much more while the audio interrupt starves
+         * the main loop. With the map a seek is a table lookup. */
+        static DWORD clmt[SF2_CLMT_ENTRIES];
+        clmt[0] = SF2_CLMT_ENTRIES;
+        g_fatfs_file.cltbl = clmt;
+        const FRESULT lm = f_lseek(&g_fatfs_file, CREATE_LINKMAP);
+        if (lm == FR_OK) {
+            std::fprintf(stderr, "[SF2] Fast seek link map created (%lu of %lu entries)\n",
+                         (unsigned long)clmt[0], (unsigned long)SF2_CLMT_ENTRIES);
+        } else {
+            g_fatfs_file.cltbl = nullptr;
+            std::fprintf(stderr, "[SF2] Fast seek unavailable (FRESULT %d, needs %lu entries): slow seeks\n",
+                         (int)lm, (unsigned long)clmt[0]);
+        }
+        f_lseek(&g_fatfs_file, 0);
+#endif
         return true;
     }
     std::fprintf(stderr, "[SF2] f_open('%s') failed: FRESULT=%d (4=NO_FILE, 5=NO_PATH, 3=NOT_READY, 1=DISK_ERR, 13=NO_FILESYSTEM)\n",
@@ -191,6 +233,11 @@ void SF2Cache_Reset(void)
     }
     g_req_queue.head.store(0, std::memory_order_relaxed);
     g_req_queue.tail.store(0, std::memory_order_relaxed);
+#if SF2_FASTPATH
+    for (uint32_t k = 0; k < NEG_ENTRIES; ++k) {
+        g_neg_block[k] = 0xFFFFFFFFU;
+    }
+#endif
     g_lru_clock.store(0, std::memory_order_relaxed);
 }
 
@@ -397,9 +444,18 @@ static LoadResult load_block(uint32_t block_idx)
 
     if (read_success) {
         g_cache[slot].block_index.store(block_idx, std::memory_order_release);
-        g_cache[slot].last_used_tick.store(g_lru_clock.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        /* One tick older than "now": the first hit in the current audio block must still be seen as a new use
+         * (it sets the 'touched' flag that triggers read-ahead). */
+        g_cache[slot].last_used_tick.store(g_lru_clock.load(std::memory_order_relaxed) - 1U, std::memory_order_relaxed);
         g_cache[slot].state.store(SF2_BLOCK_READY, std::memory_order_release);
         g_stat_blocks_loaded.fetch_add(1, std::memory_order_relaxed);
+#if SF2_FASTPATH
+        /* A new block became resident: forget the "known missing" memo (also valid mid audio block when the
+         * loader runs in another thread, or when a caller does not use SF2Cache_BeginAudioBlock()). */
+        for (uint32_t k = 0; k < NEG_ENTRIES; ++k) {
+            g_neg_block[k] = 0xFFFFFFFFU;
+        }
+#endif
         return LoadResult::Loaded;
     }
 
@@ -489,6 +545,96 @@ bool SF2Cache_PreloadBlock(uint32_t block_index)
     return (r == LoadResult::Loaded) || (r == LoadResult::Skipped && find_ready_slot(block_index) >= 0);
 }
 
+void SF2Cache_BeginAudioBlock(void)
+{
+    g_lru_clock.fetch_add(1, std::memory_order_relaxed);
+}
+
+#if SF2_FASTPATH
+
+/* Audio-interrupt-only reader: no counters, no re-validation (see SF2_FASTPATH). */
+static inline bool fast_read_slot(uint32_t slot, uint32_t block_idx, uint32_t sample_offset, uint32_t tick,
+                                  int16_t *out_sample)
+{
+    CacheBlock &cb = g_cache[slot];
+    const uint32_t bi = cb.block_index.load(std::memory_order_relaxed);
+    const uint32_t st = cb.state.load(std::memory_order_relaxed);
+    const uint32_t lu = cb.last_used_tick.load(std::memory_order_relaxed);
+    if (bi != block_idx || st != SF2_BLOCK_READY) {
+        return false;
+    }
+    *out_sample = cb.samples[sample_offset];
+    if (lu != tick) {                       /* once per slot and audio block */
+        cb.last_used_tick.store(tick, std::memory_order_relaxed);
+        cb.touched.store(1, std::memory_order_relaxed);   /* triggers read-ahead */
+    }
+    return true;
+}
+
+short SF2Cache_GetSample(tsf *f, uint32_t sample_index, int *last_slot_hint)
+{
+    const uint32_t total = g_smpl_total_samples ? g_smpl_total_samples : (f ? tsf_get_smpl_sample_count(f) : 0U);
+    if (sample_index >= total) {
+        return 0;
+    }
+
+    const uint32_t block_idx = sample_index / SF2_BLOCK_SAMPLES;
+    const uint32_t sample_offset = sample_index % SF2_BLOCK_SAMPLES;
+    const uint32_t tick = g_lru_clock.load(std::memory_order_relaxed);
+    int16_t sample = 0;
+
+    /* 1. The slot this voice used last time (almost always right). */
+    if (last_slot_hint) {
+        const uint32_t h = (uint32_t)*last_slot_hint;
+        if (h < SF2_CACHE_BLOCKS && fast_read_slot(h, block_idx, sample_offset, tick, &sample)) {
+            g_prof.hint_hits++;
+            return sample;
+        }
+    }
+
+    /* 2. Already known to be missing in this audio block? */
+    for (uint32_t k = 0; k < NEG_ENTRIES; ++k) {
+        if (g_neg_block[k] == block_idx && g_neg_tick[k] == tick) {
+            g_prof.misses++;
+            return 0;
+        }
+    }
+
+    /* 3. Linear search. */
+    const uint32_t t_start = SF2_NOW();
+    for (uint32_t i = 0; i < SF2_CACHE_BLOCKS; ++i) {
+        if (fast_read_slot(i, block_idx, sample_offset, tick, &sample)) {
+            if (last_slot_hint) {
+                *last_slot_hint = (int)i;
+            }
+            const uint32_t d = SF2_NOW() - t_start;
+            g_prof.search_hits++;
+            g_prof.search_slots += i + 1U;
+            g_prof.cycles_search += d;
+            if (d > g_prof.max_cycles) g_prof.max_cycles = d;
+            return sample;
+        }
+    }
+
+    /* 4. Miss: remember it for the rest of this audio block, ask the main loop for this and the next block. */
+    g_neg_block[g_neg_next] = block_idx;
+    g_neg_tick[g_neg_next] = tick;
+    g_neg_next = (g_neg_next + 1U) % NEG_ENTRIES;
+
+    g_stat_miss_samples.fetch_add(1, std::memory_order_relaxed);
+    SF2Cache_RequestBlock(block_idx);
+    SF2Cache_RequestBlock(block_idx + 1);
+
+    const uint32_t d = SF2_NOW() - t_start;
+    g_prof.misses++;
+    g_prof.search_slots += SF2_CACHE_BLOCKS;
+    g_prof.cycles_miss += d;
+    if (d > g_prof.max_cycles) g_prof.max_cycles = d;
+    return 0;
+}
+
+#else /* general protocol (host builds: audio and loader may run in different threads) */
+
 short SF2Cache_GetSample(tsf *f, uint32_t sample_index, int *last_slot_hint)
 {
     if (!f || sample_index >= tsf_get_smpl_sample_count(f)) {
@@ -507,7 +653,6 @@ short SF2Cache_GetSample(tsf *f, uint32_t sample_index, int *last_slot_hint)
         uint32_t slot = (uint32_t)*last_slot_hint;
         if (try_read_slot(slot, block_idx, sample_offset, tick, &sample)) {
             const uint32_t d = SF2_NOW() - t_start;
-            g_prof.calls++;
             g_prof.hint_hits++;
             g_prof.cycles_hint += d;
             if (d > g_prof.max_cycles) g_prof.max_cycles = d;
@@ -522,7 +667,6 @@ short SF2Cache_GetSample(tsf *f, uint32_t sample_index, int *last_slot_hint)
                 *last_slot_hint = (int)i;
             }
             const uint32_t d = SF2_NOW() - t_start;
-            g_prof.calls++;
             g_prof.search_hits++;
             g_prof.search_slots += i + 1U;
             g_prof.cycles_search += d;
@@ -537,13 +681,14 @@ short SF2Cache_GetSample(tsf *f, uint32_t sample_index, int *last_slot_hint)
     SF2Cache_RequestBlock(block_idx + 1);
 
     const uint32_t d = SF2_NOW() - t_start;
-    g_prof.calls++;
     g_prof.misses++;
     g_prof.search_slots += SF2_CACHE_BLOCKS;
     g_prof.cycles_miss += d;
     if (d > g_prof.max_cycles) g_prof.max_cycles = d;
     return 0;
 }
+
+#endif /* SF2_FASTPATH */
 
 uint32_t SF2Cache_GetSmplFileOffset(void)
 {
@@ -568,6 +713,7 @@ void SF2Cache_GetProfile(SF2Profile *out)
 {
     if (!out) return;
     *out = g_prof;
+    out->calls = g_prof.hint_hits + g_prof.search_hits + g_prof.misses;   /* derived: one counter less in the hot path */
 }
 
 void SF2Cache_ResetProfile(void)
