@@ -144,6 +144,20 @@ int SynthEngine_Select(SynthEngineId id)
     return 1;
 }
 
+SynthEngineId SynthEngine_SelectNext(void)
+{
+    SynthEngineId cur = SynthEngine_GetCurrent();
+    SynthEngineId next = cur;
+    for (uint32_t i = 0; i < (uint32_t)SYNTH_ENGINE_COUNT; i++) {
+        next = (SynthEngineId)(((uint32_t)next + 1U) % SYNTH_ENGINE_COUNT);
+        if (SynthEngine_IsAvailable(next)) {
+            break;
+        }
+    }
+    SynthEngine_Select(next);
+    return next;
+}
+
 void SynthEngine_ProgramChange(uint8_t program)
 {
     SynthEngine_Select((SynthEngineId)(program % SYNTH_ENGINE_COUNT));

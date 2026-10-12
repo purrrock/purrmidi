@@ -213,6 +213,30 @@ static void test_select_api() {
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
 }
 
+static void test_select_next_api() {
+    SynthEngine_Init();
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
+
+    SynthEngineId next1 = SynthEngine_SelectNext();
+    CHECK(next1 == SYNTH_ENGINE_PLUCK);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
+
+    SynthEngineId next2 = SynthEngine_SelectNext();
+    CHECK(next2 == SYNTH_ENGINE_SINE);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SINE);
+
+    SynthEngineId next3 = SynthEngine_SelectNext();
+    CHECK(next3 == SYNTH_ENGINE_ORGAN);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
+
+    for (int i = 0; i < 3 * SYNTH_ENGINE_COUNT; ++i) {
+        SynthEngineId want = expected_next(SynthEngine_GetCurrent());
+        SynthEngineId actual = SynthEngine_SelectNext();
+        CHECK(actual == want);
+        CHECK(SynthEngine_GetCurrent() == want);
+    }
+}
+
 // Аудио-поток крутит FillStereoBuffer, пока главный поток шлёт ноты и Program Change.
 // Проверка отсутствия падений / гонок (имеет смысл запускать и под ThreadSanitizer).
 static void test_switch_while_audio_running() {
@@ -300,6 +324,7 @@ int main() {
     test_same_program_does_not_cut_note();
     test_switch_silences_old_engine();
     test_select_api();
+    test_select_next_api();
     test_switch_while_audio_running();
     test_master_volume_cc7();
 
