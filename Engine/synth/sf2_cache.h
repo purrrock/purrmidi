@@ -1,25 +1,3 @@
-/**
- * @file    sf2_cache.h
- * @brief   Bounded RAM PCM sample cache and file backend for TinySoundFont.
- *
- * Threading model
- * ---------------
- *  - Audio context (DMA ISR on STM32, audio callback thread on PC) only READS the cache via
- *    SF2Cache_GetSample() and never touches the file. A miss returns silence and queues a request.
- *  - Main context owns ALL file I/O: SF2Cache_ProcessRequests() and SF2Cache_PreloadBlock().
- *    They must be called from the same (main) thread, never concurrently with each other.
- *
- * Why the cache must read ahead
- * -----------------------------
- * A purely reactive cache (load a block only after the audio thread missed it) cannot be glitch
- * free: the voice keeps advancing while the block is being loaded, so every block boundary
- * becomes a hole of silence (audible as clicks/noise), and if the main loop is slower than the
- * voices consume data the sound disappears completely. Therefore:
- *   1. SF2Cache_PreloadBlock() lets the synth load the first blocks of a note BEFORE it starts;
- *   2. every block that the audio thread reads is flagged "touched" and the main loop then
- *      loads the following SF2_READAHEAD_BLOCKS blocks;
- *   3. SF2Cache_ProcessRequests() services up to SF2_MAX_BLOCKS_PER_PROCESS blocks per call.
- */
 #ifndef SF2_CACHE_H
 #define SF2_CACHE_H
 
@@ -27,11 +5,34 @@
 #include <stdint.h>
 #include "tsf.h"
 
+/**
+ * @file    sf2_cache.h
+ * @brief   Ограниченный RAM-кэш сэмплов PCM и файловый бэкенд для TinySoundFont.
+ *
+ * Потоковая модель
+ * ----------------
+ *  - Аудио-контекст (DMA ISR на STM32, аудио-поток на ПК) только ЧИТАЕТ кэш через
+ *    SF2Cache_GetSample() и никогда не обращается к файлу напрямую.
+ *    Промах кэша возвращает тишину и ставит блок в очередь на загрузку.
+ *  - Основной контекст выполнят ВСЕ файловые операции ввода-вывода: SF2Cache_ProcessRequests()
+ *    и SF2Cache_PreloadBlock(). Они должны вызываться из одного (главного) потока.
+ *
+ * Почему кэш читает с опережением (read-ahead)
+ * --------------------------------------------
+ * Реактивный кэш (загрузка блока только после промаха в аудиопотоке) неизбежно приводит к
+ * щелчкам и выпадению звука, так как голос продолжает воспроизведение во время чтения SD-карты.
+ * По этой причине:
+ *   1. SF2Cache_PreloadBlock() загружает начальные блоки ноты ДО её старта;
+ *   2. Каждый читаемый аудиопотоком блок помечается, и главный цикл подгружает
+ *      следующие SF2_READAHEAD_BLOCKS блоков;
+ *   3. SF2Cache_ProcessRequests() обрабатывает до SF2_MAX_BLOCKS_PER_PROCESS блоков за вызов.
+ */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Host (Windows / Linux / macOS test) build uses stdio; firmware uses FatFs. */
+/* На хосте (Windows/Linux) используется stdio; на целевой прошивке — FatFs. */
 #ifndef SF2_HOST_MODE
 #if defined(PURRMIDI_HOST_BUILD) || defined(_WIN32) || defined(WIN32) || defined(__unix__) || defined(__APPLE__)
 #define SF2_HOST_MODE 1
@@ -40,13 +41,12 @@ extern "C" {
 #endif
 #endif
 
-#define SF2_BLOCK_SAMPLES 1024U    /* 1024 int16_t samples = 2048 bytes per cache block */
+#define SF2_BLOCK_SAMPLES 1024U    /* 1024 отсчёта int16_t = 2048 байт на блок кэша */
 
 /*
- * Number of cache blocks.
- *  - Firmware: 32 blocks x 2 KB = 64 KB of RAM (bounded by design).
- *  - Host:     256 blocks x 2 KB = 512 KB. A looped piano note keeps ~14 blocks of loop resident
- *              per sample (L and R), so 32 blocks are exhausted by a couple of notes.
+ * Количество блоков кэша:
+ *  - Прошивка: 32 блока x 2 КБ = 64 КБ ОЗУ (строго ограничено).
+ *  - Хост:     256 блоков x 2 КБ = 512 КБ.
  */
 #ifndef SF2_CACHE_BLOCKS
 #if SF2_HOST_MODE
@@ -56,12 +56,12 @@ extern "C" {
 #endif
 #endif
 
-/* How many blocks after a block that the audio thread is reading are loaded in advance. */
+/* Количество блоков, загружаемых с опережением (read-ahead) */
 #ifndef SF2_READAHEAD_BLOCKS
 #define SF2_READAHEAD_BLOCKS 3U
 #endif
 
-/* Upper bound of file reads performed by one SF2Cache_ProcessRequests() call. */
+/* Максимальное количество блоков, считываемых за один вызов SF2Cache_ProcessRequests() */
 #ifndef SF2_MAX_BLOCKS_PER_PROCESS
 #if SF2_HOST_MODE
 #define SF2_MAX_BLOCKS_PER_PROCESS 64U
@@ -77,32 +77,30 @@ typedef enum {
     SF2_BLOCK_EVICTING = 3
 } SF2BlockState;
 
-/** Diagnostic counters (monotonic, relaxed atomics). */
+/** Диагностические счётчики работы кэша. */
 typedef struct {
-    uint32_t miss_samples;     /**< samples the audio thread had to replace with silence       */
-    uint32_t blocks_loaded;    /**< blocks successfully read from the file                     */
-    uint32_t load_errors;      /**< failed/short block reads                                   */
+    uint32_t miss_samples;     /**< Количество отсчётов, заменённых тишиной при промахах */
+    uint32_t blocks_loaded;    /**< Успешно загруженные блоки */
+    uint32_t load_errors;      /**< Ошибки чтения блоков с носителя */
 } SF2CacheStats;
 
-/** Open SF2 file using platform file backend (FatFs on firmware, stdio on host). */
 /**
- * Diagnostics (cycle counts are CPU cycles of the DWT counter on the firmware, 0 on host builds).
- * Written by the audio interrupt (GetSample) and by the main loop (ProcessRequests / reads).
+ * Профилирование производительности (такты процессора DWT на прошивке, 0 на ПК).
  */
 typedef struct {
-    uint32_t calls;              /**< SF2Cache_GetSample() calls that reached the cache                  */
-    uint32_t hint_hits;          /**< served from the voice's remembered slot                            */
-    uint32_t search_hits;        /**< served after a linear search over the slots                        */
-    uint32_t misses;             /**< not resident: silence returned and blocks requested                */
-    uint32_t search_slots;       /**< slots examined by all linear searches (hits and misses)            */
-    uint32_t cycles_hint;        /**< total cycles spent in hint hits                                    */
-    uint32_t cycles_search;      /**< total cycles spent in search hits                                  */
-    uint32_t cycles_miss;        /**< total cycles spent in misses (includes the two RequestBlock calls) */
-    uint32_t max_cycles;         /**< longest single call                                                */
-    uint32_t proc_calls;         /**< SF2Cache_ProcessRequests() calls                                   */
+    uint32_t calls;              /**< Вызовы SF2Cache_GetSample() */
+    uint32_t hint_hits;          /**< Попадания по подсказке (remembered slot) */
+    uint32_t search_hits;        /**< Попадания в результате линейного поиска */
+    uint32_t misses;             /**< Промахи (возврат тишины и запуск подгрузки) */
+    uint32_t search_slots;       /**< Просмотрено слотов при поиске */
+    uint32_t cycles_hint;        /**< Суммарные такты на попадания по подсказке */
+    uint32_t cycles_search;      /**< Суммарные такты на поиски */
+    uint32_t cycles_miss;        /**< Суммарные такты на обработку промахов */
+    uint32_t max_cycles;         /**< Максимальное время одного вызова */
+    uint32_t proc_calls;         /**< Вызовы SF2Cache_ProcessRequests() */
     uint32_t proc_cycles_total;
     uint32_t proc_cycles_max;
-    uint32_t read_calls;         /**< block reads from the card                                          */
+    uint32_t read_calls;         /**< Операции чтения блоков с носителя */
     uint32_t read_cycles_total;
     uint32_t read_cycles_max;
 } SF2Profile;
@@ -110,56 +108,55 @@ typedef struct {
 void SF2Cache_GetProfile(SF2Profile *out);
 
 /**
- * Call once at the start of every audio block, before the first SF2Cache_GetSample() of that block.
- * It advances the LRU clock and invalidates the per-block "known missing" memo.
+ * Вызывается в начале каждого аудио-блока перед первым SF2Cache_GetSample().
+ * Продвигают часы LRU и сбрасывают кэш «известных промахов».
  */
 void SF2Cache_BeginAudioBlock(void);
 void SF2Cache_ResetProfile(void);
 
+/** Открытие файла SF2 с помощью бэкенда платформы (FatFs / stdio). */
 bool SF2Cache_OpenFile(const char *filepath);
 
-/** Close open file and reset cache. */
+/** Закрытие открытого файла и сброс состояния кэша. */
 void SF2Cache_CloseFile(void);
 
-/** Returns true if SF2 file is currently open. */
+/** Возвращает true, если файл SF2 открыт. */
 bool SF2Cache_IsFileOpen(void);
 
-/** Reset cache blocks and request queue. */
+/** Сброс блоков кэша и очереди запросов. */
 void SF2Cache_Reset(void);
 
-/** Setup tsf_stream callbacks for reading SF2 metadata. */
+/** Настройка колбэков tsf_stream для чтения метаданных SoundFont. */
 void SF2Cache_InitStream(struct tsf_stream *stream);
 
 /**
- * Main-loop service routine: loads blocks the audio thread missed, then reads ahead of the
- * blocks it is currently playing. Performs at most SF2_MAX_BLOCKS_PER_PROCESS file reads.
- * A block that fails to load is retried on the next call (never inside the same call).
+ * Обработчик запросов в главном цикле: загружает пропущенные аудиопотоком блоки
+ * и выполняет упреждающее чтение (read-ahead).
  */
 void SF2Cache_ProcessRequests(void);
 
 /**
- * Synchronously load one block (main context only). Used by the synth to have the first
- * blocks of a note resident before the voice starts. Returns true if the block is in the
- * cache when the call returns.
+ * Синхронная загрузка одного блока (только главный контекст).
+ * Используется перед стартом ноты для предзагрузки первых блоков.
  */
 bool SF2Cache_PreloadBlock(uint32_t block_index);
 
-/** Request block load into cache. Called by the audio thread on a miss. */
+/** Запрос загрузки блока в кэш (вызывается аудиопотоком при промахе). */
 void SF2Cache_RequestBlock(uint32_t block_index);
 
-/** Fetch 16-bit PCM sample for sample_index. Non-blocking audio thread call. */
+/** Выборка 16-битного отсчёта PCM для sample_index (неблокирующий вызов). */
 short SF2Cache_GetSample(tsf *f, uint32_t sample_index, int *last_slot_hint);
 
-/** Get current file offset of the smpl chunk data in SF2 file. */
+/** Получение текущего смещения чанка smpl в файле SF2. */
 uint32_t SF2Cache_GetSmplFileOffset(void);
 
-/** Set the smpl chunk data byte offset in the file. */
+/** Установка смещения данных smpl в файле. */
 void SF2Cache_SetSmplFileOffset(uint32_t file_offset, uint32_t total_samples);
 
-/** Copy diagnostic counters. */
+/** Копирование диагностических счётчиков. */
 void SF2Cache_GetStats(SF2CacheStats *out);
 
-/** Zero diagnostic counters. */
+/** Обнуление диагностических счётчиков. */
 void SF2Cache_ResetStats(void);
 
 #ifdef __cplusplus
