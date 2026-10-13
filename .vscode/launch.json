@@ -2,16 +2,18 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Cortex Debug: OpenOCD (PurrMidi)",
+            "name": "OpenOCD Run (PurrMidi)",
             "type": "cortex-debug",
             "request": "launch",
-            "servertype": "openocd",
-            "executable": "${workspaceFolder}/build/Debug/purrmidi.elf",
+            "servertype": "external",
             "cwd": "${workspaceFolder}",
-            "configFiles": [
-                "interface/stlink.cfg"
-            ],
-            "runToEntryPoint": "main"
+            "executable": "${workspaceFolder}/build/Debug/purrmidi.elf",
+            "gdbTarget": "127.0.0.1:50000",
+            "toolchainPrefix": "arm-none-eabi",
+            "preLaunchTask": "OpenOCD Run",
+            "postDebugTask": "OpenOCD Stop",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "raw"
         }
     ]
 }

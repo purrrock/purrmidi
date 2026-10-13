@@ -1,0 +1,44 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "OpenOCD Run",
+            "type": "shell",
+            "command": "cmd.exe",
+            "args": [
+                "/d",
+                "/c",
+                "call \"${workspaceFolder}\\openocd-run.cmd\""
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "isBackground": true,
+"problemMatcher": {
+    "pattern": [
+        {
+            "regexp": "^(.*)$",
+            "file": 1,
+            "message": 1
+        }
+    ],
+    "background": {
+        "activeOnStart": true,
+        "beginsPattern": ".*",
+        "endsPattern": ".*Listening on port 50000 for gdb connections.*"
+    }
+}
+        },
+        {
+            "label": "OpenOCD Stop",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": [
+                "-NoProfile",
+                "-Command",
+                "$pids = Get-NetTCPConnection -LocalPort 50000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique; foreach ($pidToStop in $pids) { $p = Get-Process -Id $pidToStop -ErrorAction SilentlyContinue; if ($p -and $p.ProcessName -eq 'openocd') { Stop-Process -Id $pidToStop -Force -ErrorAction SilentlyContinue } }"
+            ],
+            "problemMatcher": []
+        }
+    ]
+}
