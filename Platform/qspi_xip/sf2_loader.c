@@ -32,10 +32,11 @@ static SF2L_Report    s_report;
 static SF2SrcStatus src_open(void *ctx, uint32_t *size, uint32_t *stamp)
 {
     (void)ctx;
-
-    if (!SDStorage_CardPresent()) {
+    
+    // сигнал датчика на плате игнорируем
+    /* if (!SDStorage_CardPresent()) {
         return SF2SRC_NO_MEDIA;
-    }
+    } */
     if (!SDStorage_IsMounted()) {
         const SDStorage_Result r = SDStorage_Mount();
         if (r != SDS_OK) {
