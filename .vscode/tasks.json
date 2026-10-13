@@ -15,13 +15,7 @@
             },
             "isBackground": true,
 "problemMatcher": {
-    "pattern": [
-        {
-            "regexp": "^(.*)$",
-            "file": 1,
-            "message": 1
-        }
-    ],
+    "base": "$null",
     "background": {
         "activeOnStart": true,
         "beginsPattern": ".*",
