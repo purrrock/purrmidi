@@ -182,7 +182,7 @@ endif()
 # ---------------------------------------------------------------------------
 # Включается автоматически, когда CubeMX сгенерировал QUADSPI (Core/Inc/quadspi.h), а также SD/FatFs
 # (они нужны только для обновления банка). Иначе собирается прежний вариант: RAM-кэш + потоковое чтение с SD.
-# Принудительно отключить XIP: -DPURRMIDI_FORCE_SD_CACHE=ON. Подробности: docs/QSPI_XIP.md.
+# Принудительно отключить XIP: -DPURRMIDI_FORCE_SD_CACHE=ON. Подробности: docs/SOUNDFONT_QSPI_SYNTH.md.
 option(PURRMIDI_FORCE_SD_CACHE "Use the legacy SD streaming cache even if QUADSPI is configured" OFF)
 
 if(NOT PURRMIDI_FORCE_SD_CACHE

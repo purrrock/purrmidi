@@ -338,7 +338,7 @@ int main(void)
 #if SF2_LOAD_AT_BOOT
 #ifdef PURRMIDI_SF2_XIP
   /* Банк читается из QSPI Flash (XIP). Если вставлена SD-карта с новым/изменённым 0:/SNDFNT.SF2, он сначала
-   * переписывается во флеш (до ~минуты, прогресс на дисплее и в UART), см. docs/QSPI_XIP.md. */
+   * переписывается во флеш (до ~минуты, прогресс на дисплее и в UART), см. docs/SOUNDFONT_QSPI_SYNTH.md. */
   printf("[SF2] Preparing SoundFont (QSPI XIP, SD is used only to update the bank)...\r\n");
 #else
   printf("[SF2] Loading SoundFont from SD...\r\n");

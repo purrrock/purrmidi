@@ -147,7 +147,7 @@ bool QSPIFlash_Init(void)
 
     /* Типичные ошибки настройки CubeMX: размер флеша (FSIZE = log2(байт) - 1, для 8 МБ это 22). */
     if (hqspi.Init.FlashSize != 22U) {
-        printf("[QSPI] WARNING: hqspi.Init.FlashSize=%lu, expected 22 for 8 MB (see docs/QSPI_XIP.md)\r\n",
+        printf("[QSPI] WARNING: hqspi.Init.FlashSize=%lu, expected 22 for 8 MB (see docs/SOUNDFONT_QSPI_SYNTH.md)\r\n",
                (unsigned long)hqspi.Init.FlashSize);
     }
 
