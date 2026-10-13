@@ -643,6 +643,28 @@ void Display_Init(void)
     HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, LCD_BL_ON); // включаем подсветку
 }
 
+void Display_ShowBootProgress(const char *text, uint8_t percent)
+{
+    if (!display_ready) { return; }
+    if (percent > 100U) { percent = 100U; }
+
+    const int bar_w = DISPLAY_WIDTH - 8;
+
+    Canvas_Begin(DISPLAY_WIDTH, CANVAS_MAX_H, C_BLACK);
+    Canvas_Text(4, 0, (text != NULL) ? text : "", 16, 1, C_AMBER);
+    Canvas_Rect(4, 20, bar_w, 10, C_IDLE);
+    Canvas_Rect(5, 21, ((bar_w - 2) * (int)percent) / 100, 8, C_GREEN);
+    Canvas_Flush(0, 24);
+}
+
+void Display_EndBootProgress(void)
+{
+    if (!display_ready) { return; }
+
+    ST7735_FillRect(&st7735, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, C_BLACK);
+    MarkDirty(F_ALL);   /* Display_Task() перерисует интерфейс */
+}
+
 void Display_Task(void)
 {
     if (!display_ready) { return; }

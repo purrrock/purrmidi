@@ -42,6 +42,10 @@
 #include "sf2_cache.h"
 #include "diag.h"
 #include "organ_synth.h"
+#ifdef PURRMIDI_SF2_XIP
+#include "xip_mpu.h"   /* MPU-регионы и D-cache для XIP-чтения SoundFont из QSPI Flash */
+#include "sf2_loader.h"
+#endif
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -292,6 +296,12 @@ int main(void)
 #if ENABLE_ICACHE
   SCB_EnableICache();
 #endif
+#ifdef PURRMIDI_SF2_XIP
+  /* D-cache нужен для быстрого XIP-чтения сэмплов из QSPI Flash. Все SRAM с DMA-буферами (AXI, SRAM1-3, SRAM4)
+   * объявляются non-cacheable, кэшируется только окно 0x90000000 (оно открывается драйвером QSPI). */
+  XipMpu_Config();
+  SCB_EnableDCache();
+#endif
 
   /* USER CODE END Init */
 
@@ -324,7 +334,13 @@ int main(void)
          (unsigned long)SystemCoreClock, ENABLE_ICACHE ? "ON" : "off",
          (unsigned long)(1000000UL * (AUDIO_BUFFER_FRAMES / 2U) / 48000UL), (unsigned)(AUDIO_BUFFER_FRAMES / 2U));
 #if SF2_LOAD_AT_BOOT
+#ifdef PURRMIDI_SF2_XIP
+  /* Банк читается из QSPI Flash (XIP). Если вставлена SD-карта с новым/изменённым 0:/SNDFNT.SF2, он сначала
+   * переписывается во флеш (до ~минуты, прогресс на дисплее и в UART), см. docs/QSPI_XIP.md. */
+  printf("[SF2] Preparing SoundFont (QSPI XIP, SD is used only to update the bank)...\r\n");
+#else
   printf("[SF2] Loading SoundFont from SD...\r\n");
+#endif
   if (SoundFontSynth_InitSF2())
   {
     printf("[SF2] SoundFont ready\r\n");

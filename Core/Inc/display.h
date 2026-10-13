@@ -47,6 +47,13 @@ typedef enum
 void Display_Init(void);
 
 /**
+ * Экран прогресса при загрузке SoundFont-банка во флеш (до запуска основного UI).
+ * text - до 20 символов ASCII, percent 0..100. Display_EndBootProgress() возвращает обычный интерфейс.
+ */
+void Display_ShowBootProgress(const char *text, uint8_t percent);
+void Display_EndBootProgress(void);
+
+/**
  * Вызывать из главного цикла как можно чаще: отрисовывает не более одного «грязного» поля за вызов
  * для предотвращения задержек в главном цикле.
  */

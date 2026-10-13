@@ -74,3 +74,39 @@ add_executable(test_chord_detector
 target_link_libraries(test_chord_detector PRIVATE purrmidi_core)
 target_compile_features(test_chord_detector PRIVATE cxx_std_17)
 add_test(NAME test_chord_detector COMMAND test_chord_detector)
+
+# ---------------------------------------------------------------------------
+# QSPI XIP: загрузчик SoundFont-банка во флеш (логика без HAL) и XIP-бэкенд синтезатора
+# ---------------------------------------------------------------------------
+# Ядро загрузчика проверяется на эмуляции NOR-флеша (в том числе сбой питания посреди записи).
+add_executable(test_sf2_loader_core
+    test_sf2_loader_core.cpp
+    "${CMAKE_CURRENT_LIST_DIR}/../Platform/qspi_xip/sf2_loader_core.c"
+    "${CMAKE_CURRENT_LIST_DIR}/../Platform/qspi_xip/pm_crc32.c"
+)
+target_include_directories(test_sf2_loader_core PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../Platform/qspi_xip"
+)
+target_compile_features(test_sf2_loader_core PRIVATE cxx_std_17)
+add_test(NAME test_sf2_loader_core COMMAND test_sf2_loader_core)
+
+# XIP-бэкенд (sf2_xip.cpp) + настоящий TinySoundFont; "флеш" - файл tests/SNDFNT.SF2 в памяти.
+add_executable(test_sf2_xip_host
+    test_sf2_xip_host.cpp
+    "${CMAKE_CURRENT_LIST_DIR}/../Engine/synth/soundfont_synth.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../Engine/synth/sf2_xip.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../Engine/synth/tinysoundfont_impl.cpp"
+)
+target_include_directories(test_sf2_xip_host PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../Core/Inc"
+    "${CMAKE_CURRENT_LIST_DIR}/../Engine/synth"
+    "${CMAKE_CURRENT_LIST_DIR}/../Platform/qspi_xip"
+    "${CMAKE_CURRENT_LIST_DIR}/../Middlewares/Third_Party/TinySoundFont"
+)
+target_compile_definitions(test_sf2_xip_host PRIVATE PURRMIDI_TEST_XIP_STUB)
+target_compile_features(test_sf2_xip_host PRIVATE cxx_std_17)
+if(UNIX)
+    target_link_libraries(test_sf2_xip_host PRIVATE m)
+endif()
+add_test(NAME test_sf2_xip_host COMMAND test_sf2_xip_host
+         WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/..")
