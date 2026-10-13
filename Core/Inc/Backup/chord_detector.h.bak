@@ -5,18 +5,23 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/**
+ * @file    chord_detector.h
+ * @brief   Модуль распознавания аккордов и дробей (slash chords) по массиву нажатых нот.
+ */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /**
- * @brief Detect chord from active MIDI notes array.
+ * @brief Детектирование аккорда по активным MIDI-нотам.
  *
- * @param active_notes Array of 128 elements, active_notes[i] != 0 if note i is active.
- * @param active_note_count Total count of active keys.
- * @param name Output buffer for chord name (e.g., "C", "Am/C", "Cmaj7").
- * @param name_size Size of the output buffer.
- * @return true if a chord was successfully detected, false otherwise.
+ * @param active_notes Массив из 128 элементов (active_notes[i] != 0, если нота i нажата).
+ * @param active_note_count Общее число удерживаемых нот.
+ * @param name Выходной буфер для имени аккорда (например, "C", "Am/C", "Cmaj7").
+ * @param name_size Размер выходного буфера.
+ * @return true — аккорд успешно распознан; false — аккорд не определён (активных нот < 3).
  */
 bool ChordDetector_Detect(
     const uint8_t *active_notes,

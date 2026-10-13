@@ -20,6 +20,7 @@
 #include "main.h"
 #include "dma.h"
 #include "fatfs.h"
+#include "quadspi.h"
 #include "sai.h"
 #include "spi.h"
 #include "usart.h"
@@ -319,6 +320,7 @@ int main(void)
   MX_SAI1_Init();
   MX_USB_HOST_Init();
   MX_SPI4_Init();
+  MX_QUADSPI_Init();
   /* USER CODE BEGIN 2 */
   Display_Init();
   MIDI_Queue_Init();
