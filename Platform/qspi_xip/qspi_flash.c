@@ -145,6 +145,12 @@ bool QSPIFlash_Init(void)
     }
     (void)HAL_QSPI_Abort(&hqspi);
 
+    /* Типичные ошибки настройки CubeMX: размер флеша (FSIZE = log2(байт) - 1, для 8 МБ это 22). */
+    if (hqspi.Init.FlashSize != 22U) {
+        printf("[QSPI] WARNING: hqspi.Init.FlashSize=%lu, expected 22 for 8 MB (see docs/QSPI_XIP.md)\r\n",
+               (unsigned long)hqspi.Init.FlashSize);
+    }
+
     /* Программный сброс флеша: убирает любое "полузавершённое" состояние после перезагрузки MCU. */
     if (!simple_cmd(CMD_RESET_ENABLE) || !simple_cmd(CMD_RESET)) {
         printf("[QSPI] reset command failed\r\n");

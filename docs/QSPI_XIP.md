@@ -27,7 +27,7 @@
 | Clock Prescaler | **2** (80 МГц - надёжный старт); после проверки можно **1** (120 МГц, предел W25Q64 - 133 МГц) |
 | FIFO Threshold | 1 |
 | Sample Shifting | **Half Cycle Shift** |
-| Flash Size | **23** (в сгенерированном коде должно получиться `hqspi.Init.FlashSize = 22`, т.е. 8 МБ) |
+| Flash Size | **22** (в коде `hqspi.Init.FlashSize = 22`: размер = 2^(22+1) = 8 МБ; значение 23 означало бы 16 МБ) |
 | Chip Select High Time | **5 Cycles** |
 | Clock Mode | Low |
 | Flash ID | 1 |
@@ -35,7 +35,7 @@
 
 **Пины** (CubeMX назначит сам при выборе режима; проверьте): `PB2` CLK, `PB6` NCS, `PD11` IO0, `PD12` IO1,
 `PE2` IO2, `PD13` IO3. С остальной разводкой проекта (SAI, SDMMC, SPI4, USART3) конфликтов нет.
-GPIO Speed: **Very High**, Pull: No. Прерывание QUADSPI и DMA не нужны.
+GPIO Speed: **Very High** для всех шести выводов (по умолчанию CubeMX ставит Low - на 80-120 МГц чтение будет сбоить), Pull: No. Прерывание QUADSPI и DMA не нужны.
 
 **Clock Configuration**: источник QUADSPI - HCLK (в `.ioc` уже `QSPIFreq = 240 МГц`).
 
