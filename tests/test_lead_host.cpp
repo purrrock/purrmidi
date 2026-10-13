@@ -360,6 +360,49 @@ void test_voice_stealing_with_sustain_pedal() {
     std::cout << "Verified: Voice stealing on sustained note releases cleanly without stuck notes.\n";
 }
 
+void test_envelope_retrigger_on_voice_stealing() {
+    LeadSynth_Init();
+
+    // Set longer attack time (0.2s) via CC 73
+    LeadSynth_ControlChange(73, 100);
+
+    std::vector<int16_t> step_buf(48000 * 2, 0);
+
+    // Trigger single note 60 on voice 0 and render 1.0s to reach full sustain level (~12000 peak)
+    LeadSynth_NoteOn(60, 100);
+    LeadSynth_FillStereoBuffer(step_buf.data(), 48000);
+
+    int sustain_peak = 0;
+    for (size_t i = 40000; i < 48000; ++i) {
+        int s = std::abs(step_buf[i * 2]);
+        if (s > sustain_peak) sustain_peak = s;
+    }
+    std::cout << "Sustain peak before voice stealing: " << sustain_peak << "\n";
+    assert(sustain_peak > 8000);
+
+    // Trigger 8 notes in sequence so note 60 is stolen by note 68
+    for (uint8_t note = 61; note <= 68; ++note) {
+        LeadSynth_NoteOn(note, 100);
+    }
+
+    // Render 10 frames right after voice stealing
+    std::vector<int16_t> stolen_start_buf(100 * 2, 0);
+    LeadSynth_FillStereoBuffer(stolen_start_buf.data(), 100);
+
+    // Render 1 second to let stolen voice ramp up
+    std::vector<int16_t> stolen_attack_buf(48000 * 2, 0);
+    LeadSynth_FillStereoBuffer(stolen_attack_buf.data(), 24000);
+
+    // Verify first frame peak after stealing is significantly lower than full sustain
+    int start_sample_peak = std::abs(stolen_start_buf[0]);
+    std::cout << "First frame peak after voice stealing: " << start_sample_peak << "\n";
+
+    // Hard retrigger reset envelope level to 0.f, starting attack ramp-up
+    assert(start_sample_peak < sustain_peak / 2);
+
+    std::cout << "Verified: Envelope hard retrigger on voice stealing resets level to 0.\n";
+}
+
 void test_polyphony_chords_and_controls() {
     LeadSynth_Init();
 
@@ -434,6 +477,7 @@ int main() {
     test_deterministic_voice_stealing_and_reuse();
     test_voice_stealing_with_multiple_presses();
     test_voice_stealing_with_sustain_pedal();
+    test_envelope_retrigger_on_voice_stealing();
     test_polyphony_chords_and_controls();
     test_reinit_state_reset();
     std::cout << "test_lead_host passed successfully." << std::endl;

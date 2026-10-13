@@ -12,44 +12,44 @@
 using namespace daisysp;
 
 // Параметры конфигурации аудио-тракта и FIFO
-static constexpr float    LEAD_SAMPLE_RATE          = 48000.0f;
-static constexpr float    LEAD_MASTER_GAIN          = 0.50f;   // Запас по динамическому диапазону для 8 голосов
-static constexpr uint32_t EVENT_FIFO_SIZE           = 32;      // Емкость кольцевого FIFO буфера
-static constexpr uint32_t NOTE_ON_FIFO_LIMIT        = 28;      // Порог резервирования слотов для Note Off и CC64
-static constexpr float    LEAD_OUTPUT_SCALE         = (LEAD_MASTER_GAIN * 32767.0f);
+#define LEAD_SAMPLE_RATE          48000.0f
+#define LEAD_MASTER_GAIN          0.50f   // Запас по динамическому диапазону для 8 голосов
+#define EVENT_FIFO_SIZE           32      // Емкость кольцевого FIFO буфера
+#define NOTE_ON_FIFO_LIMIT        28      // Порог резервирования слотов для Note Off и CC64
+#define LEAD_OUTPUT_SCALE         (LEAD_MASTER_GAIN * 32767.0f)
 
 // Диапазоны частот и генерации
-static constexpr float LEAD_MIN_FREQ                = 20.0f;
-static constexpr float LEAD_MAX_FREQ                = 18000.0f;
+#define LEAD_MIN_FREQ             20.0f
+#define LEAD_MAX_FREQ             18000.0f
 
 // По умолчанию и ограничения параметров синтеза (настраиваются через CC)
-static constexpr float LEAD_DEFAULT_CUTOFF          = 3000.0f;
-static constexpr float LEAD_MIN_CUTOFF              = 30.0f;
-static constexpr float LEAD_MAX_CUTOFF              = 12000.0f;
+#define LEAD_DEFAULT_CUTOFF       3000.0f
+#define LEAD_MIN_CUTOFF           30.0f
+#define LEAD_MAX_CUTOFF           12000.0f
 
-static constexpr float LEAD_DEFAULT_RES             = 0.35f;
-static constexpr float LEAD_MIN_RES                 = 0.05f;
-static constexpr float LEAD_MAX_RES                 = 0.95f;
+#define LEAD_DEFAULT_RES          0.35f
+#define LEAD_MIN_RES              0.05f
+#define LEAD_MAX_RES              0.95f
 
-static constexpr float LEAD_DEFAULT_ENV_AMT         = 4000.0f;
-static constexpr float LEAD_MAX_ENV_AMT             = 10000.0f;
+#define LEAD_DEFAULT_ENV_AMT      4000.0f
+#define LEAD_MAX_ENV_AMT          10000.0f
 
-static constexpr float LEAD_DEFAULT_ATTACK          = 0.005f;
-static constexpr float LEAD_MIN_ATTACK              = 0.002f;
-static constexpr float LEAD_MAX_ATTACK              = 1.500f;
+#define LEAD_DEFAULT_ATTACK       0.005f
+#define LEAD_MIN_ATTACK           0.002f
+#define LEAD_MAX_ATTACK           1.500f
 
-static constexpr float LEAD_DEFAULT_DECAY           = 0.300f;
-static constexpr float LEAD_DEFAULT_SUSTAIN         = 0.600f;
+#define LEAD_DEFAULT_DECAY        0.300f
+#define LEAD_DEFAULT_SUSTAIN      0.600f
 
-static constexpr float LEAD_DEFAULT_RELEASE         = 0.250f;
-static constexpr float LEAD_MIN_RELEASE             = 0.020f;
-static constexpr float LEAD_MAX_RELEASE             = 2.000f;
+#define LEAD_DEFAULT_RELEASE      0.250f
+#define LEAD_MIN_RELEASE          0.020f
+#define LEAD_MAX_RELEASE          2.000f
 
-static constexpr float LEAD_VELOCITY_MIN_GAIN       = 0.200f;
-static constexpr float LEAD_VELOCITY_SCALE          = 0.800f;
+#define LEAD_VELOCITY_MIN_GAIN    0.200f
+#define LEAD_VELOCITY_SCALE       0.800f
 
-static constexpr float LEAD_FILTER_DECAY_OFFSET     = 0.050f;
-static constexpr float LEAD_FILTER_SUSTAIN_SCALE    = 0.700f;
+#define LEAD_FILTER_DECAY_OFFSET  0.050f
+#define LEAD_FILTER_SUSTAIN_SCALE 0.700f
 
 enum LeadEventType : uint8_t {
     EVENT_NOTE_ON,
@@ -435,18 +435,20 @@ static int16_t LeadSynth_NextSample(void) {
             float sus = env_sustain_lvl.load(std::memory_order_relaxed);
             float rel = env_release_sec.load(std::memory_order_relaxed);
 
+            bool hard_retrigger = !is_retrigger; // Жесткий перезапуск огибающей при выборе/вытеснении нового голоса
+
             v.amp_env.SetAttackTime(att);
             v.amp_env.SetDecayTime(dec);
             v.amp_env.SetSustainLevel(sus);
             v.amp_env.SetReleaseTime(rel);
-            v.amp_env.Retrigger(false);
+            v.amp_env.Retrigger(hard_retrigger);
             v.amp_env.Process(true);
 
             v.filter_env.SetAttackTime(att);
             v.filter_env.SetDecayTime(dec + LEAD_FILTER_DECAY_OFFSET);
             v.filter_env.SetSustainLevel(sus * LEAD_FILTER_SUSTAIN_SCALE);
             v.filter_env.SetReleaseTime(rel);
-            v.filter_env.Retrigger(false);
+            v.filter_env.Retrigger(hard_retrigger);
             v.filter_env.Process(true);
 
             v.voice_state.store((int32_t)event.param1, std::memory_order_release);
