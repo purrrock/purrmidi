@@ -11,11 +11,45 @@
 
 using namespace daisysp;
 
-#define LEAD_SAMPLE_RATE       48000.0f
-#define LEAD_MASTER_GAIN       0.50f   // Запас по динамическому диапазону для 8 голосов
-#define EVENT_FIFO_SIZE        32      // Буфер lock-free SPSC для событий
-#define NOTE_ON_FIFO_LIMIT     28      // Резерв слотов для отпусканий нот и CC
-#define LEAD_OUTPUT_SCALE      (LEAD_MASTER_GAIN * 32767.0f)
+// Параметры конфигурации аудио-тракта и FIFO
+static constexpr float    LEAD_SAMPLE_RATE          = 48000.0f;
+static constexpr float    LEAD_MASTER_GAIN          = 0.50f;   // Запас по динамическому диапазону для 8 голосов
+static constexpr uint32_t EVENT_FIFO_SIZE           = 32;      // Емкость кольцевого FIFO буфера
+static constexpr uint32_t NOTE_ON_FIFO_LIMIT        = 28;      // Порог резервирования слотов для Note Off и CC64
+static constexpr float    LEAD_OUTPUT_SCALE         = (LEAD_MASTER_GAIN * 32767.0f);
+
+// Диапазоны частот и генерации
+static constexpr float LEAD_MIN_FREQ                = 20.0f;
+static constexpr float LEAD_MAX_FREQ                = 18000.0f;
+
+// По умолчанию и ограничения параметров синтеза (настраиваются через CC)
+static constexpr float LEAD_DEFAULT_CUTOFF          = 3000.0f;
+static constexpr float LEAD_MIN_CUTOFF              = 30.0f;
+static constexpr float LEAD_MAX_CUTOFF              = 12000.0f;
+
+static constexpr float LEAD_DEFAULT_RES             = 0.35f;
+static constexpr float LEAD_MIN_RES                 = 0.05f;
+static constexpr float LEAD_MAX_RES                 = 0.95f;
+
+static constexpr float LEAD_DEFAULT_ENV_AMT         = 4000.0f;
+static constexpr float LEAD_MAX_ENV_AMT             = 10000.0f;
+
+static constexpr float LEAD_DEFAULT_ATTACK          = 0.005f;
+static constexpr float LEAD_MIN_ATTACK              = 0.002f;
+static constexpr float LEAD_MAX_ATTACK              = 1.500f;
+
+static constexpr float LEAD_DEFAULT_DECAY           = 0.300f;
+static constexpr float LEAD_DEFAULT_SUSTAIN         = 0.600f;
+
+static constexpr float LEAD_DEFAULT_RELEASE         = 0.250f;
+static constexpr float LEAD_MIN_RELEASE             = 0.020f;
+static constexpr float LEAD_MAX_RELEASE             = 2.000f;
+
+static constexpr float LEAD_VELOCITY_MIN_GAIN       = 0.200f;
+static constexpr float LEAD_VELOCITY_SCALE          = 0.800f;
+
+static constexpr float LEAD_FILTER_DECAY_OFFSET     = 0.050f;
+static constexpr float LEAD_FILTER_SUSTAIN_SCALE    = 0.700f;
 
 enum LeadEventType : uint8_t {
     EVENT_NOTE_ON,
@@ -55,19 +89,20 @@ static LeadVoice voices[LEAD_VOICES];
 static uint32_t global_trigger_counter = 0;
 
 // Параметры субтрактивного синтезатора (управляются через MIDI CC)
-static std::atomic<float> filter_cutoff_base{3000.0f}; // Базовая частота среза LPF (Гц)
-static std::atomic<float> filter_res{0.35f};           // Резонанс LPF (0..1)
-static std::atomic<float> filter_env_amount{4000.0f};  // Глубина модуляции среза огибающей (Гц)
+static std::atomic<float> filter_cutoff_base{LEAD_DEFAULT_CUTOFF};
+static std::atomic<float> filter_res{LEAD_DEFAULT_RES};
+static std::atomic<float> filter_env_amount{LEAD_DEFAULT_ENV_AMT};
 
 // Параметры огибающей
-static std::atomic<float> env_attack_sec{0.005f};
-static std::atomic<float> env_decay_sec{0.30f};
-static std::atomic<float> env_sustain_lvl{0.60f};
-static std::atomic<float> env_release_sec{0.25f};
+static std::atomic<float> env_attack_sec{LEAD_DEFAULT_ATTACK};
+static std::atomic<float> env_decay_sec{LEAD_DEFAULT_DECAY};
+static std::atomic<float> env_sustain_lvl{LEAD_DEFAULT_SUSTAIN};
+static std::atomic<float> env_release_sec{LEAD_DEFAULT_RELEASE};
 
 static LeadEvent event_fifo[EVENT_FIFO_SIZE];
 static std::atomic<uint32_t> fifo_head{0};
 static std::atomic<uint32_t> fifo_tail{0};
+static std::atomic<uint32_t> dropped_note_on_count{0};
 
 static std::atomic<uint8_t> global_note_press_count[128];
 static bool audio_sustain_pedal = false;
@@ -93,6 +128,7 @@ static bool event_fifo_push_note_on(const LeadEvent& event) {
     uint32_t tail = fifo_tail.load(std::memory_order_acquire);
 
     if (head - tail >= NOTE_ON_FIFO_LIMIT) {
+        dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
 
@@ -131,14 +167,14 @@ void LeadSynth_Init(void) {
     global_trigger_counter = 0;
     audio_sustain_pedal = false;
 
-    filter_cutoff_base.store(3000.0f, std::memory_order_relaxed);
-    filter_res.store(0.35f, std::memory_order_relaxed);
-    filter_env_amount.store(4000.0f, std::memory_order_relaxed);
+    filter_cutoff_base.store(LEAD_DEFAULT_CUTOFF, std::memory_order_relaxed);
+    filter_res.store(LEAD_DEFAULT_RES, std::memory_order_relaxed);
+    filter_env_amount.store(LEAD_DEFAULT_ENV_AMT, std::memory_order_relaxed);
 
-    env_attack_sec.store(0.005f, std::memory_order_relaxed);
-    env_decay_sec.store(0.30f, std::memory_order_relaxed);
-    env_sustain_lvl.store(0.60f, std::memory_order_relaxed);
-    env_release_sec.store(0.25f, std::memory_order_relaxed);
+    env_attack_sec.store(LEAD_DEFAULT_ATTACK, std::memory_order_relaxed);
+    env_decay_sec.store(LEAD_DEFAULT_DECAY, std::memory_order_relaxed);
+    env_sustain_lvl.store(LEAD_DEFAULT_SUSTAIN, std::memory_order_relaxed);
+    env_release_sec.store(LEAD_DEFAULT_RELEASE, std::memory_order_relaxed);
 
     for (int i = 0; i < LEAD_VOICES; i++) {
         LeadVoice& v = voices[i];
@@ -148,19 +184,19 @@ void LeadSynth_Init(void) {
 
         v.filter.Init(LEAD_SAMPLE_RATE);
         v.filter.SetDrive(0.1f);
-        v.filter.SetRes(0.35f);
+        v.filter.SetRes(LEAD_DEFAULT_RES);
 
         v.amp_env.Init(LEAD_SAMPLE_RATE);
-        v.amp_env.SetAttackTime(0.005f);
-        v.amp_env.SetDecayTime(0.30f);
-        v.amp_env.SetSustainLevel(0.60f);
-        v.amp_env.SetReleaseTime(0.25f);
+        v.amp_env.SetAttackTime(LEAD_DEFAULT_ATTACK);
+        v.amp_env.SetDecayTime(LEAD_DEFAULT_DECAY);
+        v.amp_env.SetSustainLevel(LEAD_DEFAULT_SUSTAIN);
+        v.amp_env.SetReleaseTime(LEAD_DEFAULT_RELEASE);
 
         v.filter_env.Init(LEAD_SAMPLE_RATE);
-        v.filter_env.SetAttackTime(0.005f);
-        v.filter_env.SetDecayTime(0.35f);
-        v.filter_env.SetSustainLevel(0.40f);
-        v.filter_env.SetReleaseTime(0.25f);
+        v.filter_env.SetAttackTime(LEAD_DEFAULT_ATTACK);
+        v.filter_env.SetDecayTime(LEAD_DEFAULT_DECAY + LEAD_FILTER_DECAY_OFFSET);
+        v.filter_env.SetSustainLevel(LEAD_DEFAULT_SUSTAIN * LEAD_FILTER_SUSTAIN_SCALE);
+        v.filter_env.SetReleaseTime(LEAD_DEFAULT_RELEASE);
 
         v.voice_state.store(-1, std::memory_order_relaxed);
         v.trigger_age = 0;
@@ -178,6 +214,7 @@ void LeadSynth_Init(void) {
     recovery_state.store(RECOVERY_NORMAL, std::memory_order_relaxed);
     fifo_head.store(0, std::memory_order_relaxed);
     fifo_tail.store(0, std::memory_order_relaxed);
+    dropped_note_on_count.store(0, std::memory_order_relaxed);
 }
 
 void LeadSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
@@ -190,6 +227,7 @@ void LeadSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     active_producer_ops.fetch_add(1, std::memory_order_seq_cst);
     if (recovery_state.load(std::memory_order_seq_cst) != RECOVERY_NORMAL) {
         active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
+        dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
         return;
     }
 
@@ -201,10 +239,10 @@ void LeadSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     }
 
     float freq = mtof((float)midi_note);
-    freq = clamp_f(freq, 20.0f, 18000.0f);
+    freq = clamp_f(freq, LEAD_MIN_FREQ, LEAD_MAX_FREQ);
 
     float norm_vel = (float)velocity * (1.0f / 127.0f);
-    float vel_gain = 0.20f + 0.80f * norm_vel;
+    float vel_gain = LEAD_VELOCITY_MIN_GAIN + LEAD_VELOCITY_SCALE * norm_vel;
 
     LeadEvent event;
     event.type = EVENT_NOTE_ON;
@@ -263,31 +301,35 @@ bool LeadSynth_IsNoteActive(uint8_t midi_note) {
     return false;
 }
 
+uint32_t LeadSynth_GetDroppedEventsCount(void) {
+    return dropped_note_on_count.load(std::memory_order_relaxed);
+}
+
 void LeadSynth_ControlChange(uint8_t control, uint8_t value) {
     float norm = (float)value * (1.0f / 127.0f);
 
     switch (control) {
-        case 1:  // Mod wheel -> увеличивает глубину и срез фильтра
-            filter_cutoff_base.store(500.0f + norm * 8500.0f, std::memory_order_relaxed);
+        case 1:  // CC 1: Modulation Wheel -> глубина огибающей фильтра (0..10000 Гц)
+            filter_env_amount.store(norm * LEAD_MAX_ENV_AMT, std::memory_order_relaxed);
             break;
 
-        case 71: // Cutoff Resonance
-            filter_res.store(0.05f + norm * 0.90f, std::memory_order_relaxed);
+        case 71: // CC 71: Resonance (0.05..0.95)
+            filter_res.store(LEAD_MIN_RES + norm * (LEAD_MAX_RES - LEAD_MIN_RES), std::memory_order_relaxed);
             break;
 
-        case 74: // Filter Cutoff Frequency
-            filter_cutoff_base.store(200.0f + norm * 12000.0f, std::memory_order_relaxed);
+        case 74: // CC 74: Filter Cutoff Frequency (30..12000 Гц)
+            filter_cutoff_base.store(LEAD_MIN_CUTOFF + norm * (LEAD_MAX_CUTOFF - LEAD_MIN_CUTOFF), std::memory_order_relaxed);
             break;
 
-        case 72: // Release Time
-            env_release_sec.store(0.02f + norm * 2.0f, std::memory_order_relaxed);
+        case 72: // CC 72: Release Time (0.02..2.02 с)
+            env_release_sec.store(LEAD_MIN_RELEASE + norm * LEAD_MAX_RELEASE, std::memory_order_relaxed);
             break;
 
-        case 73: // Attack Time
-            env_attack_sec.store(0.002f + norm * 1.5f, std::memory_order_relaxed);
+        case 73: // CC 73: Attack Time (0.002..1.502 с)
+            env_attack_sec.store(LEAD_MIN_ATTACK + norm * LEAD_MAX_ATTACK, std::memory_order_relaxed);
             break;
 
-        case 64: { // Sustain Pedal
+        case 64: { // CC 64: Sustain Pedal
             active_producer_ops.fetch_add(1, std::memory_order_seq_cst);
             if (recovery_state.load(std::memory_order_seq_cst) != RECOVERY_NORMAL) {
                 active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
@@ -343,7 +385,7 @@ static int16_t LeadSynth_NextSample(void) {
         if (event.type == EVENT_NOTE_ON) {
             int target_voice = -1;
 
-            // 1. Голос с такой же нотой
+            // 1. Поиск голоса, уже играющего данную ноту
             for (int i = 0; i < LEAD_VOICES; i++) {
                 if (voices[i].voice_state.load(std::memory_order_relaxed) == (int32_t)event.param1) {
                     target_voice = i;
@@ -351,7 +393,7 @@ static int16_t LeadSynth_NextSample(void) {
                 }
             }
 
-            // 2. Свободный голос
+            // 2. Поиск свободного голоса
             if (target_voice == -1) {
                 for (int i = 0; i < LEAD_VOICES; i++) {
                     if (voices[i].voice_state.load(std::memory_order_relaxed) == -1) {
@@ -361,7 +403,7 @@ static int16_t LeadSynth_NextSample(void) {
                 }
             }
 
-            // 3. Вытеснение наиболе старого голоса
+            // 3. Детерминированное вытеснение самого старого активного голоса
             if (target_voice == -1) {
                 uint32_t max_age_diff = 0;
                 target_voice = 0;
@@ -392,12 +434,14 @@ static int16_t LeadSynth_NextSample(void) {
             v.amp_env.SetSustainLevel(sus);
             v.amp_env.SetReleaseTime(rel);
             v.amp_env.Retrigger(false);
+            v.amp_env.Process(true);
 
             v.filter_env.SetAttackTime(att);
-            v.filter_env.SetDecayTime(dec + 0.05f);
-            v.filter_env.SetSustainLevel(sus * 0.7f);
+            v.filter_env.SetDecayTime(dec + LEAD_FILTER_DECAY_OFFSET);
+            v.filter_env.SetSustainLevel(sus * LEAD_FILTER_SUSTAIN_SCALE);
             v.filter_env.SetReleaseTime(rel);
             v.filter_env.Retrigger(false);
+            v.filter_env.Process(true);
 
             v.voice_state.store((int32_t)event.param1, std::memory_order_release);
 
@@ -459,7 +503,7 @@ static int16_t LeadSynth_NextSample(void) {
 
             // Динамическая модуляция частоты среза LPF огибающей
             float cutoff = base_cutoff + f_env_val * env_amt;
-            cutoff = clamp_f(cutoff, 30.0f, 15000.0f);
+            cutoff = clamp_f(cutoff, LEAD_MIN_CUTOFF, LEAD_MAX_CUTOFF);
 
             v.filter.SetRes(res_val);
             v.filter.SetFreq(cutoff);
