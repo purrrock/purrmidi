@@ -393,6 +393,8 @@ static int16_t LeadSynth_NextSample(void) {
                 }
             }
 
+            bool is_retrigger = (target_voice != -1);
+
             // 2. Поиск свободного голоса
             if (target_voice == -1) {
                 for (int i = 0; i < LEAD_VOICES; i++) {
@@ -420,7 +422,11 @@ static int16_t LeadSynth_NextSample(void) {
             v.osc.SetFreq(event.freq);
             v.velocity_gain = event.velocity_gain;
             v.trigger_age = ++global_trigger_counter;
-            if (v.press_count < 255) v.press_count++;
+            if (is_retrigger) {
+                if (v.press_count < 255) v.press_count++;
+            } else {
+                v.press_count = 1;
+            }
             v.sustain_held = false;
             v.gate = true;
 

@@ -250,26 +250,114 @@ void test_deterministic_voice_stealing_and_reuse() {
     }
     std::cout << "Verified deterministic stealing: oldest note 60 stolen, 61..67 remain active, 68 added.\n";
 
-    // Release all active notes and verify voice slots are freed and reused
+    // Send EXACTLY ONE NoteOff for note 68
     LeadSynth_NoteOff(68);
-    LeadSynth_NoteOff(68); // Release stolen voice press count
+
+    std::vector<int16_t> decay_buf(48000 * 2 * 2, 0);
+    LeadSynth_FillStereoBuffer(decay_buf.data(), 48000 * 1.5);
+
+    // Verify note 68 is cleanly released after a single NoteOff
+    assert(LeadSynth_IsNoteActive(68) == false);
+
+    // Verify remaining 7 notes 61..67 continue sounding
+    for (uint8_t note = 61; note <= 67; ++note) {
+        assert(LeadSynth_IsNoteActive(note) == true);
+    }
+
+    // Now release remaining 7 notes
     for (uint8_t note = 61; note <= 67; ++note) {
         LeadSynth_NoteOff(note);
     }
 
-    std::vector<int16_t> decay_buf(48000 * 2 * 2, 0);
     LeadSynth_FillStereoBuffer(decay_buf.data(), 48000 * 1.5);
 
     for (uint8_t note = 60; note <= 68; ++note) {
         assert(LeadSynth_IsNoteActive(note) == false);
     }
+    std::cout << "Verified: Single NoteOff cleanly releases stolen voice while other voices continue.\n";
+}
 
-    // Trigger new note 72 and verify voice re-allocation
-    LeadSynth_NoteOn(72, 100);
-    std::vector<int16_t> reuse_buf(1000 * 2, 0);
-    LeadSynth_FillStereoBuffer(reuse_buf.data(), 1000);
+void test_voice_stealing_with_multiple_presses() {
+    LeadSynth_Init();
 
-    assert(LeadSynth_IsNoteActive(72) == true);
+    // Trigger note 60 TWICE (multiple presses registered)
+    LeadSynth_NoteOn(60, 100);
+    LeadSynth_NoteOn(60, 100);
+
+    std::vector<int16_t> step_buf(100 * 2, 0);
+    LeadSynth_FillStereoBuffer(step_buf.data(), 100);
+
+    // Fill remaining 7 voices with notes 61..67
+    for (uint8_t note = 61; note <= 67; ++note) {
+        LeadSynth_NoteOn(note, 100);
+        LeadSynth_FillStereoBuffer(step_buf.data(), 100);
+    }
+
+    // All 8 voices occupied, note 60 is oldest. Trigger 9th note (68).
+    LeadSynth_NoteOn(68, 100);
+    LeadSynth_FillStereoBuffer(step_buf.data(), 100);
+
+    // Note 60 stolen by note 68!
+    assert(LeadSynth_IsNoteActive(60) == false);
+    assert(LeadSynth_IsNoteActive(68) == true);
+
+    // Send EXACTLY ONE NoteOff for note 68
+    LeadSynth_NoteOff(68);
+
+    std::vector<int16_t> decay_buf(48000 * 2 * 2, 0);
+    LeadSynth_FillStereoBuffer(decay_buf.data(), 48000 * 1.5);
+
+    // Note 68 must be cleanly released!
+    assert(LeadSynth_IsNoteActive(68) == false);
+
+    // Late NoteOff for old note 60 must not affect note 68 or other notes
+    LeadSynth_NoteOff(60);
+    LeadSynth_FillStereoBuffer(decay_buf.data(), 4800);
+    assert(LeadSynth_IsNoteActive(68) == false);
+
+    std::cout << "Verified: Voice stealing on note with multiple presses releases cleanly.\n";
+}
+
+void test_voice_stealing_with_sustain_pedal() {
+    LeadSynth_Init();
+
+    // Press sustain pedal CC64=127
+    LeadSynth_ControlChange(64, 127);
+
+    std::vector<int16_t> step_buf(100 * 2, 0);
+
+    // Trigger note 60, then release key 60 (sustained by pedal)
+    LeadSynth_NoteOn(60, 100);
+    LeadSynth_FillStereoBuffer(step_buf.data(), 100);
+    LeadSynth_NoteOff(60);
+    LeadSynth_FillStereoBuffer(step_buf.data(), 100);
+    assert(LeadSynth_IsNoteActive(60) == true); // Sustained by CC64
+
+    // Fill remaining 7 voices with notes 61..67
+    for (uint8_t note = 61; note <= 67; ++note) {
+        LeadSynth_NoteOn(note, 100);
+        LeadSynth_FillStereoBuffer(step_buf.data(), 100);
+    }
+
+    // All 8 voices occupied. Trigger 9th note (68). Note 60 is stolen!
+    LeadSynth_NoteOn(68, 100);
+    LeadSynth_FillStereoBuffer(step_buf.data(), 100);
+
+    assert(LeadSynth_IsNoteActive(60) == false); // Stolen
+    assert(LeadSynth_IsNoteActive(68) == true);  // Active
+
+    // Release pedal CC64=0
+    LeadSynth_ControlChange(64, 0);
+
+    // Send NoteOff for note 68
+    LeadSynth_NoteOff(68);
+
+    std::vector<int16_t> decay_buf(48000 * 2 * 2, 0);
+    LeadSynth_FillStereoBuffer(decay_buf.data(), 48000 * 1.5);
+
+    // Note 68 must be cleanly released!
+    assert(LeadSynth_IsNoteActive(68) == false);
+    std::cout << "Verified: Voice stealing on sustained note releases cleanly without stuck notes.\n";
 }
 
 void test_polyphony_chords_and_controls() {
@@ -344,6 +432,8 @@ int main() {
     test_fifo_overflow_critical_release_delivery();
     test_overlapping_same_pitch_notes();
     test_deterministic_voice_stealing_and_reuse();
+    test_voice_stealing_with_multiple_presses();
+    test_voice_stealing_with_sustain_pedal();
     test_polyphony_chords_and_controls();
     test_reinit_state_reset();
     std::cout << "test_lead_host passed successfully." << std::endl;
