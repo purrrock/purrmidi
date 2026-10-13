@@ -73,7 +73,7 @@ MIDI-диспетчер обрабатывает Note On, Note Off, Control Chan
 | --------------: | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 |             `0` | **E-Piano**   | Полифоническое FM-электропиано, до 8 голосов. `Engine/synth/epiano_synth.cpp`. Подробнее: `docs/EPIANO_SYNTH.md`.                                                                                                                             |
 |             `1` | **Pluck**     | Моделирование струны алгоритмом Карплуса — Стронга на базе DaisySP `Pluck`. `Engine/synth/pluck_synth.cpp`.                                                                                                                                    |
-|             `2` | **Sine**      | Одноголосая синусоида для проверки аудиотракта и MIDI-цепочки. `Engine/synth/synth.c`, `Engine/synth/sine_synth.c`.                                                                                                                        |
+|             `2` | **Lead**      | Полифонический аналоговый субтрактивный синтезатор лидов на базе DaisySP (`Oscillator`, `Svf`, `Adsr`). `Engine/synth/lead_synth.cpp`.                                                                                                          |
 |             `3` | **Organ**     | Тонколесный орган на базе `bfreeOrgan2`. `Engine/synth/organ_synth.cpp`, `Middlewares/Third_Party/bfreeOrgan2/`. Поддерживает регистровые рукоятки (drawbars) и хорус.                                                                                     |
 |             `4` | **SoundFont** | Синтезатор SoundFont2 на базе TinySoundFont. `Engine/synth/soundfont_synth.cpp`, `Platform/qspi_xip/qspi_flash.c`. Читает сэмплы из QSPI Flash (XIP) с автообновлением с SD-карты (`0:/SNDFNT.SF2`). Подробнее: `docs/SOUNDFONT_QSPI_SYNTH.md`. |
 
@@ -85,7 +85,7 @@ MIDI-диспетчер обрабатывает Note On, Note Off, Control Chan
 | ---------------: | ------------------------------------------ |
 |              `0` | Выбрать E-Piano                            |
 |              `1` | Выбрать Pluck                              |
-|              `2` | Выбрать Sine                               |
+|              `2` | Выбрать Lead                               |
 |              `3` | Выбрать Organ                              |
 |              `4` | Выбрать SoundFont                          |
 |          `5…126` | Циклический выбор по формуле `program % 5` |
@@ -94,7 +94,7 @@ MIDI-диспетчер обрабатывает Note On, Note Off, Control Chan
 Значение `127` зарезервировано как команда **Next Instrument**. Оно не проходит через обычное сопоставление номера программы по модулю. При каждом таком сообщении активный инструмент меняется на следующий в последовательности:
 
 ```text
-E-Piano → Pluck → Sine → Organ → SoundFont
+E-Piano → Pluck → Lead → Organ → SoundFont
     ↑                                  │
     └──────────────────────────────────┘
 ```

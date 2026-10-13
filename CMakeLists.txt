@@ -110,6 +110,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Звуковые движки (все входят в прошивку, выбор — по MIDI Program Change)
     Engine/synth/synth_engine.cpp
     Engine/synth/epiano_synth.cpp
+    Engine/synth/lead_synth.cpp
     Engine/synth/organ_synth.cpp
     Engine/synth/organ_profile.cpp
     Engine/synth/pluck_synth.cpp
@@ -150,6 +151,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 set(PURRMIDI_AUDIO_HOT_SOURCES
     Engine/synth/synth_engine.cpp
     Engine/synth/epiano_synth.cpp
+    Engine/synth/lead_synth.cpp
     Engine/synth/organ_synth.cpp
     Engine/synth/pluck_synth.cpp
     Engine/synth/sine_synth.c

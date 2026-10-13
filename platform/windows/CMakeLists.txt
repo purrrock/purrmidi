@@ -71,10 +71,34 @@ target_include_directories(purrmidi_synth_pluck PUBLIC
     "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
     "${DAISYSP_DIR}/Source"
+    "${DAISYSP_DIR}/Source/Utility"
+    "${DAISYSP_DIR}/Source/Synthesis"
+    "${DAISYSP_DIR}/Source/Filters"
+    "${DAISYSP_DIR}/Source/Control"
     "${DAISYSP_DIR}/DaisySP-LGPL/Source"
 )
 target_compile_definitions(purrmidi_synth_pluck PUBLIC USE_DAISYSP_LGPL)
 target_compile_features(purrmidi_synth_pluck PUBLIC cxx_std_17)
+
+# lead: полифонический субтрактивный лид-синтезатор на DaisySP (Oscillator, Svf, Adsr)
+add_library(purrmidi_synth_lead STATIC
+    "${CMAKE_SOURCE_DIR}/Engine/synth/lead_synth.cpp"
+    "${DAISYSP_DIR}/Source/Synthesis/oscillator.cpp"
+    "${DAISYSP_DIR}/Source/Filters/svf.cpp"
+    "${DAISYSP_DIR}/Source/Control/adsr.cpp"
+)
+target_include_directories(purrmidi_synth_lead PUBLIC
+    "${CMAKE_SOURCE_DIR}/Core/Inc"
+    "${CMAKE_SOURCE_DIR}/Engine/synth"
+    "${DAISYSP_DIR}/Source"
+    "${DAISYSP_DIR}/Source/Utility"
+    "${DAISYSP_DIR}/Source/Synthesis"
+    "${DAISYSP_DIR}/Source/Filters"
+    "${DAISYSP_DIR}/Source/Control"
+    "${DAISYSP_DIR}/DaisySP-LGPL/Source"
+)
+target_compile_definitions(purrmidi_synth_lead PUBLIC USE_DAISYSP_LGPL)
+target_compile_features(purrmidi_synth_lead PUBLIC cxx_std_17)
 
 # soundfont: синтезатор SF2 на базе TinySoundFont и SF2Cache
 add_library(purrmidi_synth_soundfont STATIC
@@ -89,7 +113,7 @@ target_include_directories(purrmidi_synth_soundfont PUBLIC
 )
 target_compile_features(purrmidi_synth_soundfont PUBLIC cxx_std_17)
 
-foreach(_synth sine pluck epiano organ soundfont)
+foreach(_synth sine pluck lead epiano organ soundfont)
     if(MSVC)
         target_compile_options(purrmidi_synth_${_synth} PRIVATE /utf-8 /W4)
     else()
@@ -118,6 +142,7 @@ target_include_directories(purrmidi_core PUBLIC
 
 target_link_libraries(purrmidi_core PUBLIC
     purrmidi_synth_epiano
+    purrmidi_synth_lead
     purrmidi_synth_organ
     purrmidi_synth_pluck
     purrmidi_synth_sine
