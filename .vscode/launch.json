@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Cortex Debug: OpenOCD (PurrMidi)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "openocd",
+            "executable": "${workspaceFolder}/build/Debug/purrmidi.elf",
+            "cwd": "${workspaceFolder}",
+            "configFiles": [
+                "interface/stlink.cfg"
+            ],
+            "runToEntryPoint": "main"
+        }
+    ]
+}
