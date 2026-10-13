@@ -6,7 +6,7 @@
  *   - indirect: чтение (0xEB), стирание 4 КБ / 64 КБ, запись страниц по 256 Б;
  *   - memory-mapped (XIP): флеш отображается в 0x90000000 только для чтения (команда 0xEB, 4 линии).
  *
- * Требования к CubeMX: см. docs/QSPI_XIP.md (QUADSPI, Bank1, 4 линии, Flash Size 23 бита, генерация quadspi.c).
+ * Требования к CubeMX: см. docs/SOUNDFONT_QSPI_SYNTH.md (QUADSPI, Bank1, 4 линии, Flash Size 22 бита, генерация quadspi.c).
  * Драйвер вызывает MX_QUADSPI_Init() сам, если CubeMX не сделал это раньше.
  * Для других микросхем (не Winbond) нужно проверить коды команд и число dummy-циклов.
  */
