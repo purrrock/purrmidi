@@ -115,7 +115,7 @@ target_compile_features(purrmidi_synth_soundfont PUBLIC cxx_std_17)
 
 # dulcimer: цимбалы / модальный резонатор (Mutable Instruments Elements)
 add_library(purrmidi_synth_dulcimer STATIC
-    "${CMAKE_SOURCE_DIR}/Core/Src/dulcimer_synth.cpp"
+    "${CMAKE_SOURCE_DIR}/Engine/synth/dulcimer_synth.cpp"
     "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack/elements/dsp/resonator.cc"
     "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack/elements/dsp/exciter.cc"
     "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack/elements/resources.cc"
