@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "synth_engine.h" /* Синтезаторы epiano / pluck / lead / organ / soundfont */
+#include "dulcimer_synth.h"
 #include "display.h"
 #include "midi_event.h"
 #include "midi_queue.h"

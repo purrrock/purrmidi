@@ -118,6 +118,13 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Engine/synth/soundfont_synth.cpp
     Engine/synth/tinysoundfont_impl.cpp
     Engine/synth/synth.c
+    Core/Src/dulcimer_synth.cpp
+
+    Middlewares/Third_Party/eurorack/elements/dsp/resonator.cc
+    Middlewares/Third_Party/eurorack/elements/dsp/exciter.cc
+    Middlewares/Third_Party/eurorack/elements/resources.cc
+    Middlewares/Third_Party/eurorack/stmlib/utils/random.cc
+    Middlewares/Third_Party/eurorack/stmlib/dsp/units.cc
 
     Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp
     Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp
@@ -160,6 +167,13 @@ set(PURRMIDI_AUDIO_HOT_SOURCES
     Engine/synth/sf2_xip.cpp
     Engine/synth/tinysoundfont_impl.cpp
     Engine/synth/synth.c
+    Core/Src/dulcimer_synth.cpp
+
+    Middlewares/Third_Party/eurorack/elements/dsp/resonator.cc
+    Middlewares/Third_Party/eurorack/elements/dsp/exciter.cc
+    Middlewares/Third_Party/eurorack/elements/resources.cc
+    Middlewares/Third_Party/eurorack/stmlib/utils/random.cc
+    Middlewares/Third_Party/eurorack/stmlib/dsp/units.cc
 
     Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp
     Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp
@@ -169,6 +183,15 @@ set(PURRMIDI_AUDIO_HOT_SOURCES
 )
 set_source_files_properties(${PURRMIDI_AUDIO_HOT_SOURCES}
     PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Release>:-O2>")
+
+set_source_files_properties(
+    Middlewares/Third_Party/eurorack/elements/dsp/resonator.cc
+    Middlewares/Third_Party/eurorack/elements/dsp/exciter.cc
+    Middlewares/Third_Party/eurorack/elements/resources.cc
+    Middlewares/Third_Party/eurorack/stmlib/utils/random.cc
+    Middlewares/Third_Party/eurorack/stmlib/dsp/units.cc
+    PROPERTIES COMPILE_DEFINITIONS "TEST"
+)
 
 # SD-карта (SDMMC1 + FatFs): модуль собирается только после того, как CubeMX
 # сгенерировал sdmmc.h и FatFs (см. README, раздел "Работа с SD-картой").
