@@ -10,10 +10,10 @@
 #define BORE_DELAY_SIZE           1024    // Емкость линии задержки ствола (степень двойки, мин. частота ~46.8 Гц)
 #define JET_DELAY_SIZE            512     // Емкость линии задержки струи (степень двойки)
 #define EVENT_FIFO_SIZE           32      // Емкость кольцевого FIFO буфера
-#define NOTE_ON_FIFO_LIMIT        28      // Порог резервирования слотов для критических событий
+#define NOTE_ON_FIFO_LIMIT        28      // Порог резервирования слотов для критических событий (NoteOff, CC64)
 
-// Диапазоны частот
-#define FLUTE_MIN_FREQ            30.0f
+// Диапазоны частот (MIDI нота 31 = G1 46.875 Гц ... нота 108 = C8 4186 Гц)
+#define FLUTE_MIN_FREQ            46.875f
 #define FLUTE_MAX_FREQ            18000.0f
 
 // Параметры дыхания и огибающей по умолчанию
@@ -62,9 +62,8 @@ public:
 
     inline float Read(float delay_samples) const {
         if (delay_samples < 1.0f) delay_samples = 1.0f;
-        if (delay_samples > (float)(SIZE - 2)) {
-            delay_samples = (float)(SIZE - 2);
-        }
+        const float max_delay = (float)(SIZE - 2);
+        if (delay_samples > max_delay) delay_samples = max_delay;
 
         float read_pos = (float)write_pos_ - delay_samples;
         while (read_pos < 0.0f) {
@@ -89,7 +88,6 @@ static inline float FastRandom(uint32_t &state) {
     state ^= state << 13;
     state ^= state >> 17;
     state ^= state << 5;
-    // Приведение к диапазону [-1.0, 1.0]
     return (float)state * (2.0f / 4294967295.0f) - 1.0f;
 }
 
@@ -122,6 +120,18 @@ struct FluteVoice {
     bool sustain_held{false};
 };
 
+// Таблица частот MIDI-нот 0..127 (предрассчитана)
+static float kMidiToFreq[128];
+static bool kMidiToFreqInitialized = false;
+
+static void InitMidiToFreqTable(void) {
+    if (kMidiToFreqInitialized) return;
+    for (int i = 0; i < 128; i++) {
+        kMidiToFreq[i] = 440.0f * std::pow(2.0f, (float)(i - 69) / 12.0f);
+    }
+    kMidiToFreqInitialized = true;
+}
+
 // Размещение буферов голосов в секции .ram_d2 (D2 SRAM) на STM32H7 во избежание переполнения AXI SRAM
 #if defined(__GNUC__) && !defined(__EMSCRIPTEN__) && defined(__arm__)
 static FluteVoice voices[FLUTE_VOICES] __attribute__((section(".ram_d2"), aligned(32)));
@@ -138,6 +148,10 @@ static std::atomic<float> cc_jet_ratio{FLUTE_DEFAULT_JET_RATIO};
 static std::atomic<float> cc_bore_damping{FLUTE_DEFAULT_DAMPING};
 static std::atomic<float> cc_release_sec{FLUTE_DEFAULT_RELEASE};
 static std::atomic<float> cc_attack_sec{FLUTE_DEFAULT_ATTACK};
+
+// Предрассчитанные коэффициенты огибающей
+static float cached_attack_rate = 1.0f / (FLUTE_DEFAULT_ATTACK * FLUTE_SAMPLE_RATE);
+static float cached_release_rate = 1.0f / (FLUTE_DEFAULT_RELEASE * FLUTE_SAMPLE_RATE);
 
 static FluteEvent event_fifo[EVENT_FIFO_SIZE];
 static std::atomic<uint32_t> fifo_head{0};
@@ -214,6 +228,8 @@ static bool event_fifo_pop(FluteEvent& event) {
 extern "C" {
 
 void FluteSynth_Init(void) {
+    InitMidiToFreqTable();
+
     global_trigger_counter = 0;
     audio_sustain_pedal = false;
 
@@ -223,6 +239,9 @@ void FluteSynth_Init(void) {
     cc_bore_damping.store(FLUTE_DEFAULT_DAMPING, std::memory_order_relaxed);
     cc_release_sec.store(FLUTE_DEFAULT_RELEASE, std::memory_order_relaxed);
     cc_attack_sec.store(FLUTE_DEFAULT_ATTACK, std::memory_order_relaxed);
+
+    cached_attack_rate = 1.0f / (FLUTE_DEFAULT_ATTACK * FLUTE_SAMPLE_RATE);
+    cached_release_rate = 1.0f / (FLUTE_DEFAULT_RELEASE * FLUTE_SAMPLE_RATE);
 
     for (int i = 0; i < FLUTE_VOICES; i++) {
         FluteVoice& v = voices[i];
@@ -278,8 +297,8 @@ void FluteSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
         }
     }
 
-    // Рассчитываем частоту по формуле 440 * 2^((note - 69) / 12)
-    float freq = 440.0f * std::pow(2.0f, (float)(midi_note - 69) / 12.0f);
+    InitMidiToFreqTable();
+    float freq = kMidiToFreq[midi_note];
     freq = clamp_f(freq, FLUTE_MIN_FREQ, FLUTE_MAX_FREQ);
 
     float norm_vel = (float)velocity * (1.0f / 127.0f);
@@ -364,9 +383,12 @@ void FluteSynth_ControlChange(uint8_t control, uint8_t value) {
             cc_bore_damping.store(0.05f + norm * 0.80f, std::memory_order_relaxed);
             break;
 
-        case 72: // CC 72: Release Time (0.02..1.50 с)
-            cc_release_sec.store(0.02f + norm * 1.48f, std::memory_order_relaxed);
+        case 72: { // CC 72: Release Time (0.02..1.50 с)
+            float rel = 0.02f + norm * 1.48f;
+            cc_release_sec.store(rel, std::memory_order_relaxed);
+            cached_release_rate = 1.0f / (rel * FLUTE_SAMPLE_RATE);
             break;
+        }
 
         case 74: // CC 74: Brightness / Jet Ratio (0.15..0.50)
             cc_jet_ratio.store(0.15f + norm * 0.35f, std::memory_order_relaxed);
@@ -513,10 +535,8 @@ static int16_t FluteSynth_NextSample(void) {
     float mix_sum = 0.0f;
     uint32_t active_voices_count = 0;
 
-    const float attack_sec = cc_attack_sec.load(std::memory_order_relaxed);
-    const float release_sec = cc_release_sec.load(std::memory_order_relaxed);
-    const float attack_rate = 1.0f / (attack_sec * FLUTE_SAMPLE_RATE);
-    const float release_rate = 1.0f / (release_sec * FLUTE_SAMPLE_RATE);
+    const float attack_rate = cached_attack_rate;
+    const float release_rate = cached_release_rate;
 
     const float vib_depth = cc_vibrato_depth.load(std::memory_order_relaxed);
     const float turb_gain = cc_turbulence.load(std::memory_order_relaxed);
