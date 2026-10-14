@@ -81,6 +81,10 @@ static void test_program_change_selects_engine() {
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
     CHECK(std::strcmp(SynthEngine_GetName(), "soundfont") == 0);
 
+    send_pc(5);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_DULCIMER);
+    CHECK(std::strcmp(SynthEngine_GetName(), "dulcimer") == 0);
+
     send_pc(0);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
 
@@ -89,22 +93,26 @@ static void test_program_change_selects_engine() {
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
     send_pc(4, 12);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
+    send_pc(5, 14);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_DULCIMER);
     send_pc(1, 15);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
 }
 
 static void test_program_wraps_modulo() {
     SynthEngine_Init();
-    send_pc(5);     // 5 % 5 == 0 -> E-Piano
+    send_pc(6);     // 6 % 6 == 0 -> E-Piano
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
-    send_pc(6);     // 6 % 5 == 1 -> Pluck
+    send_pc(7);     // 7 % 6 == 1 -> Pluck
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
-    send_pc(7);     // 7 % 5 == 2 -> Lead
+    send_pc(8);     // 8 % 6 == 2 -> Lead
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_LEAD);
-    send_pc(8);     // 8 % 5 == 3 -> Organ
+    send_pc(9);     // 9 % 6 == 3 -> Organ
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
-    send_pc(9);     // 9 % 5 == 4 -> SoundFont
+    send_pc(10);    // 10 % 6 == 4 -> SoundFont
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
+    send_pc(11);    // 11 % 6 == 5 -> Dulcimer
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_DULCIMER);
 }
 
 // Следующий по циклу инструмент, который можно выбрать (SoundFont без SF2 пропускается).

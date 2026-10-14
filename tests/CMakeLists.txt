@@ -60,6 +60,13 @@ target_compile_features(test_soundfont_host PRIVATE cxx_std_17)
 add_test(NAME test_soundfont_host COMMAND test_soundfont_host
          WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/..")
 
+add_executable(test_dulcimer_host
+    test_dulcimer_host.cpp
+)
+target_link_libraries(test_dulcimer_host PRIVATE purrmidi_synth_dulcimer)
+target_compile_features(test_dulcimer_host PRIVATE cxx_std_17)
+add_test(NAME test_dulcimer_host COMMAND test_dulcimer_host)
+
 add_executable(test_queue_dispatch
     test_queue_dispatch.cpp
 )
