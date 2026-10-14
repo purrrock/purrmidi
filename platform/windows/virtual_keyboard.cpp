@@ -14,13 +14,16 @@ VirtualKeyboard::VirtualKeyboard() {
 #ifdef _WIN32
     HANDLE hInput = GetStdHandle(STD_INPUT_HANDLE);
     if (hInput != INVALID_HANDLE_VALUE && hInput != NULL) {
-        console_handle_ = hInput;
-        DWORD mode = 0;
-        if (GetConsoleMode(hInput, &mode)) {
-            original_console_mode_ = mode;
-            console_mode_saved_ = true;
-            DWORD new_mode = (mode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT)) | ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS;
-            SetConsoleMode(hInput, new_mode);
+        if (GetFileType(hInput) == FILE_TYPE_CHAR) {
+            DWORD mode = 0;
+            if (GetConsoleMode(hInput, &mode)) {
+                original_console_mode_ = mode;
+                console_mode_saved_ = true;
+                DWORD new_mode = (mode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT)) | ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS;
+                if (SetConsoleMode(hInput, new_mode)) {
+                    console_handle_ = hInput;
+                }
+            }
         }
     }
 #endif
@@ -217,14 +220,17 @@ void VirtualKeyboard::Poll() {
     if (!console_handle_) return;
 
     HWND console_hwnd = GetConsoleWindow();
-    if (console_hwnd && GetForegroundWindow() != console_hwnd) {
-        if (focus_state_) {
-            focus_state_ = false;
-            AllNotesOff();
+    if (console_hwnd && IsWindowVisible(console_hwnd)) {
+        HWND fg_hwnd = GetForegroundWindow();
+        if (fg_hwnd && fg_hwnd != console_hwnd) {
+            if (focus_state_) {
+                focus_state_ = false;
+                AllNotesOff();
+            }
+        } else if (fg_hwnd == console_hwnd) {
+            focus_state_ = true;
         }
-        return;
     }
-    focus_state_ = true;
 
     DWORD num_events = 0;
     if (!GetNumberOfConsoleInputEvents(console_handle_, &num_events) || num_events == 0) {
@@ -233,7 +239,7 @@ void VirtualKeyboard::Poll() {
 
     std::vector<INPUT_RECORD> records(num_events);
     DWORD read_events = 0;
-    if (!ReadConsoleInputW(console_handle_, records.data(), num_events, &read_events)) {
+    if (!ReadConsoleInputW(console_handle_, records.data(), num_events, &read_events) || read_events == 0) {
         return;
     }
 
@@ -241,9 +247,15 @@ void VirtualKeyboard::Poll() {
         const auto& rec = records[i];
         if (rec.EventType == FOCUS_EVENT) {
             if (!rec.Event.FocusEvent.bSetFocus) {
+                focus_state_ = false;
                 AllNotesOff();
+            } else {
+                focus_state_ = true;
             }
         } else if (rec.EventType == KEY_EVENT) {
+            if (!focus_state_ && rec.Event.KeyEvent.bKeyDown) {
+                continue;
+            }
             const auto& ke = rec.Event.KeyEvent;
             uint32_t vk = ke.wVirtualKeyCode;
             uint16_t sc = ke.wVirtualScanCode;
