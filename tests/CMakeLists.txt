@@ -74,6 +74,13 @@ target_link_libraries(test_flute_host PRIVATE purrmidi_synth_flute)
 target_compile_features(test_flute_host PRIVATE cxx_std_17)
 add_test(NAME test_flute_host COMMAND test_flute_host)
 
+add_executable(test_saxophone_host
+    test_saxophone_host.cpp
+)
+target_link_libraries(test_saxophone_host PRIVATE purrmidi_synth_saxophone)
+target_compile_features(test_saxophone_host PRIVATE cxx_std_17)
+add_test(NAME test_saxophone_host COMMAND test_saxophone_host)
+
 add_executable(test_queue_dispatch
     test_queue_dispatch.cpp
 )

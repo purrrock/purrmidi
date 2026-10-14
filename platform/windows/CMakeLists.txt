@@ -140,7 +140,17 @@ target_include_directories(purrmidi_synth_flute PUBLIC
 )
 target_compile_features(purrmidi_synth_flute PUBLIC cxx_std_17)
 
-foreach(_synth sine pluck lead epiano organ soundfont dulcimer flute)
+# saxophone: полифонический физический модулятор саксофона (STK Single Reed)
+add_library(purrmidi_synth_saxophone STATIC
+    "${CMAKE_SOURCE_DIR}/Engine/synth/saxophone_synth.cpp"
+)
+target_include_directories(purrmidi_synth_saxophone PUBLIC
+    "${CMAKE_SOURCE_DIR}/Core/Inc"
+    "${CMAKE_SOURCE_DIR}/Engine/synth"
+)
+target_compile_features(purrmidi_synth_saxophone PUBLIC cxx_std_17)
+
+foreach(_synth sine pluck lead epiano organ soundfont dulcimer flute saxophone)
     if(MSVC)
         target_compile_options(purrmidi_synth_${_synth} PRIVATE /utf-8 /W4)
     else()
@@ -176,6 +186,7 @@ target_link_libraries(purrmidi_core PUBLIC
     purrmidi_synth_soundfont
     purrmidi_synth_dulcimer
     purrmidi_synth_flute
+    purrmidi_synth_saxophone
 )
 target_compile_features(purrmidi_core PUBLIC c_std_11 cxx_std_17)
 
