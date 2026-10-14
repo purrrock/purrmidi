@@ -193,6 +193,46 @@ static void TestOctaveKeys() {
     std::cout << "[PASS] TestOctaveKeys\n";
 }
 
+static void TestFocusLossAndAllNotesOff() {
+    VirtualKeyboard vk;
+    std::vector<MIDI_Event_t> events;
+    vk.SetEventCallback([&](const MIDI_Event_t& ev) {
+        events.push_back(ev);
+    });
+
+    vk.SetBaseOctave(4);
+
+    // Press Z and X
+    vk.HandleKeyDown(0x5A, 0x2C); // Z -> C4 (60)
+    vk.HandleKeyDown(0x58, 0x2D); // X -> D4 (62)
+    assert(events.size() == 2);
+    assert(vk.GetActiveNotesCount() == 2);
+
+    // Focus lost -> AllNotesOff()
+    vk.AllNotesOff();
+    assert(events.size() == 4); // Should emit 2 Note Offs
+    assert((events[2].status & MIDI_STATUS_MASK) == MIDI_STATUS_NOTE_OFF);
+    assert((events[3].status & MIDI_STATUS_MASK) == MIDI_STATUS_NOTE_OFF);
+    assert(vk.GetActiveNotesCount() == 0);
+
+    // Release keys that were cleared during focus loss -> should NOT emit extra Note Offs
+    vk.HandleKeyUp(0x5A, 0x2C);
+    vk.HandleKeyUp(0x58, 0x2D);
+    assert(events.size() == 4);
+
+    // Press Z again after focus restored -> should emit Note On 60
+    vk.HandleKeyDown(0x5A, 0x2C);
+    assert(events.size() == 5);
+    assert((events[4].status & MIDI_STATUS_MASK) == MIDI_STATUS_NOTE_ON);
+    assert(events[4].data1 == 60);
+
+    vk.HandleKeyUp(0x5A, 0x2C);
+    assert(events.size() == 6);
+    assert((events[5].status & MIDI_STATUS_MASK) == MIDI_STATUS_NOTE_OFF);
+
+    std::cout << "[PASS] TestFocusLossAndAllNotesOff\n";
+}
+
 int main() {
     TestNoteOnNoteOff();
     TestAutoRepeatSuppression();
@@ -201,6 +241,7 @@ int main() {
     TestDuplicateReleaseSafety();
     TestTabProgramChange();
     TestOctaveKeys();
+    TestFocusLossAndAllNotesOff();
 
     std::cout << "All VirtualKeyboard host tests passed successfully!\n";
     return 0;
