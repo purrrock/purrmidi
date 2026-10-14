@@ -215,7 +215,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Middlewares/Third_Party/bfreeOrgan2
     Middlewares/Third_Party/bfreeOrgan2/components
     Middlewares/Third_Party/TinySoundFont
-
+    Middlewares/Third_Party/eurorack
     Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735
 )
 
