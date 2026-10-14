@@ -229,11 +229,9 @@ int main(int argc, char* argv[]) {
 
     if (config.mode == AppConfig::Mode::Default) {
         if (midi_ports.empty()) {
-            std::cout << "No MIDI input ports available.\n";
-            DoList();
-            return 1;
-        }
-        if (midi_ports.size() == 1) {
+            config.mode = AppConfig::Mode::Play;
+            config.midi_port = -1;
+        } else if (midi_ports.size() == 1) {
             config.midi_port = 0;
             config.mode = AppConfig::Mode::Play;
             std::cout << "Auto-selected single MIDI port: [" << midi_ports[0].index << "] " << midi_ports[0].name << "\n";
@@ -256,7 +254,6 @@ int main(int argc, char* argv[]) {
         } else {
             config.midi_port = 0;
         }
-        config.midi_port = 0;
     }
     if (config.midi_port >= 0 &&
         static_cast<size_t>(config.midi_port) >= midi_ports.size()) {
