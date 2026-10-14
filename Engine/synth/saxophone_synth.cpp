@@ -22,7 +22,8 @@
 #define SAXOPHONE_DEFAULT_VIBRATO_DEP 0.02f
 #define SAXOPHONE_DEFAULT_VIBRATO_FREQ 5.2f
 #define SAXOPHONE_DEFAULT_REED_OFFSET 0.70f
-#define SAXOPHONE_DEFAULT_REED_SLOPE  -0.30f
+// #define SAXOPHONE_DEFAULT_REED_SLOPE  -0.30f
+#define SAXOPHONE_DEFAULT_REED_SLOPE  -0.65f
 #define SAXOPHONE_DEFAULT_DAMPING     0.30f
 #define SAXOPHONE_DEFAULT_ATTACK      0.025f
 #define SAXOPHONE_DEFAULT_RELEASE     0.180f
@@ -250,7 +251,8 @@ void SaxophoneSynth_Init(void) {
         v.prng_state = 0x12345678 + i * 0x1000;
 
         v.target_freq = 440.0f;
-        v.bore_length = (SAXOPHONE_SAMPLE_RATE / (2.0f * 440.0f)) - 1.0f;
+        //v.bore_length = (SAXOPHONE_SAMPLE_RATE / (2.0f * 440.0f)) - 1.0f;
+		v.bore_length = (SAXOPHONE_SAMPLE_RATE / 440.0f) - 2.0f;
         v.velocity_gain = 1.0f;
 
         v.breath_env = 0.0f;
@@ -486,9 +488,10 @@ static float SaxophoneSynth_NextFloatSample(void) {
 
             SaxophoneVoice& v = voices[target_voice];
             v.target_freq = event.freq;
-            v.bore_length = (SAXOPHONE_SAMPLE_RATE / (2.0f * event.freq)) - 1.0f;
+            //v.bore_length = (SAXOPHONE_SAMPLE_RATE / (2.0f * event.freq)) - 1.0f;
+			v.bore_length = (SAXOPHONE_SAMPLE_RATE / event.freq) - 2.0f;
             v.velocity_gain = event.velocity_gain;
-            v.trigger_age = ++global_trigger_counter;
+            v.trigger_age = ++glo bal_trigger_counter;
 
             if (is_retrigger) {
                 if (v.press_count < 255) v.press_count++;
