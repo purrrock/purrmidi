@@ -119,6 +119,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Engine/synth/tinysoundfont_impl.cpp
     Engine/synth/synth.c
     Core/Src/dulcimer_synth.cpp
+    Engine/synth/flute_synth.cpp
 
     Middlewares/Third_Party/eurorack/elements/dsp/resonator.cc
     Middlewares/Third_Party/eurorack/elements/dsp/exciter.cc
@@ -168,6 +169,7 @@ set(PURRMIDI_AUDIO_HOT_SOURCES
     Engine/synth/tinysoundfont_impl.cpp
     Engine/synth/synth.c
     Core/Src/dulcimer_synth.cpp
+    Engine/synth/flute_synth.cpp
 
     Middlewares/Third_Party/eurorack/elements/dsp/resonator.cc
     Middlewares/Third_Party/eurorack/elements/dsp/exciter.cc

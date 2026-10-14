@@ -67,6 +67,13 @@ target_link_libraries(test_dulcimer_host PRIVATE purrmidi_synth_dulcimer)
 target_compile_features(test_dulcimer_host PRIVATE cxx_std_17)
 add_test(NAME test_dulcimer_host COMMAND test_dulcimer_host)
 
+add_executable(test_flute_host
+    test_flute_host.cpp
+)
+target_link_libraries(test_flute_host PRIVATE purrmidi_synth_flute)
+target_compile_features(test_flute_host PRIVATE cxx_std_17)
+add_test(NAME test_flute_host COMMAND test_flute_host)
+
 add_executable(test_queue_dispatch
     test_queue_dispatch.cpp
 )
