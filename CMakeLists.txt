@@ -112,7 +112,6 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Engine/synth/epiano_synth.cpp
     Engine/synth/lead_synth.cpp
     Engine/synth/organ_synth.cpp
-    Engine/synth/organ_profile.cpp
     Engine/synth/pluck_synth.cpp
     Engine/synth/sine_synth.c
     Engine/synth/soundfont_synth.cpp
@@ -181,8 +180,18 @@ set(PURRMIDI_AUDIO_HOT_SOURCES
     Middlewares/Third_Party/bfreeOrgan2/components/env_ar.cpp
     Middlewares/Third_Party/bfreeOrgan2/components/env_click.cpp
 )
+# Debug (-O0) делает аудио-код в 3-5 раз медленнее: на Cortex-M7 один голос SoundFont в Debug стоит ~100 мкс на блок
+# из 128 кадров (-O2 - в разы меньше), поэтому горячие файлы по умолчанию собираются с -O2 и в Debug
+# (отладочная информация -g3 остаётся). Отключить: -DPURRMIDI_HOT_OPT_IN_DEBUG=OFF.
+option(PURRMIDI_HOT_OPT_IN_DEBUG "Compile audio hot sources with -O2 also in Debug builds" ON)
+if(PURRMIDI_HOT_OPT_IN_DEBUG)
+    set(PURRMIDI_HOT_OPT "-O2")
+else()
+    set(PURRMIDI_HOT_OPT "$<$<CONFIG:Release>:-O2>")
+endif()
 set_source_files_properties(${PURRMIDI_AUDIO_HOT_SOURCES}
-    PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Release>:-O2>")
+    Platform/qspi_xip/pm_crc32.c
+    PROPERTIES COMPILE_OPTIONS "${PURRMIDI_HOT_OPT}")
 
 set_source_files_properties(
     Middlewares/Third_Party/eurorack/elements/dsp/resonator.cc
@@ -222,6 +231,7 @@ if(NOT PURRMIDI_FORCE_SD_CACHE
         Platform/qspi_xip/sf2_loader.c
         Platform/qspi_xip/qspi_flash.c
         Platform/qspi_xip/xip_mpu.c
+        Platform/qspi_xip/xip_diag.c
     )
     target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE PURRMIDI_SF2_XIP)
 else()

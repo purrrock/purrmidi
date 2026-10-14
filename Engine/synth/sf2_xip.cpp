@@ -86,7 +86,6 @@ bool SF2Cache_IsFileOpen(void)
 
 void SF2Cache_Reset(void) {}
 void SF2Cache_BeginAudioBlock(void) {}
-void SF2Cache_ResetProfile(void) {}
 void SF2Cache_ProcessRequests(void) {}
 void SF2Cache_RequestBlock(uint32_t) {}
 void SF2Cache_ResetStats(void) {}
@@ -94,11 +93,6 @@ void SF2Cache_ResetStats(void) {}
 bool SF2Cache_PreloadBlock(uint32_t)
 {
     return true;   /* XIP: данные всегда "на месте" */
-}
-
-void SF2Cache_GetProfile(SF2Profile *out)
-{
-    if (out) std::memset(out, 0, sizeof(*out));
 }
 
 void SF2Cache_GetStats(SF2CacheStats *out)

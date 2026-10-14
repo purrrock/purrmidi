@@ -1,7 +1,8 @@
 /**
  * Хост-тест XIP-бэкенда SoundFont (Engine/synth/sf2_xip.cpp): банк берётся из памяти (имитация окна
  * 0x90000000), TinySoundFont парсит метаданные через tsf_stream поверх памяти и читает PCM по указателю.
- * Тест запускается из корня репозитория; без tests/SNDFNT.SF2 проверки с реальным банком пропускаются.
+ * Тест запускается из корня репозитория (банк SoundFonts/Yamaha S90ES lite.SF2 или PURRMIDI_TEST_SF2);
+ * без банка проверки пропускаются.
  * Режим "--hash" печатает хеш выхода: тот же рендер на файловом бэкенде (sf2_cache.cpp) даёт тот же хеш.
  */
 #include "sf2_cache.h"
@@ -9,6 +10,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -29,7 +31,10 @@ static SF2L_Report g_report;
 extern "C" bool SF2Loader_Ensure(void)
 {
     if (!g_flash.empty()) return true;
-    FILE *f = std::fopen("tests/SNDFNT.SF2", "rb");
+    const char *env = std::getenv("PURRMIDI_TEST_SF2");
+    FILE *f = env ? std::fopen(env, "rb") : nullptr;
+    if (!f) f = std::fopen("SoundFonts/Yamaha S90ES lite.SF2", "rb");   /* банк из репозитория (7,4 МБ) */
+    if (!f) f = std::fopen("tests/SNDFNT.SF2", "rb");
     if (!f) return false;
     std::fseek(f, 0, SEEK_END);
     long n = std::ftell(f);
@@ -60,9 +65,10 @@ static uint64_t fnv(uint64_t h, const int16_t *p, size_t n)
 int main(int argc, char **argv)
 {
     const bool hash_mode = (argc > 1 && std::strcmp(argv[1], "--hash") == 0);
+    const bool chords_verbose = (argc > 1 && std::strcmp(argv[1], "--chords") == 0);
 
     if (!SoundFontSynth_InitSF2()) {
-        std::puts("test_sf2_xip_host: tests/SNDFNT.SF2 not available, skipped");
+        std::puts("test_sf2_xip_host: no test SoundFont available, skipped");
         return 0;
     }
     CHECK(SoundFontSynth_IsLoaded());
@@ -87,6 +93,38 @@ int main(int argc, char **argv)
     SF2CacheStats st;
     SF2Cache_GetStats(&st);
     CHECK(st.miss_samples == 0);
+
+    /* Аккорды разной плотности: статистика рендера ([SF2] 1s: ...) и защита от жёсткого клиппинга. */
+    {
+        static const uint8_t notes[] = { 48, 52, 55, 60, 64, 67, 72, 76, 79, 84 };
+        static const int counts[] = { 1, 3, 6, 10 };
+        uint32_t now_ms = 10000;
+        uint32_t hard_clipped = 0;
+        for (int vel : { 100, 127 }) {
+            for (int n : counts) {
+                SoundFontSynth_Init();
+                for (int b = 0; b < 8; ++b) SoundFontSynth_FillStereoBuffer(buf.data(), 128);   /* хвосты прошлого аккорда */
+                SoundFontSynth_ResetStats();
+                for (int k = 0; k < n; ++k) SoundFontSynth_NoteOn(notes[k], (uint8_t)vel);
+                for (int b = 0; b < 40; ++b) {
+                    SoundFontSynth_FillStereoBuffer(buf.data(), 128);
+                    for (int i = 0; i < 256; ++i) {
+                        const int a = buf[i] < 0 ? -buf[i] : buf[i];
+                        if (a >= 32767) ++hard_clipped;
+                    }
+                }
+                if (chords_verbose) {
+                    std::fprintf(stderr, "[chord vel=%d n=%d] ", vel, n);
+                    now_ms += 1000;
+                    SoundFontSynth_ReportStats(now_ms);
+                }
+            }
+        }
+#if SF2_SOFT_LIMITER
+        CHECK(hard_clipped == 0);   /* с лимитером выход не упирается в полную шкалу даже при 10 нотах на velocity 127 */
+#endif
+        (void)hard_clipped;
+    }
 
     if (hash_mode) std::printf("hash=%016llx peak=%d\n", (unsigned long long)h, peak);
     if (g_failures) { std::fprintf(stderr, "%d check(s) FAILED\n", g_failures); return 1; }
