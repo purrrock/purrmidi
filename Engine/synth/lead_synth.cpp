@@ -16,7 +16,6 @@ using namespace daisysp;
 #define LEAD_MASTER_GAIN          0.50f   // Запас по динамическому диапазону для 8 голосов
 #define EVENT_FIFO_SIZE           32      // Емкость кольцевого FIFO буфера
 #define NOTE_ON_FIFO_LIMIT        28      // Порог резервирования слотов для Note Off и CC64
-#define LEAD_OUTPUT_SCALE         (LEAD_MASTER_GAIN * 32767.0f)
 
 // Диапазоны частот и генерации
 #define LEAD_MIN_FREQ             20.0f
@@ -51,6 +50,25 @@ using namespace daisysp;
 #define LEAD_FILTER_DECAY_OFFSET  0.050f
 #define LEAD_FILTER_SUSTAIN_SCALE 0.700f
 
+// Обновление коэффициентов фильтра с пониженной частотой (control rate).
+// Svf::SetFreq()/SetRes() внутри считают sinf() и powf(): вызывать их на каждый сэмпл для каждого голоса
+// слишком дорого для ISR (8 голосов x 48 кГц). Период должен быть степенью двойки.
+#define LEAD_CTRL_RATE            8
+#define LEAD_CUTOFF_EPS           0.25f   // Гц: изменение среза меньше этого порога не пересчитывается
+
+// Динамика суммы голосов.
+// Нормировка 1/sqrt(N): некоррелированные голоса складываются по мощности, поэтому громкость аккорда
+// остаётся близкой к громкости одной ноты. Коэффициент меняется плавно (быстро вниз, медленно вверх),
+// иначе при каждом включении/окончании голоса весь микс скачком меняет уровень (щелчки, «пампинг»).
+#define LEAD_GAIN_FALL_SEC        0.005f
+#define LEAD_GAIN_RISE_SEC        0.150f
+
+// Мягкий ограничитель на выходе вместо жёсткого среза int16: ниже порога (колена) сигнал не затрагивается,
+// выше — плавно (tanh) приближается к потолку. Потолок чуть ниже полной шкалы, поэтому выход
+// никогда не упирается в +-32767, даже при редких экстремальных пиках (резонанс + октавные голоса).
+#define LEAD_LIMIT_KNEE           0.80f
+#define LEAD_LIMIT_CEIL           0.98f
+
 enum LeadEventType : uint8_t {
     EVENT_NOTE_ON,
     EVENT_NOTE_OFF,
@@ -75,6 +93,8 @@ struct LeadVoice {
     uint32_t trigger_age{0};
     uint8_t press_count{0};
     float velocity_gain{1.0f};
+    float applied_cutoff{-1.0f}; // последняя частота среза, отправленная в Svf (-1 = принудительно обновить)
+    float applied_res{-1.0f};    // последнее значение резонанса, отправленное в Svf
     bool gate{false};
     bool sustain_held{false};
 };
@@ -87,6 +107,16 @@ static LeadVoice voices[LEAD_VOICES];
 #endif
 
 static uint32_t global_trigger_counter = 0;
+static uint32_t ctrl_counter = 0;         // счётчик сэмплов для control rate
+static float    mix_norm_gain = 1.0f;     // сглаженная нормировка суммы голосов (только аудио-контекст)
+
+static float    mix_gain_fall_coef = 0.0f; // коэффициенты однополюсного сглаживания, считаются в Init()
+static float    mix_gain_rise_coef = 0.0f;
+
+// 1/sqrt(N) для N = 0..LEAD_VOICES (N = 0 трактуется как 1)
+static const float kVoiceNorm[LEAD_VOICES + 1] = {
+    1.0f, 1.0f, 0.70710678f, 0.57735027f, 0.5f, 0.44721360f, 0.40824829f, 0.37796447f, 0.35355339f
+};
 
 // Параметры субтрактивного синтезатора (управляются через MIDI CC)
 static std::atomic<float> filter_cutoff_base{LEAD_DEFAULT_CUTOFF};
@@ -121,6 +151,14 @@ static inline float clamp_f(float val, float min_val, float max_val) {
     if (val < min_val) return min_val;
     if (val > max_val) return max_val;
     return val;
+}
+
+static inline float soft_limit(float x) {
+    const float a = fabsf(x);
+    if (a <= LEAD_LIMIT_KNEE) return x;
+    const float room = LEAD_LIMIT_CEIL - LEAD_LIMIT_KNEE;
+    const float y = LEAD_LIMIT_KNEE + room * tanhf((a - LEAD_LIMIT_KNEE) / room);
+    return (x < 0.0f) ? -y : y;
 }
 
 static bool event_fifo_push_note_on(const LeadEvent& event) {
@@ -165,6 +203,10 @@ static bool event_fifo_pop(LeadEvent& event) {
 
 void LeadSynth_Init(void) {
     global_trigger_counter = 0;
+    ctrl_counter = 0;
+    mix_norm_gain = 1.0f;
+    mix_gain_fall_coef = 1.0f - expf(-1.0f / (LEAD_GAIN_FALL_SEC * LEAD_SAMPLE_RATE));
+    mix_gain_rise_coef = 1.0f - expf(-1.0f / (LEAD_GAIN_RISE_SEC * LEAD_SAMPLE_RATE));
     audio_sustain_pedal = false;
 
     filter_cutoff_base.store(LEAD_DEFAULT_CUTOFF, std::memory_order_relaxed);
@@ -202,6 +244,8 @@ void LeadSynth_Init(void) {
         v.trigger_age = 0;
         v.press_count = 0;
         v.velocity_gain = 1.0f;
+        v.applied_cutoff = -1.0f;
+        v.applied_res = -1.0f;
         v.gate = false;
         v.sustain_held = false;
     }
@@ -449,7 +493,20 @@ static int16_t LeadSynth_NextSample(void) {
             v.filter_env.SetSustainLevel(sus * LEAD_FILTER_SUSTAIN_SCALE);
             v.filter_env.SetReleaseTime(rel);
             v.filter_env.Retrigger(hard_retrigger);
-            v.filter_env.Process(true);
+            const float f_env_start = v.filter_env.Process(true);
+
+            // Фильтр нового голоса настраиваем сразу (а не по ближайшему control-rate тику),
+            // иначе первые сэмплы ноты прошли бы через коэффициенты предыдущей ноты этого голоса.
+            {
+                const float res_now = filter_res.load(std::memory_order_relaxed);
+                float cutoff_now = filter_cutoff_base.load(std::memory_order_relaxed)
+                                 + f_env_start * filter_env_amount.load(std::memory_order_relaxed);
+                cutoff_now = clamp_f(cutoff_now, LEAD_MIN_CUTOFF, LEAD_MAX_CUTOFF);
+                v.filter.SetRes(res_now);
+                v.filter.SetFreq(cutoff_now);
+                v.applied_res = res_now;
+                v.applied_cutoff = cutoff_now;
+            }
 
             v.voice_state.store((int32_t)event.param1, std::memory_order_release);
 
@@ -487,9 +544,11 @@ static int16_t LeadSynth_NextSample(void) {
     float mix_sum_f = 0.0f;
     uint32_t active_voices_count = 0;
 
-    float base_cutoff = filter_cutoff_base.load(std::memory_order_relaxed);
-    float res_val     = filter_res.load(std::memory_order_relaxed);
-    float env_amt     = filter_env_amount.load(std::memory_order_relaxed);
+    const bool ctrl_tick = ((ctrl_counter++ & (LEAD_CTRL_RATE - 1U)) == 0U);
+
+    const float base_cutoff = filter_cutoff_base.load(std::memory_order_relaxed);
+    const float res_val     = filter_res.load(std::memory_order_relaxed);
+    const float env_amt     = filter_env_amount.load(std::memory_order_relaxed);
 
     for (int i = 0; i < LEAD_VOICES; i++) {
         LeadVoice& v = voices[i];
@@ -509,12 +568,23 @@ static int16_t LeadSynth_NextSample(void) {
 
             float raw_osc = v.osc.Process();
 
-            // Динамическая модуляция частоты среза LPF огибающей
-            float cutoff = base_cutoff + f_env_val * env_amt;
-            cutoff = clamp_f(cutoff, LEAD_MIN_CUTOFF, LEAD_MAX_CUTOFF);
+            // Динамическая модуляция частоты среза LPF огибающей (control rate, без sinf/powf на каждый сэмпл)
+            if (ctrl_tick) {
+                float cutoff = base_cutoff + f_env_val * env_amt;
+                cutoff = clamp_f(cutoff, LEAD_MIN_CUTOFF, LEAD_MAX_CUTOFF);
 
-            v.filter.SetRes(res_val);
-            v.filter.SetFreq(cutoff);
+                bool need_freq = fabsf(cutoff - v.applied_cutoff) > LEAD_CUTOFF_EPS;
+                if (v.applied_res != res_val) {
+                    v.filter.SetRes(res_val);
+                    v.applied_res = res_val;
+                    need_freq = true; // SetFreq() пересчитывает демпфирование с новым резонансом
+                }
+                if (need_freq) {
+                    v.filter.SetFreq(cutoff);
+                    v.applied_cutoff = cutoff;
+                }
+            }
+
             v.filter.Process(raw_osc);
 
             float filtered_sample = v.filter.Low();
@@ -525,20 +595,15 @@ static int16_t LeadSynth_NextSample(void) {
         }
     }
 
-    float norm_gain = 1.0f;
-    if (active_voices_count > 1) {
-        norm_gain = 1.0f / (1.0f + 0.35f * (float)(active_voices_count - 1));
-    }
+    // Плавная нормировка по числу звучащих голосов (см. LEAD_GAIN_*)
+    const float target_gain = kVoiceNorm[active_voices_count];
+    const float gain_coef = (target_gain < mix_norm_gain) ? mix_gain_fall_coef : mix_gain_rise_coef;
+    mix_norm_gain += gain_coef * (target_gain - mix_norm_gain);
 
-    float output_sample_f = mix_sum_f * norm_gain * LEAD_OUTPUT_SCALE;
+    // 1.0 = полная шкала int16. Мягкий ограничитель гарантирует |y| <= LEAD_LIMIT_CEIL без жёсткого среза.
+    const float output_sample_f = soft_limit(mix_sum_f * mix_norm_gain * LEAD_MASTER_GAIN);
 
-    if (output_sample_f > 32767.0f) {
-        output_sample_f = 32767.0f;
-    } else if (output_sample_f < -32768.0f) {
-        output_sample_f = -32768.0f;
-    }
-
-    return (int16_t)output_sample_f;
+    return (int16_t)(output_sample_f * 32767.0f);
 }
 
 void LeadSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames) {

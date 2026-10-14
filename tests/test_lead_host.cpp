@@ -468,6 +468,79 @@ void test_reinit_state_reset() {
     std::cout << "Verified: LeadSynth_Init restores clean state.\n";
 }
 
+// Аккорды не должны упираться в жёсткий срез int16 (раньше триада с velocity >= 100 доходила до +-32767).
+void test_chords_do_not_hard_clip() {
+    const std::vector<std::vector<uint8_t>> chords = {
+        {60, 64, 67},
+        {60, 64, 67, 71},
+        {48, 60, 64, 67, 72},
+        {36, 48, 55, 60, 64, 67, 72, 76},
+    };
+    const uint8_t resonance_cc[] = {45, 100}; // по умолчанию и повышенный резонанс
+
+    for (uint8_t res_cc : resonance_cc) {
+        for (const auto& chord : chords) {
+            LeadSynth_Init();
+            LeadSynth_ControlChange(71, res_cc);
+            for (uint8_t n : chord) LeadSynth_NoteOn(n, 127);
+
+            std::vector<int16_t> buf(48000 * 2, 0);
+            LeadSynth_FillStereoBuffer(buf.data(), 48000);
+
+            int rail_hits = 0;
+            int peak = 0;
+            for (size_t i = 0; i < 48000; ++i) {
+                int s = buf[i * 2];
+                if (s >= 32767 || s <= -32767) rail_hits++;
+                if (std::abs(s) > peak) peak = std::abs(s);
+            }
+            if (rail_hits != 0) {
+                std::cout << "Hard clipping: notes=" << chord.size() << " resCC=" << (int)res_cc
+                          << " rail_hits=" << rail_hits << " peak=" << peak << "\n";
+            }
+            assert(rail_hits == 0);
+            assert(peak > 4000); // и при этом не тишина
+        }
+    }
+    std::cout << "Verified: chords stay below full scale without hard clipping.\n";
+}
+
+// Когда голос заканчивает release и число звучащих голосов меняется, остальные голоса не должны
+// получать скачок уровня (раньше нормировка 1/(1+0.35(N-1)) менялась мгновенно -> щелчок).
+void test_no_level_step_when_voice_count_changes() {
+    LeadSynth_Init();
+    LeadSynth_ControlChange(74, 8);  // низкий срез: сигнал почти синусоидальный, ступеньки хорошо видны
+    LeadSynth_ControlChange(1, 0);   // без модуляции среза огибающей
+    LeadSynth_ControlChange(72, 0);  // короткий release (~20 мс)
+    LeadSynth_ControlChange(71, 0);
+
+    std::vector<int16_t> b(48000 * 2, 0);
+    auto fill = [&](long from, long to) { LeadSynth_FillStereoBuffer(b.data() + from * 2, to - from); };
+
+    LeadSynth_NoteOn(60, 100);
+    LeadSynth_NoteOn(67, 100);
+    fill(0, 14400);                  // 0.30 с: два голоса
+    LeadSynth_NoteOn(64, 100);
+    fill(14400, 28800);              // до 0.60 с: три голоса
+    LeadSynth_NoteOff(64);
+    fill(28800, 48000);              // release третьего голоса, затем снова два
+
+    auto max_d2 = [&](long from, long to) {
+        double m = 0;
+        for (long i = from + 2; i < to; ++i) {
+            double d = std::abs((double)b[i * 2] - 2.0 * b[(i - 1) * 2] + b[(i - 2) * 2]);
+            if (d > m) m = d;
+        }
+        return m;
+    };
+
+    const double steady = max_d2(38400, 48000);      // 0.8..1.0 с: два голоса, всё установилось
+    const double around_end = max_d2(28800, 38400);  // 0.6..0.8 с: окончание release третьего голоса
+    std::cout << "d2 steady=" << steady << " d2 around voice end=" << around_end << "\n";
+    assert(around_end < steady * 1.5);
+    std::cout << "Verified: no level step when a voice ends.\n";
+}
+
 int main() {
     test_lead_render_and_note_off();
     test_noteon_velocity_zero_regression();
@@ -480,6 +553,8 @@ int main() {
     test_envelope_retrigger_on_voice_stealing();
     test_polyphony_chords_and_controls();
     test_reinit_state_reset();
+    test_chords_do_not_hard_clip();
+    test_no_level_step_when_voice_count_changes();
     std::cout << "test_lead_host passed successfully." << std::endl;
     return 0;
 }

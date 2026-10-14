@@ -31,7 +31,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
-#include "synth_engine.h" /* Синтезаторы epiano / pluck / sine / organ / soundfont */
+#include "synth_engine.h" /* Синтезаторы epiano / pluck / lead / organ / soundfont */
 #include "display.h"
 #include "midi_event.h"
 #include "midi_queue.h"
@@ -255,7 +255,7 @@ static void Print_USB_Diag(uint32_t max_loop_dt)
 /* Названия инструментов для дисплея (только ASCII, до 17 символов). Порядок = SynthEngineId. */
 static const char * const display_patch_names[SYNTH_ENGINE_COUNT] =
 {
-    "E-Piano", "Pluck", "Sine", "Organ", "SoundFont"
+    "E-Piano", "Pluck", "Lead", "Organ", "SoundFont"
 };
 
 /* Номер на дисплее 1-based (как на большинстве клавиатур): Program Change 0 -> "01" */

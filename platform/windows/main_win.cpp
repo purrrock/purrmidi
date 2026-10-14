@@ -292,7 +292,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         std::cout << "Synth engine: " << SynthEngine_GetName()
-                  << " (Program Change: 0=epiano, 1=pluck, 2=sine, 3=organ, 4=soundfont, 127=next engine)\n";
+                  << " (Program Change: 0=epiano, 1=pluck, 2=lead, 3=organ, 4=soundfont, 127=next engine)\n";
         std::cout << "Synth player running. Press ENTER or Ctrl+C to stop...\n";
     } else {
         std::cout << "MIDI Monitor running. Press ENTER or Ctrl+C to stop...\n";

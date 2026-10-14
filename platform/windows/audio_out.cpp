@@ -26,7 +26,7 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput,
     AudioCallbackData* cb_data = static_cast<AudioCallbackData*>(pDevice->pUserData);
     int16_t* out = static_cast<int16_t*>(pOutput);
 
-    // Рендер через выбранный при компиляции синтезатор (sine / pluck / epiano)
+    // Рендер через выбранный при компиляции синтезатор (epiano / pluck / lead / organ / soundfont)
     SynthEngine_FillStereoBuffer(out, frameCount);
 
     // Apply gain if not 1.0f

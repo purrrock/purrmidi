@@ -8,7 +8,7 @@ endif()
 
 option(PURRMIDI_BUILD_TESTS "Build host unit tests" ON)
 
-# Все синтезаторы (epiano / pluck / sine / organ / soundfont) входят в сборку; активный
+# Все синтезаторы (epiano / pluck / lead / organ / soundfont) входят в сборку; активный
 # выбирается во время работы сообщением MIDI Program Change (см. Core/Inc/synth_engine.h).
 set(DAISYSP_DIR "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/DaisySP")
 if(NOT EXISTS "${DAISYSP_DIR}/Source")
