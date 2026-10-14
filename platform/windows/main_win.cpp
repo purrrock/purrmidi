@@ -17,6 +17,7 @@
 #include "midi_decode.h"
 #include "audio_out.h"
 #include "wav_recorder.h"
+#include "virtual_keyboard.h"
 #include "synth_engine.h"
 #include "midi_dispatch.h"
 #include "soundfont_synth.h"
@@ -70,6 +71,8 @@ struct AppConfig {
     std::string wav_filename;
     uint32_t wav_seconds{120};
     bool verbose{false};
+    int octave{4};
+    uint8_t velocity{100};
 };
 
 static void PrintUsage(const char* prog_name) {
@@ -80,6 +83,8 @@ static void PrintUsage(const char* prog_name) {
               << "  --monitor                   MIDI monitor mode (no audio output)\n"
               << "  --play                      Synthesizer player mode (audio output enabled)\n"
               << "  --midi-port N               MIDI input port index\n"
+              << "  --octave N                  Base octave for virtual keyboard (0..8, default: 4)\n"
+              << "  --velocity V                Note On velocity for virtual keyboard (1..127, default: 100)\n"
               << "  --show-realtime             Show MIDI realtime messages (Clock 0xF8, ActiveSensing 0xFE)\n"
               << "  --buffer-frames N           Audio buffer period size in frames (default: 256)\n"
               << "  --gain G                    Output audio gain factor (default: 1.0)\n"
@@ -103,6 +108,34 @@ static bool ParseArgs(int argc, char* argv[], AppConfig& config) {
                 config.midi_port = std::atoi(argv[++i]);
             } else {
                 std::cerr << "Error: --midi-port requires an index argument." << std::endl;
+                return false;
+            }
+        } else if (arg == "--octave") {
+            if (i + 1 < argc) {
+                char* endptr = nullptr;
+                const char* val_str = argv[++i];
+                long val = std::strtol(val_str, &endptr, 10);
+                if (*endptr != '\0' || endptr == val_str || val < 0 || val > 8) {
+                    std::cerr << "Error: --octave requires an integer argument in range 0..8." << std::endl;
+                    return false;
+                }
+                config.octave = static_cast<int>(val);
+            } else {
+                std::cerr << "Error: --octave requires an integer argument (0..8)." << std::endl;
+                return false;
+            }
+        } else if (arg == "--velocity") {
+            if (i + 1 < argc) {
+                char* endptr = nullptr;
+                const char* val_str = argv[++i];
+                long val = std::strtol(val_str, &endptr, 10);
+                if (*endptr != '\0' || endptr == val_str || val < 1 || val > 127) {
+                    std::cerr << "Error: --velocity requires an integer argument in range 1..127." << std::endl;
+                    return false;
+                }
+                config.velocity = static_cast<uint8_t>(val);
+            } else {
+                std::cerr << "Error: --velocity requires a value argument (1..127)." << std::endl;
                 return false;
             }
         } else if (arg == "--show-realtime") {
@@ -228,6 +261,34 @@ int main(int argc, char* argv[]) {
     SynthEngine_Init();
     MIDI_Queue_Init();
 
+    VirtualKeyboard vk;
+    vk.SetBaseOctave(config.octave);
+    vk.SetVelocity(config.velocity);
+
+    vk.SetEventCallback([&](const MIDI_Event_t& ev) {
+        if (config.verbose) {
+            std::lock_guard<std::mutex> lock(g_console_mutex);
+            std::cout << "[VK] status=0x" << std::hex
+                      << static_cast<int>(ev.status)
+                      << std::dec
+                      << " data1=" << static_cast<int>(ev.data1)
+                      << " data2=" << static_cast<int>(ev.data2) << "\n";
+        }
+        MIDI_Dispatch(&ev);
+        if ((ev.status & MIDI_STATUS_MASK) == MIDI_STATUS_PROGRAM_CHANGE) {
+            std::lock_guard<std::mutex> lock(g_console_mutex);
+            std::cout << "[PC] program " << static_cast<int>(ev.data1)
+                      << " -> synth engine: " << SynthEngine_GetName();
+            if (config.verbose) {
+                std::cout << "; SoundFont loaded: "
+                          << (SoundFontSynth_IsLoaded() ? "yes" : "no")
+                          << "; SF2 file open: "
+                          << (SF2Cache_IsFileOpen() ? "yes" : "no");
+            }
+            std::cout << "\n";
+        }
+    });
+
     if (config.verbose) {
         std::cout << "[SF2] Host file lookup uses tests/SNDFNT.SF2, then "
                      "SNDFNT.SF2 relative to the current working directory.\n"
@@ -293,21 +354,28 @@ int main(int argc, char* argv[]) {
         }
         std::cout << "Synth engine: " << SynthEngine_GetName()
                   << " (Program Change: 0=epiano, 1=pluck, 2=lead, 3=organ, 4=soundfont, 127=next engine)\n";
-        std::cout << "Synth player running. Press ENTER or Ctrl+C to stop...\n";
+        std::cout << "Virtual Keyboard: Active (Base Octave: " << vk.GetBaseOctave()
+                  << ", Velocity: " << static_cast<int>(vk.GetVelocity()) << ")\n"
+                  << "  White keys: Z X C V B N M , . /\n"
+                  << "  Black keys: S D   G H J   L ;\n"
+                  << "  Control:    [ (octave down), ] (octave up), TAB (next synth)\n";
+        std::cout << "Synth player running. Press Ctrl+C to stop...\n";
     } else {
-        std::cout << "MIDI Monitor running. Press ENTER or Ctrl+C to stop...\n";
+        std::cout << "Virtual Keyboard: Active (Base Octave: " << vk.GetBaseOctave()
+                  << ", Velocity: " << static_cast<int>(vk.GetVelocity()) << ")\n"
+                  << "  White keys: Z X C V B N M , . /\n"
+                  << "  Black keys: S D   G H J   L ;\n"
+                  << "  Control:    [ (octave down), ] (octave up), TAB (next synth)\n";
+        std::cout << "MIDI Monitor running. Press Ctrl+C to stop...\n";
     }
-
-    std::thread stdin_thread([]() {
-        std::cin.get();
-        g_running.store(false);
-    });
 
     SF2CacheStats last_sf2_stats{};
     SF2Cache_ResetStats();
     auto last_sf2_report = std::chrono::steady_clock::now();
 
     while (g_running.load()) {
+        vk.Poll();
+
         MIDI_Event_t event;
         while (MIDI_Queue_Pop(&event)) {
             if (config.verbose) {
@@ -390,10 +458,6 @@ int main(int argc, char* argv[]) {
 
     uint32_t overruns = MIDI_Queue_GetOverrunCount();
     std::cout << "MIDI Queue overrun count: " << overruns << "\n";
-
-    if (stdin_thread.joinable()) {
-        stdin_thread.detach();
-    }
 
     return 0;
 }
