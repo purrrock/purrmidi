@@ -7,7 +7,8 @@
 // Константы конфигурации синтезатора флейты
 #define FLUTE_SAMPLE_RATE         48000.0f
 #define FLUTE_MASTER_GAIN         0.70f   // Запас по динамическому диапазону
-#define DELAY_BUFFER_SIZE         2048    // Емкость линий задержки (степень двойки)
+#define BORE_DELAY_SIZE           1024    // Емкость линии задержки ствола (степень двойки, мин. частота ~46.8 Гц)
+#define JET_DELAY_SIZE            512     // Емкость линии задержки струи (степень двойки)
 #define EVENT_FIFO_SIZE           32      // Емкость кольцевого FIFO буфера
 #define NOTE_ON_FIFO_LIMIT        28      // Порог резервирования слотов для критических событий
 
@@ -44,6 +45,7 @@ struct FluteEvent {
 };
 
 // Быстрая циклическая линия задержки с линейной интерполяцией
+template <size_t SIZE>
 class DelayLine {
 public:
     DelayLine() { Reset(); }
@@ -55,30 +57,30 @@ public:
 
     inline void Write(float sample) {
         buffer_[write_pos_] = sample;
-        write_pos_ = (write_pos_ + 1) & (DELAY_BUFFER_SIZE - 1);
+        write_pos_ = (write_pos_ + 1) & (SIZE - 1);
     }
 
     inline float Read(float delay_samples) const {
         if (delay_samples < 1.0f) delay_samples = 1.0f;
-        if (delay_samples > (float)(DELAY_BUFFER_SIZE - 2)) {
-            delay_samples = (float)(DELAY_BUFFER_SIZE - 2);
+        if (delay_samples > (float)(SIZE - 2)) {
+            delay_samples = (float)(SIZE - 2);
         }
 
         float read_pos = (float)write_pos_ - delay_samples;
         while (read_pos < 0.0f) {
-            read_pos += (float)DELAY_BUFFER_SIZE;
+            read_pos += (float)SIZE;
         }
 
         uint32_t i0 = (uint32_t)read_pos;
         float frac = read_pos - (float)i0;
-        uint32_t idx0 = i0 & (DELAY_BUFFER_SIZE - 1);
-        uint32_t idx1 = (idx0 + 1) & (DELAY_BUFFER_SIZE - 1);
+        uint32_t idx0 = i0 & (SIZE - 1);
+        uint32_t idx1 = (idx0 + 1) & (SIZE - 1);
 
         return buffer_[idx0] + frac * (buffer_[idx1] - buffer_[idx0]);
     }
 
 private:
-    float buffer_[DELAY_BUFFER_SIZE];
+    float buffer_[SIZE];
     uint32_t write_pos_{0};
 };
 
@@ -100,8 +102,8 @@ static inline float JetTable(float x) {
 }
 
 struct FluteVoice {
-    DelayLine bore_delay;
-    DelayLine jet_delay;
+    DelayLine<BORE_DELAY_SIZE> bore_delay;
+    DelayLine<JET_DELAY_SIZE> jet_delay;
 
     std::atomic<int32_t> voice_state{-1}; // -1 = свободен, 0..127 = номер ноты
     uint32_t trigger_age{0};
@@ -120,9 +122,9 @@ struct FluteVoice {
     bool sustain_held{false};
 };
 
-// Размещение буферов голосов в секции .dma_buffer на STM32H7
+// Размещение буферов голосов в секции .ram_d2 (D2 SRAM) на STM32H7 во избежание переполнения AXI SRAM
 #if defined(__GNUC__) && !defined(__EMSCRIPTEN__) && defined(__arm__)
-static FluteVoice voices[FLUTE_VOICES] __attribute__((section(".dma_buffer"), aligned(32)));
+static FluteVoice voices[FLUTE_VOICES] __attribute__((section(".ram_d2"), aligned(32)));
 #else
 static FluteVoice voices[FLUTE_VOICES];
 #endif
