@@ -491,7 +491,7 @@ static float SaxophoneSynth_NextFloatSample(void) {
             //v.bore_length = (SAXOPHONE_SAMPLE_RATE / (2.0f * event.freq)) - 1.0f;
 			v.bore_length = (SAXOPHONE_SAMPLE_RATE / event.freq) - 2.0f;
             v.velocity_gain = event.velocity_gain;
-            v.trigger_age = ++glo bal_trigger_counter;
+            v.trigger_age = ++global_trigger_counter;
 
             if (is_retrigger) {
                 if (v.press_count < 255) v.press_count++;
