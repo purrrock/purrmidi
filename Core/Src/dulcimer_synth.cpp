@@ -10,7 +10,7 @@
 #include <algorithm>
 
 #define DULCIMER_SAMPLE_RATE     48000.0f
-#define DULCIMER_VOICES          8
+#define DULCIMER_VOICES          4
 #define DULCIMER_MAX_MODES       24
 #define DULCIMER_BLOCK_SIZE      16
 #define EVENT_FIFO_SIZE          32
@@ -44,8 +44,9 @@ struct DulcimerVoice {
     bool sustain_held{false};
 };
 
+// Размещаем массив голосов резонатора в D2 SRAM (.ram_d2), чтобы не переполнять AXI SRAM (RAM)
 #if defined(__GNUC__) && !defined(__EMSCRIPTEN__) && defined(__arm__)
-static DulcimerVoice voices[DULCIMER_VOICES] __attribute__((section(".dma_buffer"), aligned(32)));
+static DulcimerVoice voices[DULCIMER_VOICES] __attribute__((section(".ram_d2"), aligned(32)));
 #else
 static DulcimerVoice voices[DULCIMER_VOICES];
 #endif
