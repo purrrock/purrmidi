@@ -40,7 +40,6 @@
 #include "usbh_midi.h"
 #include "midi_dispatch.h"
 #include "soundfont_synth.h"
-#include "sf2_cache.h"
 #include "diag.h"
 #include "organ_synth.h"
 #ifdef PURRMIDI_SF2_XIP
@@ -102,30 +101,6 @@ static uint16_t active_note_count = 0;
 extern uint32_t _sitcm_text;   /* linker symbol: start of the code copied to ITCM */
 void OrganProfile_Run(void);   /* Engine/synth/organ_profile.cpp */
 
-/* 16 independent 32-bit loads per pass, 'reps' passes, pure asm so the compiler adds no stack traffic.
- * Returns elapsed CPU cycles. */
-#define BENCH_LOADS_BODY                                                                       \
-    uint32_t t0 = DWT->CYCCNT;                                                                 \
-    __asm volatile(                                                                            \
-        "1:\n\t"                                                                               \
-        "ldr r2, [%1, #0]\n\t  ldr r3, [%1, #4]\n\t  ldr r4, [%1, #8]\n\t  ldr r5, [%1, #12]\n\t" \
-        "ldr r6, [%1, #16]\n\t ldr r8, [%1, #20]\n\t ldr r9, [%1, #24]\n\t ldr r10, [%1, #28]\n\t" \
-        "ldr r2, [%1, #32]\n\t ldr r3, [%1, #36]\n\t ldr r4, [%1, #40]\n\t ldr r5, [%1, #44]\n\t" \
-        "ldr r6, [%1, #48]\n\t ldr r8, [%1, #52]\n\t ldr r9, [%1, #56]\n\t ldr r10, [%1, #60]\n\t" \
-        "subs %0, %0, #1\n\t"                                                                  \
-        "bne 1b\n\t"                                                                           \
-        : "+r"(reps) : "r"(p) : "r2", "r3", "r4", "r5", "r6", "r8", "r9", "r10", "memory", "cc"); \
-    uint32_t dt = DWT->CYCCNT - t0;                                                            \
-    *sink = 0;                                                                                 \
-    return dt;
-
-/* The same function twice: once linked into ITCM RAM, once in flash. */
-__attribute__((noinline, section(".itcm_code")))
-static uint32_t bench_loads_itcm(volatile uint32_t *p, uint32_t reps, uint32_t *sink) { BENCH_LOADS_BODY }
-
-__attribute__((noinline))
-static uint32_t bench_loads_flash(volatile uint32_t *p, uint32_t reps, uint32_t *sink) { BENCH_LOADS_BODY }
-
 /* 1 = time every audio DMA interrupt with the DWT cycle counter and report it on the UART:
  *   [AUDIO] organ: isr max=NNN us (NN% of 2666 us budget) ...
  * An interrupt that takes longer than its budget (one DMA half-buffer) starves the main loop
@@ -147,7 +122,8 @@ static volatile uint32_t audio_shed_blocks = 0;  /* blocks still to be output as
 static volatile uint32_t audio_shed_total = 0;   /* blocks dropped so far */
 /* Audio: 48 kHz, stereo, 16 bit. Circular DMA ring split into two halves.
  * It must NOT be placed in DTCM (DMA2 cannot reach it): own section in AXI SRAM,
- * see .dma_buffer in the linker script. D-Cache is off, so no cache maintenance needed. */
+ * see .dma_buffer in the linker script. With the QSPI XIP backend the D-cache is ON, but XipMpu_Config()
+ * marks all SRAM (AXI, SRAM1-3, SRAM4) non-cacheable, so no cache maintenance is needed for DMA. */
 #define AUDIO_BUFFER_FRAMES  256U                      /* stereo frames in the whole ring (2 x 128) */
 #define AUDIO_BUFFER_SIZE    (AUDIO_BUFFER_FRAMES * 2U) /* int16 items passed to SAI DMA */
 static int16_t audio_buffer[AUDIO_BUFFER_SIZE] __attribute__((section(".dma_buffer"), aligned(32)));
@@ -416,38 +392,6 @@ int main(void)
       SoundFontSynth_Profile();
     }
 
-    /* Straight-line load benchmark: separates the cost of the LOAD from the cost of FETCHING the code.
-     * rows = where the code runs, columns = where the data is. Value = CPU cycles per load. */
-    {
-      static const struct { const char *name; uint32_t addr; } data_regions[] = {
-        { "DTCM", 0x2001C000UL }, { "AXI", 0x24060000UL }, { "FLASH", 0x08010000UL },
-      };
-      const uint32_t reps = 5000U;
-      uint32_t sink = 0;
-      printf("[BENCH2] cycles per 32-bit load (16 loads x %lu passes)\r\n", (unsigned long)reps);
-      for (int mode = 0; mode < 3; mode++)
-      {
-        const char *code_name = (mode == 0) ? "code in ITCM         " :
-                                (mode == 1) ? "code in flash, ICache" : "code in flash, no IC ";
-        if (mode == 2) { SCB_DisableICache(); }
-        printf("[BENCH2] %s:", code_name);
-        for (unsigned r = 0; r < 3; r++)
-        {
-          volatile uint32_t *p = (volatile uint32_t *)data_regions[r].addr;
-          if (data_regions[r].addr >= 0x20000000UL)
-          {
-            for (uint32_t i = 0; i < 16U; i++) { p[i] = i; }
-          }
-          uint32_t dt = (mode == 0) ? bench_loads_itcm(p, reps, &sink) : bench_loads_flash(p, reps, &sink);
-          uint32_t x100 = (uint32_t)(((uint64_t)dt * 100U) / (16U * reps));
-          printf("  %s=%lu.%02lu", data_regions[r].name, (unsigned long)(x100 / 100U), (unsigned long)(x100 % 100U));
-        }
-        printf("\r\n");
-        if (mode == 2) { SCB_EnableICache(); }
-      }
-      (void)sink;
-    }
-
     for (int e = 0; e < 2; e++)
     {
       for (unsigned c = 0; c < sizeof(bench_counts) / sizeof(bench_counts[0]); c++)
@@ -647,15 +591,12 @@ int main(void)
         static uint32_t reported_max = 0;
         static uint32_t reported_over80 = 0;
         static uint32_t reported_shed = 0;
-        static uint32_t last_sf2_print = 0;
-        static uint32_t sf2_last_calls = 0;
         uint32_t t_now = HAL_GetTick();
 
         if (audio_reset_stats)
         {
             audio_reset_stats = false;
-            SF2Cache_ResetProfile();
-            sf2_last_calls = 0;
+            SoundFontSynth_ResetStats();
             audio_cyc_max = 0;
             audio_over80 = 0;
             audio_over100 = 0;
@@ -683,17 +624,10 @@ int main(void)
             }
         }
 
-        /* SoundFont cache statistics: at most once a second, only while the cache is being read. */
-        if (SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT && (t_now - last_sf2_print) >= 1000U)
+        /* SoundFont statistics: render time, voices, clipping (one line per second while notes are playing). */
+        if (SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT)
         {
-            SF2Profile sp;
-            SF2Cache_GetProfile(&sp);
-            if (sp.calls != sf2_last_calls)
-            {
-                sf2_last_calls = sp.calls;
-                last_sf2_print = t_now;
-                SoundFontSynth_PrintStats();
-            }
+            SoundFontSynth_ReportStats(t_now);
         }
     }
 #endif

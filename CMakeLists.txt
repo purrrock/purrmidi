@@ -199,6 +199,7 @@ if(NOT PURRMIDI_FORCE_SD_CACHE
         Platform/qspi_xip/sf2_loader.c
         Platform/qspi_xip/qspi_flash.c
         Platform/qspi_xip/xip_mpu.c
+        Platform/qspi_xip/xip_diag.c
     )
     target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE PURRMIDI_SF2_XIP)
 else()

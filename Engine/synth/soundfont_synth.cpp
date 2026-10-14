@@ -20,6 +20,10 @@
 
 #if !SF2_HOST_MODE
 #include "stm32h7xx.h"   /* DWT cycle counter for the diagnostics */
+#ifdef PURRMIDI_SF2_XIP
+#include "sf2_loader.h"
+#include "xip_diag.h"
+#endif
 #endif
 
 #include <atomic>
@@ -27,9 +31,15 @@
 #include <cstring>
 #include <cstdio>
 
-/* Number of blocks (SF2_BLOCK_SAMPLES samples each) loaded synchronously per voice at NoteOn. */
+/* Number of blocks (SF2_BLOCK_SAMPLES samples each) loaded synchronously per voice at NoteOn.
+ * Only the SD streaming cache needs this; with QSPI XIP the data is always in place. */
 #ifndef SF2_PRELOAD_BLOCKS_PER_VOICE
 #define SF2_PRELOAD_BLOCKS_PER_VOICE 2U
+#endif
+
+/* 1 = collect per-block statistics (render time, voices, clipping) and print them from the main loop. */
+#ifndef SF2_DIAG_STATS
+#define SF2_DIAG_STATS 1
 #endif
 
 #define SF_EVENT_FIFO_SIZE 256U   /* power of two */
@@ -93,12 +103,118 @@ float velocity_to_float(uint8_t velocity)
     return (float)velocity / 127.0f;
 }
 
+/* ---- statistics (written in the audio context, read and cleared in the main loop) ---- */
+struct DiagStats {
+    volatile uint32_t blocks;          /* audio blocks rendered in this window                         */
+    volatile uint32_t cycles_sum;      /* CPU cycles spent in SoundFontSynth_FillStereoBuffer          */
+    volatile uint32_t cycles_max;
+    volatile uint32_t over_budget;     /* blocks that took longer than one block period                */
+    volatile uint32_t voices_max;      /* active TinySoundFont voices (max over the window)            */
+    volatile uint32_t voices_last;
+    volatile uint32_t peak_permille;   /* largest |sample| of the MIX before limiting, 1000 = full scale */
+    volatile uint32_t over_fs_blocks;  /* blocks whose mix exceeded full scale (would clip)            */
+    volatile uint32_t over_fs_samples; /* samples of the mix above full scale                          */
+    volatile uint32_t notes_on;        /* NoteOn events applied                                        */
+    volatile uint32_t regions_wanted;  /* voices the bank asks for (regions matching key/velocity)     */
+    volatile uint32_t voices_started;  /* growth of the active voice count after NoteOn                */
+    volatile uint32_t voice_shortfall; /* wanted - started: voices stolen from releasing notes or lost */
+    volatile uint32_t regions_max;     /* most regions of one note seen (session)                      */
+};
+DiagStats g_diag;
+uint32_t  g_diag_fifo_dropped_seen = 0;
+
+#if !SF2_HOST_MODE
+inline uint32_t diag_cycles() { return DWT->CYCCNT; }
+inline uint32_t diag_cycles_per_us() { const uint32_t v = SystemCoreClock / 1000000U; return v ? v : 1U; }
+#else
+inline uint32_t diag_cycles() { return 0U; }
+inline uint32_t diag_cycles_per_us() { return 1U; }
+#endif
+
+/* Smooth limiter: identity below the knee, above it a tanh-shaped approach to the ceiling (the value and the
+ * slope are continuous at the knee). tanh(t) ~ t*(27+t^2)/(27+9*t^2) is exact enough for |t| < 3 and reaches
+ * 1.0 with zero slope at t = 3, so the output never exceeds SF2_LIMITER_CEILING. */
+inline float soft_limit(float x)
+{
+    const float knee = SF2_LIMITER_KNEE;
+    const float range = SF2_LIMITER_CEILING - knee;
+    const float a = (x < 0.0f) ? -x : x;
+    if (a <= knee) return x;
+    const float t = (a - knee) / range;
+    float y;
+    if (t >= 3.0f) {
+        y = SF2_LIMITER_CEILING;
+    } else {
+        const float t2 = t * t;
+        y = knee + range * (t * (27.0f + t2) / (27.0f + 9.0f * t2));
+    }
+    return (x < 0.0f) ? -y : y;
+}
+
+constexpr uint32_t kRenderChunkFrames = 128U;
+
+/* Render num_frames of stereo audio as float, measure the mix, limit it, convert to int16. */
+void render_block(int16_t *out, uint32_t num_frames)
+{
+    float mix[kRenderChunkFrames * 2U];
+
+    while (num_frames) {
+        const uint32_t n = (num_frames > kRenderChunkFrames) ? kRenderChunkFrames : num_frames;
+        tsf_render_float(g_tsf, mix, (int)n, 0);
+
+        float peak = 0.0f;
+        uint32_t over = 0;
+        for (uint32_t i = 0, cnt = n * 2U; i < cnt; ++i) {
+            float x = mix[i];
+            const float a = (x < 0.0f) ? -x : x;
+            if (a > peak) peak = a;
+            if (a > 1.0f) ++over;
+#if SF2_SOFT_LIMITER
+            x = soft_limit(x);
+#else
+            x = (x < -1.0f) ? -1.0f : (x > 1.0f ? 1.0f : x);
+#endif
+            out[i] = (int16_t)(x * 32767.0f);
+        }
+#if SF2_DIAG_STATS
+        const uint32_t pm = (uint32_t)(peak * 1000.0f);
+        if (pm > g_diag.peak_permille) g_diag.peak_permille = pm;
+        if (over) {
+            g_diag.over_fs_blocks++;
+            g_diag.over_fs_samples += over;
+        }
+#endif
+        out += n * 2U;
+        num_frames -= n;
+    }
+}
+
 /* Audio context: apply one queued MIDI event to TinySoundFont. */
 void apply_event(const Event &ev)
 {
     switch (ev.type) {
         case EV_NOTE_ON:
+#if SF2_DIAG_STATS
+        {
+            unsigned int starts[SF_MAX_NOTE_REGIONS];
+            const int wanted = tsf_channel_get_note_start_samples(g_tsf, 0, (int)ev.a, velocity_to_float(ev.b),
+                                                                  starts, SF_MAX_NOTE_REGIONS);
+            const int before = tsf_active_voice_count(g_tsf);
             tsf_channel_note_on(g_tsf, 0, (int)ev.a, velocity_to_float(ev.b));
+            const int started = tsf_active_voice_count(g_tsf) - before;
+            g_diag.notes_on++;
+            g_diag.regions_wanted += (uint32_t)wanted;
+            g_diag.voices_started += (uint32_t)(started > 0 ? started : 0);
+            if (wanted > started) {
+                g_diag.voice_shortfall += (uint32_t)(wanted - started);
+            }
+            if ((uint32_t)wanted > g_diag.regions_max) {
+                g_diag.regions_max = (uint32_t)wanted;
+            }
+        }
+#else
+            tsf_channel_note_on(g_tsf, 0, (int)ev.a, velocity_to_float(ev.b));
+#endif
             break;
         case EV_NOTE_OFF:
             tsf_channel_note_off(g_tsf, 0, (int)ev.a);
@@ -114,6 +230,7 @@ void apply_event(const Event &ev)
     }
 }
 
+#ifndef PURRMIDI_SF2_XIP
 /* Main context: make the first blocks of every voice of this note resident before it starts. */
 void preload_note(uint8_t note, uint8_t velocity)
 {
@@ -130,6 +247,7 @@ void preload_note(uint8_t note, uint8_t velocity)
         }
     }
 }
+#endif /* !PURRMIDI_SF2_XIP */
 
 } // namespace
 
@@ -164,7 +282,7 @@ bool SoundFontSynth_InitSF2(void)
 
     std::fprintf(stderr, "[SF2] SoundFont metadata loaded successfully.\n");
 
-    tsf_set_output(g_tsf, TSF_STEREO_INTERLEAVED, 48000, 0.0f);
+    tsf_set_output(g_tsf, TSF_STEREO_INTERLEAVED, 48000, SF2_GLOBAL_GAIN_DB);
     tsf_set_max_voices(g_tsf, 32);
     SF2Cache_SetSmplFileOffset(tsf_get_smpl_file_offset(g_tsf), tsf_get_smpl_sample_count(g_tsf));
 
@@ -204,7 +322,9 @@ void SoundFontSynth_NoteOn(uint8_t note, uint8_t velocity)
     if (note > 127) return;
     if (velocity > 127) velocity = 127;
 
+#ifndef PURRMIDI_SF2_XIP
     preload_note(note, velocity);
+#endif
 
     Event ev = { EV_NOTE_ON, note, velocity };
     fifo_push(ev);
@@ -249,7 +369,23 @@ void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
     }
 
     SF2Cache_BeginAudioBlock();
-    tsf_render_short(g_tsf, buffer, (int)num_frames, 0);
+#if SF2_DIAG_STATS
+    const uint32_t t0 = diag_cycles();
+    render_block(buffer, num_frames);
+    const uint32_t dt = diag_cycles() - t0;
+    const uint32_t voices = (uint32_t)tsf_active_voice_count(g_tsf);
+
+    g_diag.blocks++;
+    g_diag.cycles_sum += dt;
+    if (dt > g_diag.cycles_max) g_diag.cycles_max = dt;
+#if !SF2_HOST_MODE
+    if (dt > (SystemCoreClock / 48000U) * num_frames) g_diag.over_budget++;
+#endif
+    g_diag.voices_last = voices;
+    if (voices > g_diag.voices_max) g_diag.voices_max = voices;
+#else
+    render_block(buffer, num_frames);
+#endif
 }
 
 void SoundFontSynth_Process(void)
@@ -270,178 +406,123 @@ bool SoundFontSynth_IsAvailable(void)
 
 /* ------------------------------------------------------------------------------------------------
  * Diagnostics
+ *   - SoundFontSynth_ReportStats(): one line per second while notes are playing (see soundfont_synth.h)
+ *   - SoundFontSynth_Profile():     boot-time report: XIP configuration, raw XIP read speed, regions per
+ *                                   note and the cost of 1..10 note chords rendered by the real engine
  * ------------------------------------------------------------------------------------------------ */
 
-static uint32_t sf_cycles_per_us(void)
+void SoundFontSynth_ResetStats(void)
 {
-#if SF2_HOST_MODE
-    return 1U;
-#else
-    const uint32_t v = SystemCoreClock / 1000000U;
-    return v ? v : 1U;
-#endif
+    std::memset((void *)&g_diag, 0, sizeof(g_diag));
 }
 
-void SoundFontSynth_PrintStats(void)
+void SoundFontSynth_ReportStats(uint32_t now_ms)
 {
-    SF2Profile p;
-    SF2CacheStats s;
-    SF2Cache_GetProfile(&p);
-    SF2Cache_GetStats(&s);
-    if (p.calls == 0U) {
+#if SF2_DIAG_STATS
+    static uint32_t last_ms = 0;
+    static uint32_t last_notes = 0;
+
+    if ((now_ms - last_ms) < 1000U) {
         return;
     }
-    const uint32_t us = sf_cycles_per_us();
-    auto pct = [&](uint32_t part) { return (unsigned long)((uint64_t)part * 100U / p.calls); };
-    auto avg = [](uint32_t total, uint32_t n) { return (unsigned long)(n ? total / n : 0U); };
+    last_ms = now_ms;
+
+    /* Quiet when nothing is happening: no notes were started and no voices are sounding. */
+    const uint32_t notes = g_diag.notes_on;
+    if (g_diag.blocks == 0U || (notes == last_notes && g_diag.voices_max == 0U)) {
+        last_notes = notes;
+        return;
+    }
+    last_notes = notes;
+
+    const uint32_t blocks = g_diag.blocks;
+    const uint32_t us = diag_cycles_per_us();
+    const uint32_t dropped = g_dropped.load(std::memory_order_relaxed);
+    const unsigned long avg_us = (unsigned long)((g_diag.cycles_sum / blocks) / us);
+    const unsigned long max_us = (unsigned long)(g_diag.cycles_max / us);
 
     std::fprintf(stderr,
-        "[SF2] getsample calls=%lu hint=%lu%% search=%lu%% miss=%lu%% | avg cycles hint=%lu search=%lu miss=%lu max=%lu"
-        " | avg slots/search=%lu | total in cache=%lu us\n",
-        (unsigned long)p.calls, pct(p.hint_hits), pct(p.search_hits), pct(p.misses),
-        avg(p.cycles_hint, p.hint_hits), avg(p.cycles_search, p.search_hits), avg(p.cycles_miss, p.misses),
-        (unsigned long)p.max_cycles,
-        avg(p.search_slots, p.search_hits + p.misses),
-        (unsigned long)((p.cycles_hint + p.cycles_search + p.cycles_miss) / us));
-    std::fprintf(stderr,
-        "[SF2] main loop: process calls=%lu avg=%lu us max=%lu us | card reads=%lu avg=%lu us max=%lu us"
-        " | blocks loaded=%lu miss samples=%lu errors=%lu\n",
-        (unsigned long)p.proc_calls, avg(p.proc_cycles_total, p.proc_calls) / us, (unsigned long)(p.proc_cycles_max / us),
-        (unsigned long)p.read_calls, avg(p.read_cycles_total, p.read_calls) / us, (unsigned long)(p.read_cycles_max / us),
-        (unsigned long)s.blocks_loaded, (unsigned long)s.miss_samples, (unsigned long)s.load_errors);
+        "[SF2] 1s: render avg=%lu max=%lu us (over budget=%lu of %lu blocks) | voices max=%lu now=%lu"
+        " | notes=%lu regions want=%lu started=%lu short=%lu (max/note=%lu)"
+        " | mix peak=%lu.%02lu FS, over 1.0 FS: %lu samples in %lu blocks%s | fifo dropped=%lu\n",
+        avg_us, max_us, (unsigned long)g_diag.over_budget, (unsigned long)blocks,
+        (unsigned long)g_diag.voices_max, (unsigned long)g_diag.voices_last,
+        (unsigned long)g_diag.notes_on, (unsigned long)g_diag.regions_wanted, (unsigned long)g_diag.voices_started,
+        (unsigned long)g_diag.voice_shortfall, (unsigned long)g_diag.regions_max,
+        (unsigned long)(g_diag.peak_permille / 1000U), (unsigned long)((g_diag.peak_permille / 10U) % 100U),
+        (unsigned long)g_diag.over_fs_samples, (unsigned long)g_diag.over_fs_blocks,
+        SF2_SOFT_LIMITER ? " (soft limiter ON)" : " (HARD CLIP)",
+        (unsigned long)(dropped - g_diag_fifo_dropped_seen));
+    g_diag_fifo_dropped_seen = dropped;
+
+    /* New window; the session maximum of regions per note is kept. */
+    const uint32_t keep_regions_max = g_diag.regions_max;
+    SoundFontSynth_ResetStats();
+    g_diag.regions_max = keep_regions_max;
+#else
+    (void)now_ms;
+#endif
 }
 
 #if !SF2_HOST_MODE
 
 namespace {
 
-inline uint32_t now_cycles(void) { return DWT->CYCCNT; }
-
-/* cycles per operation x10, net of the empty loop */
-uint32_t net_x10(uint32_t total, uint32_t base, uint32_t n)
+/* Regions (= TinySoundFont voices) one note needs, for a few keys and velocities. */
+void diag_regions_per_note(void)
 {
-    return (total > base) ? (uint32_t)(((uint64_t)(total - base) * 10U) / n) : 0U;
-}
+    static const uint8_t keys[] = { 36, 48, 60, 72, 84, 96 };
+    static const uint8_t vels[] = { 40, 100, 127 };
+    unsigned int starts[SF_MAX_NOTE_REGIONS];
 
-void print_x10(const char *name, uint32_t x10)
-{
-    std::fprintf(stderr, "[SF2PROF]   %-34s %lu.%lu cycles\n", name, (unsigned long)(x10 / 10U), (unsigned long)(x10 % 10U));
-}
-
-void profile_atomics(void)
-{
-    static std::atomic<uint32_t> a{0};
-    constexpr uint32_t N = 2000;
-    volatile uint32_t sink = 0;
-
-    uint32_t t0 = now_cycles();
-    for (uint32_t i = 0; i < N; ++i) { __asm volatile("" ::: "memory"); sink = i; }
-    const uint32_t base = now_cycles() - t0;
-
-    t0 = now_cycles();
-    for (uint32_t i = 0; i < N; ++i) { sink = a.load(std::memory_order_relaxed); __asm volatile("" ::: "memory"); }
-    print_x10("atomic load (relaxed)", net_x10(now_cycles() - t0, base, N));
-
-    t0 = now_cycles();
-    for (uint32_t i = 0; i < N; ++i) { sink = a.load(std::memory_order_seq_cst); __asm volatile("" ::: "memory"); }
-    print_x10("atomic load (seq_cst)", net_x10(now_cycles() - t0, base, N));
-
-    t0 = now_cycles();
-    for (uint32_t i = 0; i < N; ++i) { sink = a.fetch_add(1, std::memory_order_relaxed); __asm volatile("" ::: "memory"); }
-    print_x10("atomic fetch_add (relaxed)", net_x10(now_cycles() - t0, base, N));
-
-    t0 = now_cycles();
-    for (uint32_t i = 0; i < N; ++i) { sink = a.fetch_add(1, std::memory_order_seq_cst); __asm volatile("" ::: "memory"); }
-    print_x10("atomic fetch_add (seq_cst)", net_x10(now_cycles() - t0, base, N));
-    (void)sink;
-}
-
-void profile_getsample(void)
-{
-    const uint32_t total_blocks = tsf_get_smpl_sample_count(g_tsf) / SF2_BLOCK_SAMPLES;
-    if (total_blocks < 300U) {
-        std::fprintf(stderr, "[SF2PROF]   (sample data too small for the GetSample test)\n");
-        return;
+    std::fprintf(stderr, "[SF2DIAG] preset 0: \"%s\", presets=%d, sample data %lu samples, max voices 32\n",
+                 tsf_get_presetname(g_tsf, 0) ? tsf_get_presetname(g_tsf, 0) : "?", tsf_get_presetcount(g_tsf),
+                 (unsigned long)tsf_get_smpl_sample_count(g_tsf));
+    std::fprintf(stderr, "[SF2DIAG] voices (regions) per note at velocity 40 / 100 / 127:\n");
+    for (unsigned k = 0; k < sizeof(keys); ++k) {
+        int n[3];
+        for (unsigned v = 0; v < 3U; ++v) {
+            n[v] = tsf_channel_get_note_start_samples(g_tsf, 0, keys[k], velocity_to_float(vels[v]), starts, SF_MAX_NOTE_REGIONS);
+        }
+        std::fprintf(stderr, "[SF2DIAG]   key %3u: %d / %d / %d\n", keys[k], n[0], n[1], n[2]);
     }
-
-    /* 31 filler blocks first, so that block 3 ends up in the LAST slot: a search then walks all slots. */
-    SF2Cache_Reset();
-    for (uint32_t k = 0; k < SF2_CACHE_BLOCKS - 1U; ++k) { SF2Cache_PreloadBlock(100U + k); }
-    SF2Cache_PreloadBlock(3U);
-
-    const uint32_t S = 3U * SF2_BLOCK_SAMPLES + 10U;
-    constexpr uint32_t M = 200;
-    volatile int16_t sink = 0;
-    int hint = -1;
-
-    uint32_t t0 = now_cycles();
-    for (uint32_t i = 0; i < M; ++i) { hint = -1; sink = SF2Cache_GetSample(g_tsf, S, &hint); }
-    print_x10("GetSample hit by search (last slot)", (uint32_t)(((uint64_t)(now_cycles() - t0) * 10U) / M));
-    std::fprintf(stderr, "[SF2PROF]   (block 3 found in slot %d, SF2_CACHE_BLOCKS=%lu)\n", hint, (unsigned long)SF2_CACHE_BLOCKS);
-
-    hint = (hint >= 0) ? hint : 0;
-    t0 = now_cycles();
-    for (uint32_t i = 0; i < M; ++i) { sink = SF2Cache_GetSample(g_tsf, S, &hint); }
-    print_x10("GetSample hit by hint", (uint32_t)(((uint64_t)(now_cycles() - t0) * 10U) / M));
-
-    /* misses: distinct blocks (each also queues load requests), then the same block repeated */
-    uint32_t tm = 0;
-    for (uint32_t k = 0; k < 8U; ++k) {
-        int h = -1;
-        SF2Cache_BeginAudioBlock();            /* a new audio block: the "already missed" memo is empty */
-        const uint32_t t1 = now_cycles();
-        sink = SF2Cache_GetSample(g_tsf, (total_blocks / 2U + k * 7U) * SF2_BLOCK_SAMPLES + 5U, &h);
-        tm += now_cycles() - t1;
-    }
-    print_x10("GetSample miss, new block (+requests)", (uint32_t)(((uint64_t)tm * 10U) / 8U));
-    SF2Cache_BeginAudioBlock();
-    t0 = now_cycles();
-    for (uint32_t i = 0; i < M; ++i) { int h = -1; sink = SF2Cache_GetSample(g_tsf, (total_blocks / 2U) * SF2_BLOCK_SAMPLES + 5U, &h); }
-    print_x10("GetSample miss, repeated in same block", (uint32_t)(((uint64_t)(now_cycles() - t0) * 10U) / M));
-    (void)sink;
-
-    SF2Cache_Reset();
 }
 
-void profile_chord(void)
+void diag_chord(const char *tag)
 {
     static int16_t buf[256];
-    static const uint8_t notes[] = { 48, 52, 55, 60, 64, 67 };
-    static const int counts[] = { 1, 3, 6 };
-    const uint32_t us = sf_cycles_per_us();
+    static const uint8_t notes[] = { 48, 52, 55, 60, 64, 67, 72, 76, 79, 84 };
+    static const int counts[] = { 1, 3, 6, 10 };
+    const uint32_t us = diag_cycles_per_us();
+    const uint32_t budget_us = 2666U;
     constexpr int BLOCKS = 60;
 
     for (unsigned c = 0; c < sizeof(counts) / sizeof(counts[0]); ++c) {
         const int n = counts[c];
         SoundFontSynth_Init();
-        SF2Cache_ResetProfile();
-        SF2Cache_ResetStats();
-
-        uint32_t t0 = now_cycles();
+        /* tsf_reset() leaves the previous voices in a short quick-release: let them die before measuring. */
+        for (int b = 0; b < 8; ++b) { SoundFontSynth_FillStereoBuffer(buf, 128); }
+        SoundFontSynth_ResetStats();
         for (int k = 0; k < n; ++k) { SoundFontSynth_NoteOn(notes[k], 100); }
-        const uint32_t pre = now_cycles() - t0;
 
-        uint32_t first = 0, sum = 0, mx = 0, proc_max = 0;
+        uint32_t first = 0, sum = 0, mx = 0;
         int voices = 0;
         for (int b = 0; b < BLOCKS; ++b) {
-            t0 = now_cycles();
+            const uint32_t t0 = diag_cycles();
             SoundFontSynth_FillStereoBuffer(buf, 128);
-            const uint32_t d = now_cycles() - t0;
+            const uint32_t d = diag_cycles() - t0;
             if (b == 0) { first = d; voices = tsf_active_voice_count(g_tsf); }
             sum += d;
             if (d > mx) mx = d;
-
-            t0 = now_cycles();
-            SoundFontSynth_Process();          /* what the main loop does between audio blocks */
-            const uint32_t dp = now_cycles() - t0;
-            if (dp > proc_max) proc_max = dp;
         }
         std::fprintf(stderr,
-            "[SF2PROF] chord n=%d (tsf voices=%d): note-on preload=%lu us | first fill=%lu us, avg=%lu us, max=%lu us"
-            " (budget 2666 us) | process max=%lu us\n",
-            n, voices, (unsigned long)(pre / us), (unsigned long)(first / us), (unsigned long)(sum / BLOCKS / us),
-            (unsigned long)(mx / us), (unsigned long)(proc_max / us));
-        SoundFontSynth_PrintStats();
+            "[SF2DIAG] %s chord n=%2d: voices=%2d | first block=%lu us avg=%lu us max=%lu us (%lu%% of %lu us)%s"
+            " | mix peak=%lu.%02lu FS (over 1.0 FS: %lu samples) | want=%lu started=%lu short=%lu\n",
+            tag, n, voices, (unsigned long)(first / us), (unsigned long)(sum / BLOCKS / us), (unsigned long)(mx / us),
+            (unsigned long)(mx / us * 100U / budget_us), (unsigned long)budget_us, (mx / us > budget_us) ? "  <-- OVER BUDGET" : "",
+            (unsigned long)(g_diag.peak_permille / 1000U), (unsigned long)((g_diag.peak_permille / 10U) % 100U),
+            (unsigned long)g_diag.over_fs_samples, (unsigned long)g_diag.regions_wanted,
+            (unsigned long)g_diag.voices_started, (unsigned long)g_diag.voice_shortfall);
     }
 }
 
@@ -450,15 +531,32 @@ void profile_chord(void)
 void SoundFontSynth_Profile(void)
 {
     if (!g_loaded || !g_tsf) {
-        std::fprintf(stderr, "[SF2PROF] SoundFont not loaded, skipped\n");
+        std::fprintf(stderr, "[SF2DIAG] SoundFont not loaded, skipped\n");
         return;
     }
-    std::fprintf(stderr, "[SF2PROF] --- atomic operations (D-cache is off, ARM seq_cst adds DMB barriers) ---\n");
-    profile_atomics();
-    std::fprintf(stderr, "[SF2PROF] --- SF2Cache_GetSample() ---\n");
-    profile_getsample();
-    std::fprintf(stderr, "[SF2PROF] --- chord + main loop servicing the cache ---\n");
-    profile_chord();
+    std::fprintf(stderr, "[SF2DIAG] ===== SoundFont diagnostics (render budget 2666 us per 128-frame block) =====\n");
+    diag_regions_per_note();
+
+#ifdef PURRMIDI_SF2_XIP
+    const uint8_t *bank = nullptr;
+    uint32_t bank_size = 0;
+    XipDiag_PrintConfig();
+    if (SF2Loader_GetBank(&bank, &bank_size)) {
+        std::fprintf(stderr, "[SF2DIAG] bank in XIP: %p, %lu bytes\n", (const void *)bank, (unsigned long)bank_size);
+        XipDiag_Bench(bank, bank_size);
+    }
+#endif
+
+    std::fprintf(stderr, "[SF2DIAG] --- chords rendered by the real engine ---\n");
+    diag_chord("D-cache ON ");
+#ifdef PURRMIDI_SF2_XIP
+    SCB_DisableDCache();
+    diag_chord("D-cache OFF");
+    SCB_EnableDCache();
+#endif
+    SoundFontSynth_Init();
+    SoundFontSynth_ResetStats();
+    std::fprintf(stderr, "[SF2DIAG] ===== end of diagnostics =====\n");
 }
 
 #else /* host build */
