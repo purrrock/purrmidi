@@ -238,13 +238,16 @@ void XipDiag_Bench(const uint8_t *bank, uint32_t bank_size)
     const uint32_t off_us = bench_streams(a, samples, "D-cache OFF");
     SCB_EnableDCache();
 
-    if (on_us > 0U && off_us * 10U < on_us * 12U) {
-        printf("[XIP] PROBLEM: D-cache speeds XIP reads up by less than 1.2x (ON %lu us, OFF %lu us at 32 voices)\r\n",
+    /* Голос читает банк последовательно, а QSPI сам стримит последовательные данные, поэтому в этом тесте
+     * D-cache может почти не давать выигрыша (Release: 222 против 224 мкс) - это норма. Кэш важен для случайных
+     * обращений и для остального кода: см. сравнение аккордов в реальном движке ниже. Тревога - только если
+     * с кэшем заметно МЕДЛЕННЕЕ. */
+    if (on_us > 0U && on_us * 10U > off_us * 11U) {
+        printf("[XIP] PROBLEM: reads with D-cache are slower than without it (ON %lu us, OFF %lu us at 32 voices)\r\n",
                (unsigned long)on_us, (unsigned long)off_us);
     } else if (on_us > 0U) {
-        printf("[XIP] D-cache verdict: OK, XIP reads %lu.%lux faster with D-cache (32 voices: ON %lu us, OFF %lu us)\r\n",
-               (unsigned long)(off_us / on_us), (unsigned long)((off_us * 10U / on_us) % 10U), (unsigned long)on_us,
-               (unsigned long)off_us);
+        printf("[XIP] D-cache verdict: OK (32 voices, reads only: ON %lu us, OFF %lu us; sequential streams are fast "
+               "even uncached)\r\n", (unsigned long)on_us, (unsigned long)off_us);
     }
     printf("[XIP] --- bench done ---\r\n");
 }
