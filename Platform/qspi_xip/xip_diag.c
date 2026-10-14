@@ -108,15 +108,23 @@ static void print_x10(const char *name, uint32_t x10, const char *unit)
     printf("[XIP]   %-44s %lu.%lu %s\r\n", name, (unsigned long)(x10 / 10U), (unsigned long)(x10 % 10U), unit);
 }
 
-/* Чтение подряд: холодный кэш (каждая строка - обращение к флешу), затем тёплый (должны быть попадания). */
+/* Чтение подряд: холодный кэш (каждая строка - обращение к флешу), затем тёплый. Цикл сравнивается с таким же
+ * циклом по массиву в DTCM: в Debug (-O0) накладные расходы цикла (~20 тактов на чтение) полностью скрывают
+ * разницу кэша, поэтому важны значения "net" (за вычетом базового цикла). */
+static volatile int16_t s_baseline[512];
+
 static void bench_sequential(const int16_t *a)
 {
     enum { N = 4096 };            /* 8 КБ: заведомо помещается в D-cache (16 КБ) */
     volatile const int16_t *p = a;
     int32_t sum = 0;
 
-    invalidate(a, N * 2U);
     uint32_t t0 = DWT->CYCCNT;
+    for (uint32_t i = 0; i < N; i++) { sum += s_baseline[i & 511U]; }
+    const uint32_t base = DWT->CYCCNT - t0;
+
+    invalidate(a, N * 2U);
+    t0 = DWT->CYCCNT;
     for (uint32_t i = 0; i < N; i++) { sum += p[i]; }
     const uint32_t cold = DWT->CYCCNT - t0;
 
@@ -124,13 +132,13 @@ static void bench_sequential(const int16_t *a)
     for (uint32_t i = 0; i < N; i++) { sum += p[i]; }
     const uint32_t warm = DWT->CYCCNT - t0;
 
-    print_x10("sequential int16, cold cache", (cold * 10U) / N, "cycles/sample");
-    print_x10("sequential int16, warm cache", (warm * 10U) / N, "cycles/sample");
+    print_x10("loop overhead (same loop over DTCM)", (base * 10U) / N, "cycles/sample");
+    print_x10("sequential int16, cold cache (total)", (cold * 10U) / N, "cycles/sample");
+    print_x10("sequential int16, warm cache (total)", (warm * 10U) / N, "cycles/sample");
+    print_x10("  net of loop overhead, cold", (cold > base ? cold - base : 0U) * 10U / N, "cycles/sample");
+    print_x10("  net of loop overhead, warm", (warm > base ? warm - base : 0U) * 10U / N, "cycles/sample");
     print_x10("sequential, cold throughput", ((N * 2U) * 10U) / ((cold / cycles_per_us()) ? (cold / cycles_per_us()) : 1U),
               "MB/s");
-    if (warm * 4U > cold) {
-        printf("[XIP]   PROBLEM: warm reads are not much faster than cold ones - the D-cache does not work for XIP\r\n");
-    }
     (void)sum;
 }
 
@@ -160,8 +168,9 @@ static void bench_latency(const int16_t *a, uint32_t samples)
 }
 
 /* Модель голосов TinySoundFont: voice-major, на каждом кадре два чтения (pos, pos+1), шаг pitch (16.16). */
-static void bench_streams(const int16_t *a, uint32_t samples, const char *tag)
+static uint32_t bench_streams(const int16_t *a, uint32_t samples, const char *tag)
 {
+    uint32_t ref_avg_us = 0;
     static const uint32_t counts[] = { 1, 4, 8, 16, 32 };
     static const uint32_t steps[]  = { 0x10000U, 0x20000U };   /* высота 1.0 и 2.0 */
     enum { BLOCKS = 40 };
@@ -199,9 +208,11 @@ static void bench_streams(const int16_t *a, uint32_t samples, const char *tag)
                    tag, (unsigned long)(steps[si] >> 16), (unsigned long)n, (unsigned long)avg_us, (unsigned long)max_us,
                    (unsigned long)(max_us * 100U / BLOCK_BUDGET_US), (unsigned long)BLOCK_BUDGET_US,
                    (max_us > BLOCK_BUDGET_US) ? "  <-- OVER BUDGET" : "");
+            if (si == 0U && n == 32U) ref_avg_us = avg_us;
             (void)sum;
         }
     }
+    return ref_avg_us;
 }
 
 void XipDiag_Bench(const uint8_t *bank, uint32_t bank_size)
@@ -220,11 +231,20 @@ void XipDiag_Bench(const uint8_t *bank, uint32_t bank_size)
     printf("[XIP] --- raw XIP read speed (no synth) ---\r\n");
     bench_sequential(a);
     bench_latency(a, samples);
-    bench_streams(a, samples, "D-cache ON ");
+    const uint32_t on_us = bench_streams(a, samples, "D-cache ON ");
 
     printf("[XIP] --- same with D-cache OFF ---\r\n");
     SCB_DisableDCache();
-    bench_streams(a, samples, "D-cache OFF");
+    const uint32_t off_us = bench_streams(a, samples, "D-cache OFF");
     SCB_EnableDCache();
+
+    if (on_us > 0U && off_us * 10U < on_us * 12U) {
+        printf("[XIP] PROBLEM: D-cache speeds XIP reads up by less than 1.2x (ON %lu us, OFF %lu us at 32 voices)\r\n",
+               (unsigned long)on_us, (unsigned long)off_us);
+    } else if (on_us > 0U) {
+        printf("[XIP] D-cache verdict: OK, XIP reads %lu.%lux faster with D-cache (32 voices: ON %lu us, OFF %lu us)\r\n",
+               (unsigned long)(off_us / on_us), (unsigned long)((off_us * 10U / on_us) % 10U), (unsigned long)on_us,
+               (unsigned long)off_us);
+    }
     printf("[XIP] --- bench done ---\r\n");
 }

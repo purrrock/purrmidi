@@ -31,7 +31,10 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
-#include "synth_engine.h" /* Синтезаторы epiano / pluck / sine / organ / soundfont */
+#include "synth_engine.h" /* Синтезаторы epiano / pluck / lead / organ / soundfont */
+#include "dulcimer_synth.h"
+#include "flute_synth.h"
+#include "saxophone_synth.h"
 #include "display.h"
 #include "midi_event.h"
 #include "midi_queue.h"
@@ -94,22 +97,17 @@ static uint16_t active_note_count = 0;
 #define PC_NEXT_REPEAT_GUARD_MS 300U
 
 /* 1 = enable the Cortex-M7 instruction cache. The code runs from flash, which is slow at 480 MHz
- * without a cache (several wait states per fetch); the organ engine is the heaviest per-sample
- * code in the firmware and ran 3-5x slower than it should. */
+ * without a cache (several wait states per fetch). */
 #define ENABLE_ICACHE 1
 
-extern uint32_t _sitcm_text;   /* linker symbol: start of the code copied to ITCM */
-void OrganProfile_Run(void);   /* Engine/synth/organ_profile.cpp */
-
 /* 1 = time every audio DMA interrupt with the DWT cycle counter and report it on the UART:
- *   [AUDIO] organ: isr max=NNN us (NN% of 2666 us budget) ...
+ *   [AUDIO] soundfont: isr max=NNN us (NN% of 2666 us budget) ...
  * An interrupt that takes longer than its budget (one DMA half-buffer) starves the main loop
  * (USB, MIDI, display) forever - this is how the system "hangs" even though nothing crashed. */
 #define AUDIO_DIAG_UART 1
 
-/* 1 = at power-up (before the audio DMA and USB start, so nothing else interferes) time one
- * 128-frame block of the organ and epiano engines with N sounding notes and print the result:
- *   [BENCH] organ  n= 0: 123 us per block
+/* 1 = at power-up (before the audio DMA and USB start, so nothing else interferes) print CPU and memory
+ * reference measurements ([BENCH]) and the SoundFont diagnostics ([XIP], [SF2DIAG]).
  * This separates "the code itself is slow" from "something steals CPU time while playing". */
 #define BOOT_BENCH 1
 static volatile uint32_t audio_cyc_max = 0;      /* longest fill so far (CPU cycles) */
@@ -231,7 +229,7 @@ static void Print_USB_Diag(uint32_t max_loop_dt)
 /* Названия инструментов для дисплея (только ASCII, до 17 символов). Порядок = SynthEngineId. */
 static const char * const display_patch_names[SYNTH_ENGINE_COUNT] =
 {
-    "E-Piano", "Pluck", "Sine", "Organ", "SoundFont"
+    "E-Piano", "Pluck", "Lead", "Organ", "SoundFont", "Dulcimer", "Flute", "Saxophone"
 };
 
 /* Номер на дисплее 1-based (как на большинстве клавиатур): Program Change 0 -> "01" */
@@ -306,8 +304,12 @@ int main(void)
   printf("Synth engine: %s\r\n", SynthEngine_GetName());
   Display_SyncPatch();
   Display_SyncVolume();
-  printf("[SYS] organ code at %p (0x0000xxxx = ITCM, 0x0800xxxx = flash), sample table at %p\r\n",
-         (void *)OrganSynth_FillStereoBuffer, (void *)&_sitcm_text);
+#ifdef __OPTIMIZE__
+  printf("[SYS] build: optimized (main.c compiled with -O1..-O3/-Os)\r\n");
+#else
+  printf("[SYS] build: NOT OPTIMIZED (-O0, Debug) - code runs several times slower than in Release; "
+         "benchmarks and audio load below are pessimistic\r\n");
+#endif
   printf("[SYS] SYSCLK=%lu Hz, I-cache %s, audio budget %lu us per %u frames\r\n",
          (unsigned long)SystemCoreClock, ENABLE_ICACHE ? "ON" : "off",
          (unsigned long)(1000000UL * (AUDIO_BUFFER_FRAMES / 2U) / 48000UL), (unsigned)(AUDIO_BUFFER_FRAMES / 2U));
@@ -330,13 +332,6 @@ int main(void)
 #endif
 #if BOOT_BENCH
   {
-    static int16_t bench_buf[256];
-    static const uint8_t bench_notes[] = { 48, 52, 55, 60, 64, 67, 72, 76, 79, 84 };
-    const uint32_t us = SystemCoreClock / 1000000U;
-    const SynthEngineId bench_engines[2] = { SYNTH_ENGINE_ORGAN, SYNTH_ENGINE_EPIANO };
-    const char *bench_names[2] = { "organ ", "epiano" };
-    const int bench_counts[] = { 0, 1, 3, 6, 10 };
-
     /* Reference: a loop of exactly 1M iterations (2M instructions: subs + bne). A healthy
      * Cortex-M7 needs about 1.0-1.1M cycles. Much more = the CPU is being slowed down
      * (interrupt storm, bus contention, memory attributes). Done with IRQs on and off. */
@@ -386,43 +381,11 @@ int main(void)
       }
     }
 
-    OrganProfile_Run();
     if (SoundFontSynth_IsLoaded())
     {
       SoundFontSynth_Profile();
     }
 
-    for (int e = 0; e < 2; e++)
-    {
-      for (unsigned c = 0; c < sizeof(bench_counts) / sizeof(bench_counts[0]); c++)
-      {
-        SynthEngine_Select(SYNTH_ENGINE_LEAD);               /* Select() of the current engine is a no-op, */
-        SynthEngine_Select(bench_engines[e]);                /* so switch away and back to re-initialise it */
-        for (int k = 0; k < bench_counts[c]; k++)
-        {
-          SynthEngine_NoteOn(bench_notes[k], 100);
-        }
-        SynthEngine_FillStereoBuffer(bench_buf, 128);        /* applies the events */
-        uint32_t t0 = DWT->CYCCNT;
-        SynthEngine_FillStereoBuffer(bench_buf, 128);
-        SynthEngine_FillStereoBuffer(bench_buf, 128);
-        SynthEngine_FillStereoBuffer(bench_buf, 128);
-        uint32_t dt = (DWT->CYCCNT - t0) / 3U;
-        /* the same again with interrupts masked */
-        __disable_irq();
-        t0 = DWT->CYCCNT;
-        SynthEngine_FillStereoBuffer(bench_buf, 128);
-        SynthEngine_FillStereoBuffer(bench_buf, 128);
-        SynthEngine_FillStereoBuffer(bench_buf, 128);
-        uint32_t dt_noirq = (DWT->CYCCNT - t0) / 3U;
-        __enable_irq();
-        printf("[BENCH] %s n=%2d: %lu us per 128-frame block (%lu cycles), IRQ masked: %lu cycles\r\n",
-               bench_names[e], bench_counts[c], (unsigned long)(dt / us), (unsigned long)dt,
-               (unsigned long)dt_noirq);
-      }
-    }
-    SynthEngine_Select(SYNTH_ENGINE_EPIANO);
-    Display_SyncPatch();
   }
 #endif
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A

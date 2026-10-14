@@ -60,6 +60,27 @@ target_compile_features(test_soundfont_host PRIVATE cxx_std_17)
 add_test(NAME test_soundfont_host COMMAND test_soundfont_host
          WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/..")
 
+add_executable(test_dulcimer_host
+    test_dulcimer_host.cpp
+)
+target_link_libraries(test_dulcimer_host PRIVATE purrmidi_synth_dulcimer)
+target_compile_features(test_dulcimer_host PRIVATE cxx_std_17)
+add_test(NAME test_dulcimer_host COMMAND test_dulcimer_host)
+
+add_executable(test_flute_host
+    test_flute_host.cpp
+)
+target_link_libraries(test_flute_host PRIVATE purrmidi_synth_flute)
+target_compile_features(test_flute_host PRIVATE cxx_std_17)
+add_test(NAME test_flute_host COMMAND test_flute_host)
+
+add_executable(test_saxophone_host
+    test_saxophone_host.cpp
+)
+target_link_libraries(test_saxophone_host PRIVATE purrmidi_synth_saxophone purrmidi_core)
+target_compile_features(test_saxophone_host PRIVATE cxx_std_17)
+add_test(NAME test_saxophone_host COMMAND test_saxophone_host)
+
 add_executable(test_queue_dispatch
     test_queue_dispatch.cpp
 )
@@ -81,6 +102,18 @@ add_executable(test_chord_detector
 target_link_libraries(test_chord_detector PRIVATE purrmidi_core)
 target_compile_features(test_chord_detector PRIVATE cxx_std_17)
 add_test(NAME test_chord_detector COMMAND test_chord_detector)
+
+add_executable(test_virtual_keyboard
+    test_virtual_keyboard.cpp
+    "${CMAKE_CURRENT_LIST_DIR}/../platform/windows/virtual_keyboard.cpp"
+)
+target_include_directories(test_virtual_keyboard PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../Core/Inc"
+    "${CMAKE_CURRENT_LIST_DIR}/../Engine/midi"
+    "${CMAKE_CURRENT_LIST_DIR}/../platform/windows"
+)
+target_compile_features(test_virtual_keyboard PRIVATE cxx_std_17)
+add_test(NAME test_virtual_keyboard COMMAND test_virtual_keyboard)
 
 # ---------------------------------------------------------------------------
 # QSPI XIP: загрузчик SoundFont-банка во флеш (логика без HAL) и XIP-бэкенд синтезатора

@@ -43,12 +43,21 @@ static void test_engine_registration_and_pc() {
     CHECK(std::strcmp(SynthEngine_GetName(), "soundfont") == 0);
 
     SynthEngine_ProgramChange(5);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_DULCIMER);
 
     SynthEngine_ProgramChange(6);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_FLUTE);
+
+    SynthEngine_ProgramChange(7);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SAXOPHONE);
+
+    SynthEngine_ProgramChange(8); // 8 % 8 == 0 -> epiano
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
+
+    SynthEngine_ProgramChange(9); // 9 % 8 == 1 -> pluck
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
 
-    SynthEngine_ProgramChange(9); // 9 % 5 == 4 -> soundfont
+    SynthEngine_ProgramChange(12); // 12 % 8 == 4 -> soundfont
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
 }
 

@@ -8,7 +8,7 @@ endif()
 
 option(PURRMIDI_BUILD_TESTS "Build host unit tests" ON)
 
-# Все синтезаторы (epiano / pluck / sine / organ / soundfont) входят в сборку; активный
+# Все синтезаторы (epiano / pluck / lead / organ / soundfont) входят в сборку; активный
 # выбирается во время работы сообщением MIDI Program Change (см. Core/Inc/synth_engine.h).
 set(DAISYSP_DIR "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/DaisySP")
 if(NOT EXISTS "${DAISYSP_DIR}/Source")
@@ -113,7 +113,44 @@ target_include_directories(purrmidi_synth_soundfont PUBLIC
 )
 target_compile_features(purrmidi_synth_soundfont PUBLIC cxx_std_17)
 
-foreach(_synth sine pluck lead epiano organ soundfont)
+# dulcimer: цимбалы / модальный резонатор (Mutable Instruments Elements)
+add_library(purrmidi_synth_dulcimer STATIC
+    "${CMAKE_SOURCE_DIR}/Engine/synth/dulcimer_synth.cpp"
+    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack/elements/dsp/resonator.cc"
+    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack/elements/dsp/exciter.cc"
+    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack/elements/resources.cc"
+    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack/stmlib/utils/random.cc"
+    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack/stmlib/dsp/units.cc"
+)
+target_include_directories(purrmidi_synth_dulcimer PUBLIC
+    "${CMAKE_SOURCE_DIR}/Core/Inc"
+    "${CMAKE_SOURCE_DIR}/Engine/synth"
+    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack"
+)
+target_compile_definitions(purrmidi_synth_dulcimer PUBLIC TEST)
+target_compile_features(purrmidi_synth_dulcimer PUBLIC cxx_std_17)
+
+# flute: полифонический физический модулятор флейты (STK Flute)
+add_library(purrmidi_synth_flute STATIC
+    "${CMAKE_SOURCE_DIR}/Engine/synth/flute_synth.cpp"
+)
+target_include_directories(purrmidi_synth_flute PUBLIC
+    "${CMAKE_SOURCE_DIR}/Core/Inc"
+    "${CMAKE_SOURCE_DIR}/Engine/synth"
+)
+target_compile_features(purrmidi_synth_flute PUBLIC cxx_std_17)
+
+# saxophone: полифонический физический модулятор саксофона (STK Single Reed)
+add_library(purrmidi_synth_saxophone STATIC
+    "${CMAKE_SOURCE_DIR}/Engine/synth/saxophone_synth.cpp"
+)
+target_include_directories(purrmidi_synth_saxophone PUBLIC
+    "${CMAKE_SOURCE_DIR}/Core/Inc"
+    "${CMAKE_SOURCE_DIR}/Engine/synth"
+)
+target_compile_features(purrmidi_synth_saxophone PUBLIC cxx_std_17)
+
+foreach(_synth sine pluck lead epiano organ soundfont dulcimer flute saxophone)
     if(MSVC)
         target_compile_options(purrmidi_synth_${_synth} PRIVATE /utf-8 /W4)
     else()
@@ -147,6 +184,9 @@ target_link_libraries(purrmidi_core PUBLIC
     purrmidi_synth_pluck
     purrmidi_synth_sine
     purrmidi_synth_soundfont
+    purrmidi_synth_dulcimer
+    purrmidi_synth_flute
+    purrmidi_synth_saxophone
 )
 target_compile_features(purrmidi_core PUBLIC c_std_11 cxx_std_17)
 
@@ -183,6 +223,7 @@ if(PURRMIDI_BUILD_APP)
         midi_input.cpp
         audio_out.cpp
         wav_recorder.cpp
+        virtual_keyboard.cpp
     )
 
     set_target_properties(purrmidi_win PROPERTIES

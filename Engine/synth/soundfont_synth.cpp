@@ -523,6 +523,11 @@ void diag_chord(const char *tag)
             (unsigned long)(g_diag.peak_permille / 1000U), (unsigned long)((g_diag.peak_permille / 10U) % 100U),
             (unsigned long)g_diag.over_fs_samples, (unsigned long)g_diag.regions_wanted,
             (unsigned long)g_diag.voices_started, (unsigned long)g_diag.voice_shortfall);
+        if (n >= 6 && voices > 0) {
+            const uint32_t per_voice = sum / BLOCKS / us / (uint32_t)voices;
+            std::fprintf(stderr, "[SF2DIAG]   ~%lu us per voice per block -> about %lu voices fit in 80%% of the block (limit 32)\n",
+                         (unsigned long)per_voice, (unsigned long)(budget_us * 80U / 100U / (per_voice ? per_voice : 1U)));
+        }
     }
 }
 
@@ -535,6 +540,11 @@ void SoundFontSynth_Profile(void)
         return;
     }
     std::fprintf(stderr, "[SF2DIAG] ===== SoundFont diagnostics (render budget 2666 us per 128-frame block) =====\n");
+#ifdef __OPTIMIZE__
+    std::fprintf(stderr, "[SF2DIAG] soundfont_synth.cpp: optimized build\n");
+#else
+    std::fprintf(stderr, "[SF2DIAG] soundfont_synth.cpp: NOT OPTIMIZED (-O0): render cost below is several times higher than in Release\n");
+#endif
     diag_regions_per_note();
 
 #ifdef PURRMIDI_SF2_XIP

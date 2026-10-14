@@ -4,3 +4,9 @@
 [submodule "Middlewares/Third_Party/DaisySP"]
 	path = Middlewares/Third_Party/DaisySP
 	url = https://github.com/electro-smith/DaisySP.git
+[submodule "Middlewares/Third_Party/eurorack"]
+	path = Middlewares/Third_Party/eurorack
+	url = https://github.com/pichenettes/eurorack.git
+[submodule "Middlewares/Third_Party/stk"]
+	path = Middlewares/Third_Party/stk
+	url = https://github.com/thestk/stk.git

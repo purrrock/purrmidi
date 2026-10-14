@@ -1,0 +1,363 @@
+diff --git a/Core/Src/main.c b/Core/Src/main.c
+index ce69521..d52e5f5 100644
+--- a/Core/Src/main.c
++++ b/Core/Src/main.c
+@@ -31,7 +31,7 @@
+ /* USER CODE BEGIN Includes */
+ #include <stdio.h>
+ #include <string.h>
+-#include "synth_engine.h" /* Синтезаторы epiano / pluck / sine / organ / soundfont */
++#include "synth_engine.h" /* Синтезаторы epiano / pluck / lead / organ / soundfont */
+ #include "display.h"
+ #include "midi_event.h"
+ #include "midi_queue.h"
+@@ -255,7 +255,7 @@ static void Print_USB_Diag(uint32_t max_loop_dt)
+ /* Названия инструментов для дисплея (только ASCII, до 17 символов). Порядок = SynthEngineId. */
+ static const char * const display_patch_names[SYNTH_ENGINE_COUNT] =
+ {
+-    "E-Piano", "Pluck", "Sine", "Organ", "SoundFont"
++    "E-Piano", "Pluck", "Lead", "Organ", "SoundFont"
+ };
+ 
+ /* Номер на дисплее 1-based (как на большинстве клавиатур): Program Change 0 -> "01" */
+diff --git a/Engine/synth/lead_synth.cpp b/Engine/synth/lead_synth.cpp
+index a59b902..ba744ca 100644
+--- a/Engine/synth/lead_synth.cpp
++++ b/Engine/synth/lead_synth.cpp
+@@ -16,7 +16,6 @@ using namespace daisysp;
+ #define LEAD_MASTER_GAIN          0.50f   // Запас по динамическому диапазону для 8 голосов
+ #define EVENT_FIFO_SIZE           32      // Емкость кольцевого FIFO буфера
+ #define NOTE_ON_FIFO_LIMIT        28      // Порог резервирования слотов для Note Off и CC64
+-#define LEAD_OUTPUT_SCALE         (LEAD_MASTER_GAIN * 32767.0f)
+ 
+ // Диапазоны частот и генерации
+ #define LEAD_MIN_FREQ             20.0f
+@@ -51,6 +50,25 @@ using namespace daisysp;
+ #define LEAD_FILTER_DECAY_OFFSET  0.050f
+ #define LEAD_FILTER_SUSTAIN_SCALE 0.700f
+ 
++// Обновление коэффициентов фильтра с пониженной частотой (control rate).
++// Svf::SetFreq()/SetRes() внутри считают sinf() и powf(): вызывать их на каждый сэмпл для каждого голоса
++// слишком дорого для ISR (8 голосов x 48 кГц). Период должен быть степенью двойки.
++#define LEAD_CTRL_RATE            8
++#define LEAD_CUTOFF_EPS           0.25f   // Гц: изменение среза меньше этого порога не пересчитывается
++
++// Динамика суммы голосов.
++// Нормировка 1/sqrt(N): некоррелированные голоса складываются по мощности, поэтому громкость аккорда
++// остаётся близкой к громкости одной ноты. Коэффициент меняется плавно (быстро вниз, медленно вверх),
++// иначе при каждом включении/окончании голоса весь микс скачком меняет уровень (щелчки, «пампинг»).
++#define LEAD_GAIN_FALL_SEC        0.005f
++#define LEAD_GAIN_RISE_SEC        0.150f
++
++// Мягкий ограничитель на выходе вместо жёсткого среза int16: ниже порога (колена) сигнал не затрагивается,
++// выше — плавно (tanh) приближается к потолку. Потолок чуть ниже полной шкалы, поэтому выход
++// никогда не упирается в +-32767, даже при редких экстремальных пиках (резонанс + октавные голоса).
++#define LEAD_LIMIT_KNEE           0.80f
++#define LEAD_LIMIT_CEIL           0.98f
++
+ enum LeadEventType : uint8_t {
+     EVENT_NOTE_ON,
+     EVENT_NOTE_OFF,
+@@ -75,6 +93,8 @@ struct LeadVoice {
+     uint32_t trigger_age{0};
+     uint8_t press_count{0};
+     float velocity_gain{1.0f};
++    float applied_cutoff{-1.0f}; // последняя частота среза, отправленная в Svf (-1 = принудительно обновить)
++    float applied_res{-1.0f};    // последнее значение резонанса, отправленное в Svf
+     bool gate{false};
+     bool sustain_held{false};
+ };
+@@ -87,6 +107,16 @@ static LeadVoice voices[LEAD_VOICES];
+ #endif
+ 
+ static uint32_t global_trigger_counter = 0;
++static uint32_t ctrl_counter = 0;         // счётчик сэмплов для control rate
++static float    mix_norm_gain = 1.0f;     // сглаженная нормировка суммы голосов (только аудио-контекст)
++
++static float    mix_gain_fall_coef = 0.0f; // коэффициенты однополюсного сглаживания, считаются в Init()
++static float    mix_gain_rise_coef = 0.0f;
++
++// 1/sqrt(N) для N = 0..LEAD_VOICES (N = 0 трактуется как 1)
++static const float kVoiceNorm[LEAD_VOICES + 1] = {
++    1.0f, 1.0f, 0.70710678f, 0.57735027f, 0.5f, 0.44721360f, 0.40824829f, 0.37796447f, 0.35355339f
++};
+ 
+ // Параметры субтрактивного синтезатора (управляются через MIDI CC)
+ static std::atomic<float> filter_cutoff_base{LEAD_DEFAULT_CUTOFF};
+@@ -123,6 +153,14 @@ static inline float clamp_f(float val, float min_val, float max_val) {
+     return val;
+ }
+ 
++static inline float soft_limit(float x) {
++    const float a = fabsf(x);
++    if (a <= LEAD_LIMIT_KNEE) return x;
++    const float room = LEAD_LIMIT_CEIL - LEAD_LIMIT_KNEE;
++    const float y = LEAD_LIMIT_KNEE + room * tanhf((a - LEAD_LIMIT_KNEE) / room);
++    return (x < 0.0f) ? -y : y;
++}
++
+ static bool event_fifo_push_note_on(const LeadEvent& event) {
+     uint32_t head = fifo_head.load(std::memory_order_relaxed);
+     uint32_t tail = fifo_tail.load(std::memory_order_acquire);
+@@ -165,6 +203,10 @@ static bool event_fifo_pop(LeadEvent& event) {
+ 
+ void LeadSynth_Init(void) {
+     global_trigger_counter = 0;
++    ctrl_counter = 0;
++    mix_norm_gain = 1.0f;
++    mix_gain_fall_coef = 1.0f - expf(-1.0f / (LEAD_GAIN_FALL_SEC * LEAD_SAMPLE_RATE));
++    mix_gain_rise_coef = 1.0f - expf(-1.0f / (LEAD_GAIN_RISE_SEC * LEAD_SAMPLE_RATE));
+     audio_sustain_pedal = false;
+ 
+     filter_cutoff_base.store(LEAD_DEFAULT_CUTOFF, std::memory_order_relaxed);
+@@ -202,6 +244,8 @@ void LeadSynth_Init(void) {
+         v.trigger_age = 0;
+         v.press_count = 0;
+         v.velocity_gain = 1.0f;
++        v.applied_cutoff = -1.0f;
++        v.applied_res = -1.0f;
+         v.gate = false;
+         v.sustain_held = false;
+     }
+@@ -449,7 +493,20 @@ static int16_t LeadSynth_NextSample(void) {
+             v.filter_env.SetSustainLevel(sus * LEAD_FILTER_SUSTAIN_SCALE);
+             v.filter_env.SetReleaseTime(rel);
+             v.filter_env.Retrigger(hard_retrigger);
+-            v.filter_env.Process(true);
++            const float f_env_start = v.filter_env.Process(true);
++
++            // Фильтр нового голоса настраиваем сразу (а не по ближайшему control-rate тику),
++            // иначе первые сэмплы ноты прошли бы через коэффициенты предыдущей ноты этого голоса.
++            {
++                const float res_now = filter_res.load(std::memory_order_relaxed);
++                float cutoff_now = filter_cutoff_base.load(std::memory_order_relaxed)
++                                 + f_env_start * filter_env_amount.load(std::memory_order_relaxed);
++                cutoff_now = clamp_f(cutoff_now, LEAD_MIN_CUTOFF, LEAD_MAX_CUTOFF);
++                v.filter.SetRes(res_now);
++                v.filter.SetFreq(cutoff_now);
++                v.applied_res = res_now;
++                v.applied_cutoff = cutoff_now;
++            }
+ 
+             v.voice_state.store((int32_t)event.param1, std::memory_order_release);
+ 
+@@ -487,9 +544,11 @@ static int16_t LeadSynth_NextSample(void) {
+     float mix_sum_f = 0.0f;
+     uint32_t active_voices_count = 0;
+ 
+-    float base_cutoff = filter_cutoff_base.load(std::memory_order_relaxed);
+-    float res_val     = filter_res.load(std::memory_order_relaxed);
+-    float env_amt     = filter_env_amount.load(std::memory_order_relaxed);
++    const bool ctrl_tick = ((ctrl_counter++ & (LEAD_CTRL_RATE - 1U)) == 0U);
++
++    const float base_cutoff = filter_cutoff_base.load(std::memory_order_relaxed);
++    const float res_val     = filter_res.load(std::memory_order_relaxed);
++    const float env_amt     = filter_env_amount.load(std::memory_order_relaxed);
+ 
+     for (int i = 0; i < LEAD_VOICES; i++) {
+         LeadVoice& v = voices[i];
+@@ -509,12 +568,23 @@ static int16_t LeadSynth_NextSample(void) {
+ 
+             float raw_osc = v.osc.Process();
+ 
+-            // Динамическая модуляция частоты среза LPF огибающей
+-            float cutoff = base_cutoff + f_env_val * env_amt;
+-            cutoff = clamp_f(cutoff, LEAD_MIN_CUTOFF, LEAD_MAX_CUTOFF);
++            // Динамическая модуляция частоты среза LPF огибающей (control rate, без sinf/powf на каждый сэмпл)
++            if (ctrl_tick) {
++                float cutoff = base_cutoff + f_env_val * env_amt;
++                cutoff = clamp_f(cutoff, LEAD_MIN_CUTOFF, LEAD_MAX_CUTOFF);
++
++                bool need_freq = fabsf(cutoff - v.applied_cutoff) > LEAD_CUTOFF_EPS;
++                if (v.applied_res != res_val) {
++                    v.filter.SetRes(res_val);
++                    v.applied_res = res_val;
++                    need_freq = true; // SetFreq() пересчитывает демпфирование с новым резонансом
++                }
++                if (need_freq) {
++                    v.filter.SetFreq(cutoff);
++                    v.applied_cutoff = cutoff;
++                }
++            }
+ 
+-            v.filter.SetRes(res_val);
+-            v.filter.SetFreq(cutoff);
+             v.filter.Process(raw_osc);
+ 
+             float filtered_sample = v.filter.Low();
+@@ -525,20 +595,15 @@ static int16_t LeadSynth_NextSample(void) {
+         }
+     }
+ 
+-    float norm_gain = 1.0f;
+-    if (active_voices_count > 1) {
+-        norm_gain = 1.0f / (1.0f + 0.35f * (float)(active_voices_count - 1));
+-    }
+-
+-    float output_sample_f = mix_sum_f * norm_gain * LEAD_OUTPUT_SCALE;
++    // Плавная нормировка по числу звучащих голосов (см. LEAD_GAIN_*)
++    const float target_gain = kVoiceNorm[active_voices_count];
++    const float gain_coef = (target_gain < mix_norm_gain) ? mix_gain_fall_coef : mix_gain_rise_coef;
++    mix_norm_gain += gain_coef * (target_gain - mix_norm_gain);
+ 
+-    if (output_sample_f > 32767.0f) {
+-        output_sample_f = 32767.0f;
+-    } else if (output_sample_f < -32768.0f) {
+-        output_sample_f = -32768.0f;
+-    }
++    // 1.0 = полная шкала int16. Мягкий ограничитель гарантирует |y| <= LEAD_LIMIT_CEIL без жёсткого среза.
++    const float output_sample_f = soft_limit(mix_sum_f * mix_norm_gain * LEAD_MASTER_GAIN);
+ 
+-    return (int16_t)output_sample_f;
++    return (int16_t)(output_sample_f * 32767.0f);
+ }
+ 
+ void LeadSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames) {
+diff --git a/Engine/synth/lead_synth.h b/Engine/synth/lead_synth.h
+index f0952c2..99c3cbc 100644
+--- a/Engine/synth/lead_synth.h
++++ b/Engine/synth/lead_synth.h
+@@ -22,6 +22,11 @@
+  *     - CC 73: Время атаки огибающей (Attack Time);
+  *     - CC 74: Базовая частота среза фильтра (Filter Cutoff Frequency).
+  *
++ * Динамика микса:
++ *   Сумма голосов нормируется по 1/sqrt(N) со сглаживанием (без скачков уровня при смене числа голосов),
++ *   на выходе стоит мягкий ограничитель (tanh) с потолком ниже полной шкалы int16, поэтому аккорды не
++ *   упираются в жёсткий срез. Коэффициенты фильтра обновляются с пониженной частотой (каждые 8 сэмплов).
++ *
+  * Контракт вызовов:
+  *   LeadSynth_Init / NoteOn / NoteOff / ControlChange — из контекста main / MIDI-потока;
+  *   LeadSynth_FillStereoBuffer — из контекста аудио-прерывания DMA (STM32) или аудио-потока (ПК).
+diff --git a/platform/windows/CMakeLists.txt b/platform/windows/CMakeLists.txt
+index 65e5c3f..f82239d 100644
+--- a/platform/windows/CMakeLists.txt
++++ b/platform/windows/CMakeLists.txt
+@@ -8,7 +8,7 @@ endif()
+ 
+ option(PURRMIDI_BUILD_TESTS "Build host unit tests" ON)
+ 
+-# Все синтезаторы (epiano / pluck / sine / organ / soundfont) входят в сборку; активный
++# Все синтезаторы (epiano / pluck / lead / organ / soundfont) входят в сборку; активный
+ # выбирается во время работы сообщением MIDI Program Change (см. Core/Inc/synth_engine.h).
+ set(DAISYSP_DIR "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/DaisySP")
+ if(NOT EXISTS "${DAISYSP_DIR}/Source")
+diff --git a/platform/windows/audio_out.cpp b/platform/windows/audio_out.cpp
+index c128615..ef57bce 100644
+--- a/platform/windows/audio_out.cpp
++++ b/platform/windows/audio_out.cpp
+@@ -26,7 +26,7 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput,
+     AudioCallbackData* cb_data = static_cast<AudioCallbackData*>(pDevice->pUserData);
+     int16_t* out = static_cast<int16_t*>(pOutput);
+ 
+-    // Рендер через выбранный при компиляции синтезатор (sine / pluck / epiano)
++    // Рендер через выбранный при компиляции синтезатор (epiano / pluck / lead / organ / soundfont)
+     SynthEngine_FillStereoBuffer(out, frameCount);
+ 
+     // Apply gain if not 1.0f
+diff --git a/platform/windows/main_win.cpp b/platform/windows/main_win.cpp
+index 40af2ab..c3278f4 100644
+--- a/platform/windows/main_win.cpp
++++ b/platform/windows/main_win.cpp
+@@ -292,7 +292,7 @@ int main(int argc, char* argv[]) {
+             return 1;
+         }
+         std::cout << "Synth engine: " << SynthEngine_GetName()
+-                  << " (Program Change: 0=epiano, 1=pluck, 2=sine, 3=organ, 4=soundfont, 127=next engine)\n";
++                  << " (Program Change: 0=epiano, 1=pluck, 2=lead, 3=organ, 4=soundfont, 127=next engine)\n";
+         std::cout << "Synth player running. Press ENTER or Ctrl+C to stop...\n";
+     } else {
+         std::cout << "MIDI Monitor running. Press ENTER or Ctrl+C to stop...\n";
+diff --git a/tests/test_lead_host.cpp b/tests/test_lead_host.cpp
+index 4ec8bb5..6a51be3 100644
+--- a/tests/test_lead_host.cpp
++++ b/tests/test_lead_host.cpp
+@@ -468,6 +468,79 @@ void test_reinit_state_reset() {
+     std::cout << "Verified: LeadSynth_Init restores clean state.\n";
+ }
+ 
++// Аккорды не должны упираться в жёсткий срез int16 (раньше триада с velocity >= 100 доходила до +-32767).
++void test_chords_do_not_hard_clip() {
++    const std::vector<std::vector<uint8_t>> chords = {
++        {60, 64, 67},
++        {60, 64, 67, 71},
++        {48, 60, 64, 67, 72},
++        {36, 48, 55, 60, 64, 67, 72, 76},
++    };
++    const uint8_t resonance_cc[] = {45, 100}; // по умолчанию и повышенный резонанс
++
++    for (uint8_t res_cc : resonance_cc) {
++        for (const auto& chord : chords) {
++            LeadSynth_Init();
++            LeadSynth_ControlChange(71, res_cc);
++            for (uint8_t n : chord) LeadSynth_NoteOn(n, 127);
++
++            std::vector<int16_t> buf(48000 * 2, 0);
++            LeadSynth_FillStereoBuffer(buf.data(), 48000);
++
++            int rail_hits = 0;
++            int peak = 0;
++            for (size_t i = 0; i < 48000; ++i) {
++                int s = buf[i * 2];
++                if (s >= 32767 || s <= -32767) rail_hits++;
++                if (std::abs(s) > peak) peak = std::abs(s);
++            }
++            if (rail_hits != 0) {
++                std::cout << "Hard clipping: notes=" << chord.size() << " resCC=" << (int)res_cc
++                          << " rail_hits=" << rail_hits << " peak=" << peak << "\n";
++            }
++            assert(rail_hits == 0);
++            assert(peak > 4000); // и при этом не тишина
++        }
++    }
++    std::cout << "Verified: chords stay below full scale without hard clipping.\n";
++}
++
++// Когда голос заканчивает release и число звучащих голосов меняется, остальные голоса не должны
++// получать скачок уровня (раньше нормировка 1/(1+0.35(N-1)) менялась мгновенно -> щелчок).
++void test_no_level_step_when_voice_count_changes() {
++    LeadSynth_Init();
++    LeadSynth_ControlChange(74, 8);  // низкий срез: сигнал почти синусоидальный, ступеньки хорошо видны
++    LeadSynth_ControlChange(1, 0);   // без модуляции среза огибающей
++    LeadSynth_ControlChange(72, 0);  // короткий release (~20 мс)
++    LeadSynth_ControlChange(71, 0);
++
++    std::vector<int16_t> b(48000 * 2, 0);
++    auto fill = [&](long from, long to) { LeadSynth_FillStereoBuffer(b.data() + from * 2, to - from); };
++
++    LeadSynth_NoteOn(60, 100);
++    LeadSynth_NoteOn(67, 100);
++    fill(0, 14400);                  // 0.30 с: два голоса
++    LeadSynth_NoteOn(64, 100);
++    fill(14400, 28800);              // до 0.60 с: три голоса
++    LeadSynth_NoteOff(64);
++    fill(28800, 48000);              // release третьего голоса, затем снова два
++
++    auto max_d2 = [&](long from, long to) {
++        double m = 0;
++        for (long i = from + 2; i < to; ++i) {
++            double d = std::abs((double)b[i * 2] - 2.0 * b[(i - 1) * 2] + b[(i - 2) * 2]);
++            if (d > m) m = d;
++        }
++        return m;
++    };
++
++    const double steady = max_d2(38400, 48000);      // 0.8..1.0 с: два голоса, всё установилось
++    const double around_end = max_d2(28800, 38400);  // 0.6..0.8 с: окончание release третьего голоса
++    std::cout << "d2 steady=" << steady << " d2 around voice end=" << around_end << "\n";
++    assert(around_end < steady * 1.5);
++    std::cout << "Verified: no level step when a voice ends.\n";
++}
++
+ int main() {
+     test_lead_render_and_note_off();
+     test_noteon_velocity_zero_regression();
+@@ -480,6 +553,8 @@ int main() {
+     test_envelope_retrigger_on_voice_stealing();
+     test_polyphony_chords_and_controls();
+     test_reinit_state_reset();
++    test_chords_do_not_hard_clip();
++    test_no_level_step_when_voice_count_changes();
+     std::cout << "test_lead_host passed successfully." << std::endl;
+     return 0;
+ }
