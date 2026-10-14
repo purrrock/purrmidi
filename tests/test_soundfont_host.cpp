@@ -45,13 +45,16 @@ static void test_engine_registration_and_pc() {
     SynthEngine_ProgramChange(5);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_DULCIMER);
 
-    SynthEngine_ProgramChange(6); // 6 % 6 == 0 -> epiano
+    SynthEngine_ProgramChange(6);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_FLUTE);
+
+    SynthEngine_ProgramChange(7); // 7 % 7 == 0 -> epiano
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
 
-    SynthEngine_ProgramChange(7); // 7 % 6 == 1 -> pluck
+    SynthEngine_ProgramChange(8); // 8 % 7 == 1 -> pluck
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
 
-    SynthEngine_ProgramChange(10); // 10 % 6 == 4 -> soundfont
+    SynthEngine_ProgramChange(11); // 11 % 7 == 4 -> soundfont
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
 }
 

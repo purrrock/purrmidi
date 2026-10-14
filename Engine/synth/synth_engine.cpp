@@ -24,6 +24,7 @@
 #include "pluck_synth.h"
 #include "soundfont_synth.h"
 #include "dulcimer_synth.h"
+#include "flute_synth.h"
 
 #include <atomic>
 #include <cstring>
@@ -60,6 +61,9 @@ const Engine kEngines[SYNTH_ENGINE_COUNT] = {
     /* SYNTH_ENGINE_DULCIMER */
     { "dulcimer", DulcimerSynth_Init, DulcimerSynth_NoteOn, DulcimerSynth_NoteOff,
       DulcimerSynth_ControlChange, DulcimerSynth_FillStereoBuffer },
+    /* SYNTH_ENGINE_FLUTE */
+    { "flute", FluteSynth_Init, FluteSynth_NoteOn, FluteSynth_NoteOff,
+      FluteSynth_ControlChange, FluteSynth_FillStereoBuffer },
 };
 
 std::atomic<const Engine *> g_active{nullptr};   /* nullptr до первого SynthEngine_Init() */

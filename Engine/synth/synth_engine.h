@@ -47,7 +47,8 @@ typedef enum {
     SYNTH_ENGINE_LEAD      = 2,
     SYNTH_ENGINE_ORGAN     = 3,
     SYNTH_ENGINE_SOUNDFONT = 4,
-    SYNTH_ENGINE_DULCIMER   = 5,
+    SYNTH_ENGINE_DULCIMER  = 5,
+    SYNTH_ENGINE_FLUTE     = 6,
     SYNTH_ENGINE_COUNT
 } SynthEngineId;
 
