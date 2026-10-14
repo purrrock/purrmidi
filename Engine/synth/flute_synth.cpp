@@ -141,17 +141,13 @@ static FluteVoice voices[FLUTE_VOICES];
 
 static uint32_t global_trigger_counter = 0;
 
-// Параметры синтезатора флейты (управляются через MIDI CC)
+// Параметры синтезатора флейты (атомарны для предотвращения data race между main и ISR)
 static std::atomic<float> cc_vibrato_depth{FLUTE_DEFAULT_VIBRATO_DEP};
 static std::atomic<float> cc_turbulence{FLUTE_DEFAULT_TURBULENCE};
 static std::atomic<float> cc_jet_ratio{FLUTE_DEFAULT_JET_RATIO};
 static std::atomic<float> cc_bore_damping{FLUTE_DEFAULT_DAMPING};
 static std::atomic<float> cc_release_sec{FLUTE_DEFAULT_RELEASE};
 static std::atomic<float> cc_attack_sec{FLUTE_DEFAULT_ATTACK};
-
-// Предрассчитанные коэффициенты огибающей
-static float cached_attack_rate = 1.0f / (FLUTE_DEFAULT_ATTACK * FLUTE_SAMPLE_RATE);
-static float cached_release_rate = 1.0f / (FLUTE_DEFAULT_RELEASE * FLUTE_SAMPLE_RATE);
 
 static FluteEvent event_fifo[EVENT_FIFO_SIZE];
 static std::atomic<uint32_t> fifo_head{0};
@@ -239,9 +235,6 @@ void FluteSynth_Init(void) {
     cc_bore_damping.store(FLUTE_DEFAULT_DAMPING, std::memory_order_relaxed);
     cc_release_sec.store(FLUTE_DEFAULT_RELEASE, std::memory_order_relaxed);
     cc_attack_sec.store(FLUTE_DEFAULT_ATTACK, std::memory_order_relaxed);
-
-    cached_attack_rate = 1.0f / (FLUTE_DEFAULT_ATTACK * FLUTE_SAMPLE_RATE);
-    cached_release_rate = 1.0f / (FLUTE_DEFAULT_RELEASE * FLUTE_SAMPLE_RATE);
 
     for (int i = 0; i < FLUTE_VOICES; i++) {
         FluteVoice& v = voices[i];
@@ -386,7 +379,6 @@ void FluteSynth_ControlChange(uint8_t control, uint8_t value) {
         case 72: { // CC 72: Release Time (0.02..1.50 с)
             float rel = 0.02f + norm * 1.48f;
             cc_release_sec.store(rel, std::memory_order_relaxed);
-            cached_release_rate = 1.0f / (rel * FLUTE_SAMPLE_RATE);
             break;
         }
 
@@ -535,8 +527,10 @@ static int16_t FluteSynth_NextSample(void) {
     float mix_sum = 0.0f;
     uint32_t active_voices_count = 0;
 
-    const float attack_rate = cached_attack_rate;
-    const float release_rate = cached_release_rate;
+    const float att_sec = cc_attack_sec.load(std::memory_order_relaxed);
+    const float rel_sec = cc_release_sec.load(std::memory_order_relaxed);
+    const float attack_rate = 1.0f / (att_sec * FLUTE_SAMPLE_RATE);
+    const float release_rate = 1.0f / (rel_sec * FLUTE_SAMPLE_RATE);
 
     const float vib_depth = cc_vibrato_depth.load(std::memory_order_relaxed);
     const float turb_gain = cc_turbulence.load(std::memory_order_relaxed);

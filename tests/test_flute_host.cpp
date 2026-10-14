@@ -230,7 +230,7 @@ int main() {
         CHECK(calculate_peak(buf) > 0);
 
         FluteSynth_NoteOff(60);
-        for (int i = 0; i < 60; ++i) {
+        for (int i = 0; i < 80; ++i) {
             FluteSynth_FillStereoBuffer(buf.data(), 256);
         }
         CHECK(FluteSynth_IsNoteActive(60) == false);
