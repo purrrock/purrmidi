@@ -37,7 +37,7 @@ void DulcimerSynth_ControlChange(uint8_t cc_num, uint8_t value);
  * @param buffer      Указатель на выходной стереобуфер (L, R, L, R...)
  * @param num_samples Количество стереокадров для сэмплирования
  */
-void DulcimerSynth_FillStereoBuffer(int16_t *buffer, uint16_t num_samples);
+void DulcimerSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_samples);
 
 #ifdef __cplusplus
 }

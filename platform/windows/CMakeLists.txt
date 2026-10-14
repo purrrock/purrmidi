@@ -164,6 +164,7 @@ target_link_libraries(purrmidi_core PUBLIC
     purrmidi_synth_pluck
     purrmidi_synth_sine
     purrmidi_synth_soundfont
+    purrmidi_synth_dulcimer
 )
 target_compile_features(purrmidi_core PUBLIC c_std_11 cxx_std_17)
 

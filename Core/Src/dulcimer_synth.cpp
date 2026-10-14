@@ -34,7 +34,7 @@ struct DulcimerEvent {
 struct DulcimerVoice {
     elements::Resonator resonator;
     elements::Exciter exciter;
-    std::atomic<int32_t> voice_state{-1}; // -1 = inactive, 0..127 = active note
+    std::atomic<int32_t> voice_state{-1}; // -1 = inactive, 0..127 = active note number
     float freq{220.0f / DULCIMER_SAMPLE_RATE};
     float level_ema{0.0f};
     uint32_t trigger_age{0};
@@ -303,7 +303,7 @@ void DulcimerSynth_ControlChange(uint8_t cc_num, uint8_t value) {
     }
 }
 
-void DulcimerSynth_FillStereoBuffer(int16_t *buffer, uint16_t num_samples) {
+void DulcimerSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_samples) {
     // 1. Recovery state machine checks
     uint32_t rec_st = recovery_state.load(std::memory_order_seq_cst);
     if (rec_st != RECOVERY_NORMAL) {
@@ -365,6 +365,17 @@ void DulcimerSynth_FillStereoBuffer(int16_t *buffer, uint16_t num_samples) {
                         target_voice = i;
                     }
                 }
+
+                // Cleanly release stolen voice's previous note press count if stolen
+                int32_t stolen_note = voices[target_voice].voice_state.load(std::memory_order_relaxed);
+                if (stolen_note >= 0 && stolen_note < 128) {
+                    uint8_t cur_cnt = global_note_press_count[stolen_note].load(std::memory_order_relaxed);
+                    while (cur_cnt > 0) {
+                        if (global_note_press_count[stolen_note].compare_exchange_weak(cur_cnt, cur_cnt - 1, std::memory_order_relaxed)) {
+                            break;
+                        }
+                    }
+                }
             }
 
             DulcimerVoice& v = voices[target_voice];
@@ -373,9 +384,16 @@ void DulcimerSynth_FillStereoBuffer(int16_t *buffer, uint16_t num_samples) {
             v.trigger_age  = ++global_trigger_counter;
             v.pending_trig = true;
             v.gate         = true;
-            if (v.press_count < 255) v.press_count++;
             v.sustain_held = false;
-            v.voice_state.store((int32_t)event.param1, std::memory_order_release);
+
+            // If reusing same voice or stolen voice, reassign state cleanly
+            int32_t cur_state = v.voice_state.load(std::memory_order_relaxed);
+            if (cur_state == (int32_t)event.param1) {
+                if (v.press_count < 255) v.press_count++;
+            } else {
+                v.press_count = 1;
+                v.voice_state.store((int32_t)event.param1, std::memory_order_release);
+            }
 
             v.resonator.set_frequency(event.freq);
             v.exciter.set_model(elements::EXCITER_MODEL_MALLET);
@@ -414,17 +432,17 @@ void DulcimerSynth_FillStereoBuffer(int16_t *buffer, uint16_t num_samples) {
     }
 
     // 3. Render audio block in sub-blocks of DULCIMER_BLOCK_SIZE
-    uint16_t samples_remaining = num_samples;
+    uint32_t samples_remaining = num_samples;
     int16_t *out_ptr = buffer;
 
-    float cur_geom  = user_geometry.load(std::memory_order_relaxed);
+    float cur_geom   = user_geometry.load(std::memory_order_relaxed);
     float cur_bright = user_brightness.load(std::memory_order_relaxed);
-    float cur_damp  = user_damping.load(std::memory_order_relaxed);
-    float cur_pos   = user_position.load(std::memory_order_relaxed);
-    float cur_timb  = user_timbre.load(std::memory_order_relaxed);
+    float cur_damp   = user_damping.load(std::memory_order_relaxed);
+    float cur_pos    = user_position.load(std::memory_order_relaxed);
+    float cur_timb   = user_timbre.load(std::memory_order_relaxed);
 
     while (samples_remaining > 0) {
-        uint16_t chunk = std::min((uint16_t)DULCIMER_BLOCK_SIZE, samples_remaining);
+        uint32_t chunk = std::min((uint32_t)DULCIMER_BLOCK_SIZE, samples_remaining);
 
         float mix_l[DULCIMER_BLOCK_SIZE] = {0.0f};
         float mix_r[DULCIMER_BLOCK_SIZE] = {0.0f};
@@ -445,7 +463,7 @@ void DulcimerSynth_FillStereoBuffer(int16_t *buffer, uint16_t num_samples) {
             uint8_t flags = 0;
             if (v.pending_trig) {
                 flags |= elements::EXCITER_FLAG_RISING_EDGE;
-                v.pending_trig = false;
+                v.pending_trig = false; // Issue RISING_EDGE strictly on the first sub-block of attack
             }
             if (v.gate || v.sustain_held) {
                 flags |= elements::EXCITER_FLAG_GATE;
@@ -462,7 +480,7 @@ void DulcimerSynth_FillStereoBuffer(int16_t *buffer, uint16_t num_samples) {
             v.resonator.Process(bow_strength, exciter_out, center_out, side_out, chunk);
 
             float block_energy = 0.0f;
-            for (uint16_t k = 0; k < chunk; k++) {
+            for (uint32_t k = 0; k < chunk; k++) {
                 float l = center_out[k] + side_out[k];
                 float r = center_out[k] - side_out[k];
                 mix_l[k] += l;
@@ -492,7 +510,7 @@ void DulcimerSynth_FillStereoBuffer(int16_t *buffer, uint16_t num_samples) {
             gain /= std::sqrt((float)active_count);
         }
 
-        for (uint16_t k = 0; k < chunk; k++) {
+        for (uint32_t k = 0; k < chunk; k++) {
             float sample_l = mix_l[k] * gain * 32767.0f;
             float sample_r = mix_r[k] * gain * 32767.0f;
 
