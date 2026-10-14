@@ -158,6 +158,16 @@ static void TestTabProgramChange() {
     assert((events[0].status & MIDI_STATUS_MASK) == MIDI_STATUS_PROGRAM_CHANGE);
     assert(events[0].data1 == 127);
 
+    // Repeated auto-repeat KeyDown for TAB while held
+    vk.HandleKeyDown(0x09, 0x0F);
+    vk.HandleKeyDown(0x09, 0x0F);
+    assert(events.size() == 1); // No duplicate Program Change events
+
+    // Release TAB and press again
+    vk.HandleKeyUp(0x09, 0x0F);
+    vk.HandleKeyDown(0x09, 0x0F);
+    assert(events.size() == 2);
+
     std::cout << "[PASS] TestTabProgramChange\n";
 }
 
@@ -168,6 +178,13 @@ static void TestOctaveKeys() {
     // Press [ (scancode 0x1A) -> octave down to 3
     vk.HandleKeyDown(0xDB, 0x1A);
     assert(vk.GetBaseOctave() == 3);
+
+    // Auto-repeat KeyDown for [ while held
+    vk.HandleKeyDown(0xDB, 0x1A);
+    assert(vk.GetBaseOctave() == 3); // Octave stays 3
+
+    // Release [
+    vk.HandleKeyUp(0xDB, 0x1A);
 
     // Press ] (scancode 0x1B) -> octave up to 4
     vk.HandleKeyDown(0xDD, 0x1B);

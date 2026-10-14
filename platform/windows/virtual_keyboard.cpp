@@ -131,8 +131,8 @@ void VirtualKeyboard::DispatchEvent(const MIDI_Event_t& ev) {
 void VirtualKeyboard::HandleKeyDown(uint32_t key_code, uint16_t scan_code) {
     uint32_t key_id = MakeKeyId(key_code, scan_code);
 
-    // Игнорируем повторные автонажатия удержанной клавиши ОС Windows
-    if (active_key_notes_.find(key_id) != active_key_notes_.end()) {
+    // Игнорируем повторные автонажатия удержанной клавиши ОС Windows (для всех клавиш, включая TAB и октавы)
+    if (!held_keys_.insert(key_id).second) {
         return;
     }
 
@@ -174,6 +174,8 @@ void VirtualKeyboard::HandleKeyDown(uint32_t key_code, uint16_t scan_code) {
 
 void VirtualKeyboard::HandleKeyUp(uint32_t key_code, uint16_t scan_code) {
     uint32_t key_id = MakeKeyId(key_code, scan_code);
+    held_keys_.erase(key_id);
+
     auto it = active_key_notes_.find(key_id);
     if (it == active_key_notes_.end()) {
         return; // Повторное или неизвестное отпускание игнорируется
@@ -198,6 +200,7 @@ void VirtualKeyboard::AllNotesOff() {
         DispatchEvent(ev);
     }
     active_key_notes_.clear();
+    held_keys_.clear();
 }
 
 bool VirtualKeyboard::IsNoteActive(uint8_t note) const {

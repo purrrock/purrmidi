@@ -6,6 +6,7 @@
 #include <vector>
 #include <functional>
 #include <unordered_map>
+#include <unordered_set>
 #include "midi_event.h"
 
 namespace purrmidi {
@@ -70,6 +71,9 @@ private:
     int base_octave_{4};
     uint8_t velocity_{100};
     EventCallback event_cb_;
+
+    // Набор всех удерживаемых в данный момент key_id (для фильтрации автоповтора нот и управляющих клавиш)
+    std::unordered_set<uint32_t> held_keys_;
 
     // Отображение key_id -> MIDI note, отправленная при KeyDown
     std::unordered_map<uint32_t, uint8_t> active_key_notes_;

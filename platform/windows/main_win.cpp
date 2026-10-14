@@ -112,14 +112,28 @@ static bool ParseArgs(int argc, char* argv[], AppConfig& config) {
             }
         } else if (arg == "--octave") {
             if (i + 1 < argc) {
-                config.octave = std::atoi(argv[++i]);
+                char* endptr = nullptr;
+                const char* val_str = argv[++i];
+                long val = std::strtol(val_str, &endptr, 10);
+                if (*endptr != '\0' || endptr == val_str || val < 0 || val > 8) {
+                    std::cerr << "Error: --octave requires an integer argument in range 0..8." << std::endl;
+                    return false;
+                }
+                config.octave = static_cast<int>(val);
             } else {
                 std::cerr << "Error: --octave requires an integer argument (0..8)." << std::endl;
                 return false;
             }
         } else if (arg == "--velocity") {
             if (i + 1 < argc) {
-                config.velocity = static_cast<uint8_t>(std::atoi(argv[++i]));
+                char* endptr = nullptr;
+                const char* val_str = argv[++i];
+                long val = std::strtol(val_str, &endptr, 10);
+                if (*endptr != '\0' || endptr == val_str || val < 1 || val > 127) {
+                    std::cerr << "Error: --velocity requires an integer argument in range 1..127." << std::endl;
+                    return false;
+                }
+                config.velocity = static_cast<uint8_t>(val);
             } else {
                 std::cerr << "Error: --velocity requires a value argument (1..127)." << std::endl;
                 return false;
