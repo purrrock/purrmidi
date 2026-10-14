@@ -117,7 +117,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Engine/synth/soundfont_synth.cpp
     Engine/synth/tinysoundfont_impl.cpp
     Engine/synth/synth.c
-    Core/Src/dulcimer_synth.cpp
+    Engine/synth/dulcimer_synth.cpp
     Engine/synth/flute_synth.cpp
     Engine/synth/saxophone_synth.cpp
 
@@ -168,7 +168,7 @@ set(PURRMIDI_AUDIO_HOT_SOURCES
     Engine/synth/sf2_xip.cpp
     Engine/synth/tinysoundfont_impl.cpp
     Engine/synth/synth.c
-    Core/Src/dulcimer_synth.cpp
+    Engine/synth/dulcimer_synth.cpp
     Engine/synth/flute_synth.cpp
     Engine/synth/saxophone_synth.cpp
 
