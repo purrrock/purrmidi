@@ -246,13 +246,20 @@ int main(int argc, char* argv[]) {
 
     if (config.midi_port < 0) {
         if (midi_ports.empty()) {
-            std::cerr << "Error: No MIDI input ports found." << std::endl;
-            return 1;
+            if (config.mode == AppConfig::Mode::Play) {
+                std::cout << "No MIDI input ports found; "
+                             "continuing with virtual keyboard only.\n";
+            } else {
+                std::cerr << "Error: No MIDI input ports found." << std::endl;
+                return 1;
+            }
+        } else {
+            config.midi_port = 0;
         }
         config.midi_port = 0;
     }
-
-    if (static_cast<size_t>(config.midi_port) >= midi_ports.size()) {
+    if (config.midi_port >= 0 &&
+        static_cast<size_t>(config.midi_port) >= midi_ports.size()) {
         std::cerr << "Error: Invalid MIDI port index " << config.midi_port << ". Available ports:\n";
         DoList();
         return 1;
@@ -321,12 +328,16 @@ int main(int argc, char* argv[]) {
         }
     });
 
-    if (!midi_in.OpenPort(config.midi_port, false, !config.show_realtime, true)) {
-        std::cerr << "Failed to open MIDI port " << config.midi_port << std::endl;
-        return 1;
+    if (config.midi_port >= 0) {
+        if (!midi_in.OpenPort(config.midi_port, false, !config.show_realtime, true)) {
+            std::cerr << "Failed to open MIDI port " << config.midi_port << std::endl;
+            return 1;
+        }
+        std::cout << "Opened MIDI Port [" << config.midi_port << "]: "
+                  << midi_ports[config.midi_port].name << "\n";
+    } else {
+        std::cout << "MIDI input disabled; using virtual keyboard only.\n";
     }
-
-    std::cout << "Opened MIDI Port [" << config.midi_port << "]: " << midi_ports[config.midi_port].name << "\n";
 
     WavRecorder wav_recorder;
     AudioOut audio_out;
