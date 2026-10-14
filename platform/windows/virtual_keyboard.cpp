@@ -218,7 +218,7 @@ bool VirtualKeyboard::IsNoteActive(uint8_t note) const {
 void VirtualKeyboard::Poll() {
 #ifdef _WIN32
     if (!console_handle_) return;
-
+/*
     HWND console_hwnd = GetConsoleWindow();
     if (console_hwnd && IsWindowVisible(console_hwnd)) {
         HWND fg_hwnd = GetForegroundWindow();
@@ -231,7 +231,7 @@ void VirtualKeyboard::Poll() {
             focus_state_ = true;
         }
     }
-
+*/
     DWORD num_events = 0;
     if (!GetNumberOfConsoleInputEvents(console_handle_, &num_events) || num_events == 0) {
         return;
@@ -253,9 +253,7 @@ void VirtualKeyboard::Poll() {
                 focus_state_ = true;
             }
         } else if (rec.EventType == KEY_EVENT) {
-            if (!focus_state_ && rec.Event.KeyEvent.bKeyDown) {
-                continue;
-            }
+
             const auto& ke = rec.Event.KeyEvent;
             uint32_t vk = ke.wVirtualKeyCode;
             uint16_t sc = ke.wVirtualScanCode;
