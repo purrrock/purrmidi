@@ -72,6 +72,13 @@ void SaxophoneSynth_ControlChange(uint8_t control, uint8_t value);
 void SaxophoneSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames);
 
 /**
+ * @brief Генерация очередного блока плавающих стерео-сэмплов [-1.0f, +1.0f] для тестирования.
+ * @param buffer     Указатель на выходной стереобуфер float (L, R, L, R...).
+ * @param num_frames Количество стереокадров для генерации.
+ */
+void SaxophoneSynth_FillFloatBuffer(float *buffer, uint32_t num_frames);
+
+/**
  * @brief Проверка активности конкретной ноты.
  * @param midi_note Номер ноты (0..127).
  * @return true если нота активна в одном из голосов, false в противном случае.

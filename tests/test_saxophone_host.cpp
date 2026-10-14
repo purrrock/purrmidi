@@ -59,7 +59,7 @@ int main() {
         std::cout << "[PASS] Test 2: Note On produces sound and Note Off releases to silence." << std::endl;
     }
 
-    // Test 3: Velocity response
+    // Test 3: Velocity response and Velocity=0 acting as NoteOff
     {
         SaxophoneSynth_Init();
         std::vector<int16_t> buf(256 * 2, 0);
@@ -73,11 +73,14 @@ int main() {
         SaxophoneSynth_NoteOn(60, 127);
         SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
         int hard_peak = calculate_peak(buf);
-        SaxophoneSynth_NoteOff(60);
+
+        // NoteOn with velocity 0 == Note Off
+        SaxophoneSynth_NoteOn(60, 0);
         for (int i = 0; i < 40; ++i) SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
 
         CHECK(hard_peak > soft_peak);
-        std::cout << "[PASS] Test 3: Higher velocity produces higher amplitude." << std::endl;
+        CHECK(SaxophoneSynth_IsNoteActive(60) == false);
+        std::cout << "[PASS] Test 3: Velocity response and Velocity 0 == NoteOff verified." << std::endl;
     }
 
     // Test 4: CC 11 (Expression) and CC 73 (Attack Time)
@@ -149,7 +152,7 @@ int main() {
         std::cout << "[PASS] Test 5: Control Changes and Sustain Pedal processed correctly." << std::endl;
     }
 
-    // Test 6: Polyphony, voice stealing, and Note Off on stolen note
+    // Test 6: Polyphony, voice stealing, re-triggering, and repeated Note Off
     {
         SaxophoneSynth_Init();
         std::vector<int16_t> buf(256 * 2, 0);
@@ -172,8 +175,14 @@ int main() {
 
         // Sending Note Off for stolen note (60) should NOT affect note 72 or other notes
         SaxophoneSynth_NoteOff(60);
+        SaxophoneSynth_NoteOff(60); // Repeated Note Off
         SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
         CHECK(SaxophoneSynth_IsNoteActive(72) == true);
+
+        // Re-trigger stolen note 60
+        SaxophoneSynth_NoteOn(60, 100);
+        SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
+        CHECK(SaxophoneSynth_IsNoteActive(60) == true);
 
         for (uint8_t i = 0; i < SAXOPHONE_VOICES; i++) {
             SaxophoneSynth_NoteOff(60 + i);
@@ -185,7 +194,7 @@ int main() {
         for (uint8_t i = 0; i <= 12; i++) {
             CHECK(SaxophoneSynth_IsNoteActive(60 + i) == false);
         }
-        std::cout << "[PASS] Test 6: Polyphony, voice stealing, and stolen Note Off isolation verified." << std::endl;
+        std::cout << "[PASS] Test 6: Polyphony, voice stealing, re-triggering, and repeated Note Off verified." << std::endl;
     }
 
     // Test 7: FIFO overflow and recovery stress test
@@ -211,27 +220,37 @@ int main() {
         std::cout << "[PASS] Test 7: FIFO overflow and stress recovery verified." << std::endl;
     }
 
-    // Test 8: Signal stability and absence of NaN / Inf over long rendering
+    // Test 8: Raw float signal stability and absence of NaN / Inf over long rendering
     {
         SaxophoneSynth_Init();
         SaxophoneSynth_NoteOn(60, 100);
         SaxophoneSynth_NoteOn(64, 100);
         SaxophoneSynth_NoteOn(67, 100);
 
-        std::vector<int16_t> buf(512 * 2, 0);
+        std::vector<float> float_buf(512 * 2, 0.0f);
+        bool has_nonzero = false;
+
         for (int block = 0; block < 200; ++block) { // ~2 seconds of rendering
-            SaxophoneSynth_FillStereoBuffer(buf.data(), 512);
-            for (int16_t s : buf) {
-                CHECK(s >= -32768 && s <= 32767);
+            SaxophoneSynth_FillFloatBuffer(float_buf.data(), 512);
+            for (float f : float_buf) {
+                CHECK(std::isfinite(f));
+                CHECK(std::abs(f) <= 1.0f);
+                if (f != 0.0f) has_nonzero = true;
             }
         }
+        CHECK(has_nonzero);
+
         SaxophoneSynth_NoteOff(60);
         SaxophoneSynth_NoteOff(64);
         SaxophoneSynth_NoteOff(67);
         for (int block = 0; block < 50; ++block) {
-            SaxophoneSynth_FillStereoBuffer(buf.data(), 512);
+            SaxophoneSynth_FillFloatBuffer(float_buf.data(), 512);
+            for (float f : float_buf) {
+                CHECK(std::isfinite(f));
+                CHECK(std::abs(f) <= 1.0f);
+            }
         }
-        std::cout << "[PASS] Test 8: Long-duration signal stability verified (no NaN/Inf)." << std::endl;
+        std::cout << "[PASS] Test 8: Raw float signal stability verified (std::isfinite and [-1.0f, +1.0f] bounds)." << std::endl;
     }
 
     // Test 9: SynthEngine integration & switching

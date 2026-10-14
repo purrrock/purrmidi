@@ -422,7 +422,7 @@ void SaxophoneSynth_ControlChange(uint8_t control, uint8_t value) {
     }
 }
 
-static int16_t SaxophoneSynth_NextSample(void) {
+static float SaxophoneSynth_NextFloatSample(void) {
     uint32_t rec_st = recovery_state.load(std::memory_order_seq_cst);
     if (rec_st != RECOVERY_NORMAL) {
         recovery_state.store(RECOVERY_IN_PROGRESS, std::memory_order_seq_cst);
@@ -616,12 +616,25 @@ static int16_t SaxophoneSynth_NextSample(void) {
         output_f = 0.0f;
     }
 
-    return (int16_t)(output_f * 32767.0f);
+    return output_f;
+}
+
+static int16_t SaxophoneSynth_NextSample(void) {
+    float f = SaxophoneSynth_NextFloatSample();
+    return (int16_t)(f * 32767.0f);
 }
 
 void SaxophoneSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames) {
     for (uint32_t i = 0; i < num_frames; i++) {
         int16_t sample = SaxophoneSynth_NextSample();
+        buffer[i * 2]     = sample; // L
+        buffer[i * 2 + 1] = sample; // R
+    }
+}
+
+void SaxophoneSynth_FillFloatBuffer(float *buffer, uint32_t num_frames) {
+    for (uint32_t i = 0; i < num_frames; i++) {
+        float sample = SaxophoneSynth_NextFloatSample();
         buffer[i * 2]     = sample; // L
         buffer[i * 2 + 1] = sample; // R
     }
