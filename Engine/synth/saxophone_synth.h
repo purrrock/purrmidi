@@ -18,12 +18,14 @@
  *     - Управление динамикой, жёсткостью трости и давлением выдоха через Velocity и CC.
  *
  * Управление по MIDI Control Change:
- *     - CC 1:  Глубина вибрато (Vibrato Depth);
- *     - CC 2 / CC 11 / CC 73: Интенсивность дыхания / турбулентность шума (Breath Pressure / Noise Turbulence);
- *     - CC 64: Педаль сустейна (Sustain Pedal);
- *     - CC 71: Жесткость трости / Демпфирование резонатора (Reed Stiffness / Bore Damping);
- *     - CC 72: Время затухания дыхания (Release Time);
- *     - CC 74: Яркость / Разперт трости (Brightness / Reed Aperture).
+ *     - CC 1:  Глубина вибрато (Vibrato Depth, 0..0.08);
+ *     - CC 2:  Давление дыхания / Breath Controller (Breath Pressure, 0.0..1.0);
+ *     - CC 11: Уровень экспрессии / Громкость (Expression Volume, 0.0..1.0);
+ *     - CC 64: Педаль сустейна (Sustain Pedal, >=64 вкл, <64 выкл);
+ *     - CC 71: Жесткость трости (Reed Stiffness / Slope, -0.10..-0.50);
+ *     - CC 72: Время затухания атаки/дыхания (Release Time, 0.02..1.50 с);
+ *     - CC 73: Время атаки (Attack Time, 0.005..1.00 с);
+ *     - CC 74: Яркость / Демпфирование резонатора (Brightness / Bore Damping LPF, 0.05..0.75).
  *
  * Контракт вызовов:
  *   SaxophoneSynth_Init / NoteOn / NoteOff / ControlChange — из контекста main / MIDI-потока;

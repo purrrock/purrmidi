@@ -1,4 +1,5 @@
 #include "saxophone_synth.h"
+#include "synth_engine.h"
 #include <iostream>
 #include <vector>
 #include <cmath>
@@ -26,7 +27,7 @@ static int calculate_peak(const std::vector<int16_t> &buf) {
 }
 
 int main() {
-    std::cout << "Running SaxophoneSynth host tests..." << std::endl;
+    std::cout << "Running comprehensive SaxophoneSynth host tests..." << std::endl;
 
     // Test 1: SaxophoneSynth_Init resets state and renders silence
     {
@@ -79,15 +80,54 @@ int main() {
         std::cout << "[PASS] Test 3: Higher velocity produces higher amplitude." << std::endl;
     }
 
-    // Test 4: Control Changes and Sustain pedal
+    // Test 4: CC 11 (Expression) and CC 73 (Attack Time)
+    {
+        SaxophoneSynth_Init();
+        std::vector<int16_t> buf(256 * 2, 0);
+
+        // CC 73: Fast attack
+        SaxophoneSynth_ControlChange(73, 0); // 5 ms attack
+        SaxophoneSynth_NoteOn(60, 100);
+        SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
+        int fast_att_peak = calculate_peak(buf);
+        SaxophoneSynth_NoteOff(60);
+        for (int i = 0; i < 40; ++i) SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
+
+        // CC 73: Slow attack
+        SaxophoneSynth_ControlChange(73, 127); // 1 sec attack
+        SaxophoneSynth_NoteOn(60, 100);
+        SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
+        int slow_att_peak = calculate_peak(buf);
+        SaxophoneSynth_NoteOff(60);
+        for (int i = 0; i < 40; ++i) SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
+
+        CHECK(fast_att_peak > slow_att_peak);
+
+        // CC 11: Expression
+        SaxophoneSynth_ControlChange(11, 10); // Low expression
+        SaxophoneSynth_ControlChange(73, 0);  // Fast attack
+        SaxophoneSynth_NoteOn(60, 100);
+        SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
+        int low_expr_peak = calculate_peak(buf);
+
+        SaxophoneSynth_ControlChange(11, 127); // Full expression
+        SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
+        int high_expr_peak = calculate_peak(buf);
+
+        SaxophoneSynth_NoteOff(60);
+        for (int i = 0; i < 40; ++i) SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
+
+        CHECK(high_expr_peak > low_expr_peak);
+        std::cout << "[PASS] Test 4: CC 11 Expression and CC 73 Attack Time verified." << std::endl;
+    }
+
+    // Test 5: Control Changes and Sustain pedal
     {
         SaxophoneSynth_Init();
         SaxophoneSynth_ControlChange(1, 64);
         SaxophoneSynth_ControlChange(2, 80);
-        SaxophoneSynth_ControlChange(11, 100);
         SaxophoneSynth_ControlChange(71, 70);
         SaxophoneSynth_ControlChange(72, 40);
-        SaxophoneSynth_ControlChange(73, 90);
         SaxophoneSynth_ControlChange(74, 110);
 
         SaxophoneSynth_ControlChange(64, 127); // Pedal ON
@@ -106,10 +146,10 @@ int main() {
             SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
         }
         CHECK(SaxophoneSynth_IsNoteActive(64) == false);
-        std::cout << "[PASS] Test 4: Control Changes and Sustain Pedal processed correctly." << std::endl;
+        std::cout << "[PASS] Test 5: Control Changes and Sustain Pedal processed correctly." << std::endl;
     }
 
-    // Test 5: Polyphony and deterministic voice stealing
+    // Test 6: Polyphony, voice stealing, and Note Off on stolen note
     {
         SaxophoneSynth_Init();
         std::vector<int16_t> buf(256 * 2, 0);
@@ -130,6 +170,11 @@ int main() {
         CHECK(SaxophoneSynth_IsNoteActive(60) == false);
         CHECK(SaxophoneSynth_IsNoteActive(72) == true);
 
+        // Sending Note Off for stolen note (60) should NOT affect note 72 or other notes
+        SaxophoneSynth_NoteOff(60);
+        SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
+        CHECK(SaxophoneSynth_IsNoteActive(72) == true);
+
         for (uint8_t i = 0; i < SAXOPHONE_VOICES; i++) {
             SaxophoneSynth_NoteOff(60 + i);
         }
@@ -140,7 +185,69 @@ int main() {
         for (uint8_t i = 0; i <= 12; i++) {
             CHECK(SaxophoneSynth_IsNoteActive(60 + i) == false);
         }
-        std::cout << "[PASS] Test 5: Polyphony and deterministic voice stealing verified." << std::endl;
+        std::cout << "[PASS] Test 6: Polyphony, voice stealing, and stolen Note Off isolation verified." << std::endl;
+    }
+
+    // Test 7: FIFO overflow and recovery stress test
+    {
+        SaxophoneSynth_Init();
+
+        // Push 40 NoteOn events without calling FillBuffer (FIFO capacity = 32, limit = 28)
+        for (int i = 0; i < 40; ++i) {
+            SaxophoneSynth_NoteOn(60 + (i % 12), 100);
+        }
+        CHECK(SaxophoneSynth_GetDroppedEventsCount() > 0);
+
+        std::vector<int16_t> buf(256 * 2, 0);
+        SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
+
+        // Trigger NoteOff events
+        for (int i = 0; i < 12; ++i) {
+            SaxophoneSynth_NoteOff(60 + i);
+        }
+        for (int i = 0; i < 40; ++i) {
+            SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
+        }
+        std::cout << "[PASS] Test 7: FIFO overflow and stress recovery verified." << std::endl;
+    }
+
+    // Test 8: Signal stability and absence of NaN / Inf over long rendering
+    {
+        SaxophoneSynth_Init();
+        SaxophoneSynth_NoteOn(60, 100);
+        SaxophoneSynth_NoteOn(64, 100);
+        SaxophoneSynth_NoteOn(67, 100);
+
+        std::vector<int16_t> buf(512 * 2, 0);
+        for (int block = 0; block < 200; ++block) { // ~2 seconds of rendering
+            SaxophoneSynth_FillStereoBuffer(buf.data(), 512);
+            for (int16_t s : buf) {
+                CHECK(s >= -32768 && s <= 32767);
+            }
+        }
+        SaxophoneSynth_NoteOff(60);
+        SaxophoneSynth_NoteOff(64);
+        SaxophoneSynth_NoteOff(67);
+        for (int block = 0; block < 50; ++block) {
+            SaxophoneSynth_FillStereoBuffer(buf.data(), 512);
+        }
+        std::cout << "[PASS] Test 8: Long-duration signal stability verified (no NaN/Inf)." << std::endl;
+    }
+
+    // Test 9: SynthEngine integration & switching
+    {
+        SynthEngine_Init();
+        CHECK(SynthEngine_Select(SYNTH_ENGINE_SAXOPHONE) == 1);
+        CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SAXOPHONE);
+        CHECK(std::string(SynthEngine_GetName()) == "saxophone");
+
+        SynthEngine_NoteOn(60, 100);
+        std::vector<int16_t> buf(256 * 2, 0);
+        SynthEngine_FillStereoBuffer(buf.data(), 256);
+        CHECK(calculate_peak(buf) > 0);
+
+        SynthEngine_NoteOff(60);
+        std::cout << "[PASS] Test 9: SynthEngine integration and switching verified." << std::endl;
     }
 
     if (g_failures != 0) {

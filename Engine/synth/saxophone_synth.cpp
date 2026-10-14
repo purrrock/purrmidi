@@ -18,6 +18,7 @@
 // Параметры трости и дыхания по умолчанию
 #define SAXOPHONE_DEFAULT_BREATH      0.85f
 #define SAXOPHONE_DEFAULT_TURBULENCE  0.05f
+#define SAXOPHONE_DEFAULT_EXPRESSION  1.00f
 #define SAXOPHONE_DEFAULT_VIBRATO_DEP 0.02f
 #define SAXOPHONE_DEFAULT_VIBRATO_FREQ 5.2f
 #define SAXOPHONE_DEFAULT_REED_OFFSET 0.70f
@@ -140,8 +141,10 @@ static SaxophoneVoice voices[SAXOPHONE_VOICES];
 
 static uint32_t global_trigger_counter = 0;
 
-// Параметры синтезатора саксофона (атомарны для предотвращения data race)
+// Параметры синтезатора саксофона (атомарны для предотвращения data race между MIDI и аудио контекстом)
 static std::atomic<float> cc_vibrato_depth{SAXOPHONE_DEFAULT_VIBRATO_DEP};
+static std::atomic<float> cc_breath_ctrl{SAXOPHONE_DEFAULT_BREATH};
+static std::atomic<float> cc_expression{SAXOPHONE_DEFAULT_EXPRESSION};
 static std::atomic<float> cc_turbulence{SAXOPHONE_DEFAULT_TURBULENCE};
 static std::atomic<float> cc_reed_stiffness{SAXOPHONE_DEFAULT_REED_SLOPE};
 static std::atomic<float> cc_bore_damping{SAXOPHONE_DEFAULT_DAMPING};
@@ -229,6 +232,8 @@ void SaxophoneSynth_Init(void) {
     audio_sustain_pedal = false;
 
     cc_vibrato_depth.store(SAXOPHONE_DEFAULT_VIBRATO_DEP, std::memory_order_relaxed);
+    cc_breath_ctrl.store(SAXOPHONE_DEFAULT_BREATH, std::memory_order_relaxed);
+    cc_expression.store(SAXOPHONE_DEFAULT_EXPRESSION, std::memory_order_relaxed);
     cc_turbulence.store(SAXOPHONE_DEFAULT_TURBULENCE, std::memory_order_relaxed);
     cc_reed_stiffness.store(SAXOPHONE_DEFAULT_REED_SLOPE, std::memory_order_relaxed);
     cc_bore_damping.store(SAXOPHONE_DEFAULT_DAMPING, std::memory_order_relaxed);
@@ -364,19 +369,27 @@ void SaxophoneSynth_ControlChange(uint8_t control, uint8_t value) {
             cc_vibrato_depth.store(norm * 0.08f, std::memory_order_relaxed);
             break;
 
-        case 2:  // CC 2: Breath Controller -> Турбулентность/Шум
-        case 11: // CC 11: Expression
-        case 73: // CC 73: Attack / Breath Intensity
-            cc_turbulence.store(norm * 0.20f, std::memory_order_relaxed);
+        case 2:  // CC 2: Breath Controller -> Давление дыхания (0.0..1.0)
+            cc_breath_ctrl.store(norm, std::memory_order_relaxed);
             break;
 
-        case 71: // CC 71: Resonance / Reed Stiffness (-0.15 .. -0.45)
-            cc_reed_stiffness.store(-0.15f - norm * 0.30f, std::memory_order_relaxed);
+        case 11: // CC 11: Expression -> Выходная громкость экспрессии (0.0..1.0)
+            cc_expression.store(norm, std::memory_order_relaxed);
+            break;
+
+        case 71: // CC 71: Resonance / Reed Stiffness (-0.10 .. -0.50)
+            cc_reed_stiffness.store(-0.10f - norm * 0.40f, std::memory_order_relaxed);
             break;
 
         case 72: { // CC 72: Release Time (0.02..1.50 с)
             float rel = 0.02f + norm * 1.48f;
             cc_release_sec.store(rel, std::memory_order_relaxed);
+            break;
+        }
+
+        case 73: { // CC 73: Attack Time (0.005..1.00 с)
+            float att = 0.005f + norm * 0.995f;
+            cc_attack_sec.store(att, std::memory_order_relaxed);
             break;
         }
 
@@ -530,6 +543,8 @@ static int16_t SaxophoneSynth_NextSample(void) {
     const float release_rate = 1.0f / (rel_sec * SAXOPHONE_SAMPLE_RATE);
 
     const float vib_depth = cc_vibrato_depth.load(std::memory_order_relaxed);
+    const float breath_ctrl = cc_breath_ctrl.load(std::memory_order_relaxed);
+    const float expression = cc_expression.load(std::memory_order_relaxed);
     const float turb_gain = cc_turbulence.load(std::memory_order_relaxed);
     const float reed_slope = cc_reed_stiffness.load(std::memory_order_relaxed);
     const float damping = cc_bore_damping.load(std::memory_order_relaxed);
@@ -566,7 +581,7 @@ static int16_t SaxophoneSynth_NextSample(void) {
 
             // Шум дыхания / турбулентность
             float noise = FastRandom(v.prng_state) * turb_gain;
-            float mouth_pressure = v.breath_env * (SAXOPHONE_DEFAULT_BREATH + vibrato) + noise * v.breath_env;
+            float mouth_pressure = v.breath_env * breath_ctrl * (SAXOPHONE_DEFAULT_BREATH + vibrato) + noise * v.breath_env;
 
             // Отражённая волна из ствола с учётом затухания стенками (Lowpass Filter)
             float bore_out = v.bore_delay.Read(v.bore_length);
@@ -595,7 +610,11 @@ static int16_t SaxophoneSynth_NextSample(void) {
         norm_gain = 1.0f / (1.0f + 0.35f * (float)(active_voices_count - 1));
     }
 
-    float output_f = soft_limit(mix_sum * norm_gain * SAXOPHONE_MASTER_GAIN);
+    float output_f = soft_limit(mix_sum * norm_gain * expression * SAXOPHONE_MASTER_GAIN);
+
+    if (!std::isfinite(output_f)) {
+        output_f = 0.0f;
+    }
 
     return (int16_t)(output_f * 32767.0f);
 }
