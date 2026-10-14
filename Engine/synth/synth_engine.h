@@ -13,7 +13,7 @@
  *     --------+--------------------------------------------------------
  *        0    | E-Piano   — полифоническое FM-электропиано (по умолчанию)
  *        1    | Pluck     — Карплус-Стронг, DaisySP Pluck
- *        2    | Sine      — одноголосая синусоида (проверка тракта)
+ *        2    | Lead      — полифонический субтрактивный аналоговый лид
  *        3    | Organ     — орган Хаммонда (bfreeOrgan2)
  *        4    | SoundFont — синтезатор SF2 на базе TinySoundFont
  *
@@ -44,7 +44,7 @@ extern "C" {
 typedef enum {
     SYNTH_ENGINE_EPIANO    = 0,
     SYNTH_ENGINE_PLUCK     = 1,
-    SYNTH_ENGINE_SINE      = 2,
+    SYNTH_ENGINE_LEAD      = 2,
     SYNTH_ENGINE_ORGAN     = 3,
     SYNTH_ENGINE_SOUNDFONT = 4,
     SYNTH_ENGINE_COUNT
@@ -110,7 +110,7 @@ uint8_t SynthEngine_GetMasterVolume(void);
 /** Текущий активный синтезатор. */
 SynthEngineId SynthEngine_GetCurrent(void);
 
-/** Имя синтезатора: "epiano" / "pluck" / "sine" / "organ" / "soundfont" (для логов). Для неверного id — "?". */
+/** Имя синтезатора: "epiano" / "pluck" / "lead" / "organ" / "soundfont" (для логов). Для неверного id — "?". */
 const char *SynthEngine_GetEngineName(SynthEngineId id);
 
 /** Имя активного синтезатора. */

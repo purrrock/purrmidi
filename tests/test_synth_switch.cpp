@@ -70,8 +70,8 @@ static void test_program_change_selects_engine() {
     CHECK(std::strcmp(SynthEngine_GetName(), "pluck") == 0);
 
     send_pc(2);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SINE);
-    CHECK(std::strcmp(SynthEngine_GetName(), "sine") == 0);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_LEAD);
+    CHECK(std::strcmp(SynthEngine_GetName(), "lead") == 0);
 
     send_pc(3);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
@@ -99,8 +99,8 @@ static void test_program_wraps_modulo() {
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
     send_pc(6);     // 6 % 5 == 1 -> Pluck
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
-    send_pc(7);     // 7 % 5 == 2 -> Sine
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SINE);
+    send_pc(7);     // 7 % 5 == 2 -> Lead
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_LEAD);
     send_pc(8);     // 8 % 5 == 3 -> Organ
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
     send_pc(9);     // 9 % 5 == 4 -> SoundFont
@@ -129,14 +129,14 @@ static void test_program_change_127_cycles_engines() {
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
 
     // Program Change 127 переключает на следующий инструмент по циклу:
-    // E-Piano -> Pluck -> Sine -> Organ -> SoundFont -> E-Piano.
+    // E-Piano -> Pluck -> Lead -> Organ -> SoundFont -> E-Piano.
     // Если SoundFont недоступен (нет SD/файла SNDFNT.SF2), он пропускается:
     // ... -> Organ -> E-Piano.
     send_pc(127);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
 
     send_pc(127);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SINE);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_LEAD);
 
     send_pc(127);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
@@ -189,7 +189,7 @@ static void test_switch_silences_old_engine() {
     send_note_on(60, 100);
     CHECK(render_peak(2400) > 0);
 
-    send_pc(2);                                  // sine: нот нет -> тишина
+    send_pc(2);                                  // lead: нот нет -> тишина
     CHECK(render_peak(4800) == 0);
 
     send_pc(0);                                  // возврат: старая нота не должна «воскреснуть»
@@ -201,10 +201,10 @@ static void test_switch_silences_old_engine() {
 
 static void test_select_api() {
     SynthEngine_Init();
-    CHECK(SynthEngine_Select(SYNTH_ENGINE_SINE) == 1);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SINE);
+    CHECK(SynthEngine_Select(SYNTH_ENGINE_LEAD) == 1);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_LEAD);
     CHECK(SynthEngine_Select(SYNTH_ENGINE_COUNT) == 0);   // вне диапазона
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SINE); // не изменился
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_LEAD); // не изменился
     CHECK(std::strcmp(SynthEngine_GetEngineName(SYNTH_ENGINE_EPIANO), "epiano") == 0);
     CHECK(std::strcmp(SynthEngine_GetEngineName(SYNTH_ENGINE_SOUNDFONT), "soundfont") == 0);
     CHECK(std::strcmp(SynthEngine_GetEngineName(SYNTH_ENGINE_COUNT), "?") == 0);
@@ -222,8 +222,8 @@ static void test_select_next_api() {
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
 
     SynthEngineId next2 = SynthEngine_SelectNext();
-    CHECK(next2 == SYNTH_ENGINE_SINE);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SINE);
+    CHECK(next2 == SYNTH_ENGINE_LEAD);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_LEAD);
 
     SynthEngineId next3 = SynthEngine_SelectNext();
     CHECK(next3 == SYNTH_ENGINE_ORGAN);
@@ -278,7 +278,7 @@ static void test_master_volume_cc7() {
     SynthEngine_Init();
     CHECK(SynthEngine_GetMasterVolume() == SYNTH_MASTER_VOLUME_DEFAULT);
 
-    // Берём движок Sine: стабильная амплитуда, удобно сравнивать пики.
+    // Берём движок Lead: стабильная амплитуда, удобно сравнивать пики.
     send_pc(2);
     send_note_on(69, 127);
     render_peak(2400);                       // даём прогреться и применить события
@@ -298,7 +298,9 @@ static void test_master_volume_cc7() {
     CHECK(render_peak(4800) == 0);           // полная тишина
 
     send_cc(SYNTH_MASTER_VOLUME_CC, 127, 5); // канал не важен, возврат к полному уровню
-    render_peak(480);
+    send_note_off(69);
+    send_note_on(69, 127);
+    render_peak(2400);                       // перезапуск огибающей для той же фазы атаки
     const int back = render_peak(4800);
     CHECK(back >= full - full / 20 && back <= full + full / 20);
 

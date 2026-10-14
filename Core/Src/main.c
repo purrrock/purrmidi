@@ -452,7 +452,7 @@ int main(void)
     {
       for (unsigned c = 0; c < sizeof(bench_counts) / sizeof(bench_counts[0]); c++)
       {
-        SynthEngine_Select(SYNTH_ENGINE_SINE);               /* Select() of the current engine is a no-op, */
+        SynthEngine_Select(SYNTH_ENGINE_LEAD);               /* Select() of the current engine is a no-op, */
         SynthEngine_Select(bench_engines[e]);                /* so switch away and back to re-initialise it */
         for (int k = 0; k < bench_counts[c]; k++)
         {
