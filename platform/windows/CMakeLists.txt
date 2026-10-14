@@ -183,6 +183,7 @@ if(PURRMIDI_BUILD_APP)
         midi_input.cpp
         audio_out.cpp
         wav_recorder.cpp
+        virtual_keyboard.cpp
     )
 
     set_target_properties(purrmidi_win PROPERTIES

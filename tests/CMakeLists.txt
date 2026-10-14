@@ -82,6 +82,18 @@ target_link_libraries(test_chord_detector PRIVATE purrmidi_core)
 target_compile_features(test_chord_detector PRIVATE cxx_std_17)
 add_test(NAME test_chord_detector COMMAND test_chord_detector)
 
+add_executable(test_virtual_keyboard
+    test_virtual_keyboard.cpp
+    "${CMAKE_CURRENT_LIST_DIR}/../platform/windows/virtual_keyboard.cpp"
+)
+target_include_directories(test_virtual_keyboard PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../Core/Inc"
+    "${CMAKE_CURRENT_LIST_DIR}/../Engine/midi"
+    "${CMAKE_CURRENT_LIST_DIR}/../platform/windows"
+)
+target_compile_features(test_virtual_keyboard PRIVATE cxx_std_17)
+add_test(NAME test_virtual_keyboard COMMAND test_virtual_keyboard)
+
 # ---------------------------------------------------------------------------
 # QSPI XIP: загрузчик SoundFont-банка во флеш (логика без HAL) и XIP-бэкенд синтезатора
 # ---------------------------------------------------------------------------
