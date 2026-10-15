@@ -4,6 +4,7 @@
 #include "usbh_midi.h"
 #include "midi_event.h"
 #include "midi_queue.h"
+#include "usb_midi_packet.h"
 
 extern ApplicationTypeDef Appli_state;
 extern USBH_HandleTypeDef hUsbHostFS;
@@ -40,9 +41,8 @@ void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
 
     for (uint16_t i = 0; i + 3 < length; i += 4)
     {
-        uint8_t cin = midi_rx_buffer[i] & 0x0F;
-
-        if (cin == 0x00)
+        /* Любой непустой пакет (в т.ч. Active Sensing) считается признаком «устройство живо». */
+        if ((midi_rx_buffer[i] & 0x0F) == 0x00)
         {
             continue;
         }
@@ -50,49 +50,13 @@ void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
         has_midi_event = true;
         midi_usb_packets++;
 
-        uint8_t status = midi_rx_buffer[i + 1];
-        uint8_t data1  = 0;
-        uint8_t data2  = 0;
-
-        switch (cin)
+        MIDI_Event_t event;
+        if (!UsbMidi_PacketToEvent(&midi_rx_buffer[i], &event))
         {
-            case 0x1:
-            case 0x5:
-            case 0xF:
-                // 1 byte message (status only)
-                break;
-
-            case 0x2:
-            case 0x6:
-            case 0xC:
-            case 0xD:
-                // 2 byte message (status + data1)
-                data1 = midi_rx_buffer[i + 2];
-                break;
-
-            case 0x3:
-            case 0x4:
-            case 0x7:
-            case 0x8:
-            case 0x9:
-            case 0xA:
-            case 0xB:
-            case 0xE:
-                // 3 byte message (status + data1 + data2)
-                data1 = midi_rx_buffer[i + 2];
-                data2 = midi_rx_buffer[i + 3];
-                break;
-
-            default:
-                continue;
+            continue;   /* SysEx / System Common / Real-Time / мусор: синтезатору не нужны */
         }
 
         midi_events++;
-        MIDI_Event_t event = {
-            .status = status,
-            .data1 = data1,
-            .data2 = data2
-        };
         MIDI_Queue_Push(&event);
     }
 

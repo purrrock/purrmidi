@@ -135,6 +135,14 @@ void SynthEngine_Init(void)
     activate(SYNTH_ENGINE_DEFAULT);
 }
 
+void SynthEngine_Panic(void)
+{
+    const Engine *cur = g_active.load(std::memory_order_relaxed);
+    if (cur) {
+        activate((SynthEngineId)(cur - kEngines));
+    }
+}
+
 void SynthEngine_SetMasterVolume(uint8_t level)
 {
     g_master_vol.store(level > 127U ? (uint8_t)127U : level, std::memory_order_relaxed);

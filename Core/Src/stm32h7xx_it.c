@@ -73,6 +73,7 @@ void UsageFault_Handler(void)  __attribute__((naked));
 extern HCD_HandleTypeDef hhcd_USB_OTG_FS;
 extern DMA_HandleTypeDef hdma_sai1_a;
 extern SD_HandleTypeDef hsd1;
+extern SAI_HandleTypeDef hsai_BlockA1;
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -89,7 +90,10 @@ void NMI_Handler(void)
 
   /* USER CODE END NonMaskableInt_IRQn 0 */
   /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
-   while (1)
+  /* NMI на STM32H7 - в первую очередь ECC-ошибка RAM или сбой тактирования (CSS).
+   * Зависать навсегда бессмысленно: перезапускаем, прибор сам вернётся в рабочее состояние. */
+  NVIC_SystemReset();
+  while (1)
   {
   }
   /* USER CODE END NonMaskableInt_IRQn 1 */
@@ -231,6 +235,14 @@ void SDMMC1_IRQHandler(void)
   /* USER CODE BEGIN SDMMC1_IRQn 1 */
 
   /* USER CODE END SDMMC1_IRQn 1 */
+}
+
+/**
+  * @brief This function handles SAI1 global interrupt (underrun/overrun and frame-sync errors).
+  */
+void SAI1_IRQHandler(void)
+{
+  HAL_SAI_IRQHandler(&hsai_BlockA1);
 }
 
 /**

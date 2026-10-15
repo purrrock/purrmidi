@@ -104,6 +104,13 @@ SynthEngineId SynthEngine_SelectNext(void);
  */
 int SynthEngine_IsAvailable(SynthEngineId id);
 
+/**
+ * «Паника»: мгновенно гасит ВСЕ звучащие ноты активного синтезатора (его состояние сбрасывается
+ * как при выборе). Нужна, когда Note Off уже не придут: USB-клавиатуру выдернули при зажатых клавишах.
+ * Только из основного цикла (тот же контекст, что и NoteOn/Select). Активный движок не меняется.
+ */
+void SynthEngine_Panic(void);
+
 /** Общая громкость 0..127 (значения выше 127 ограничиваются). Можно вызывать из main. */
 void SynthEngine_SetMasterVolume(uint8_t level);
 

@@ -87,5 +87,12 @@ void Diag_FaultReport(uint32_t *frame, uint32_t exc_return, uint32_t kind)
     Diag_Puts("\n");
     Diag_Puts("decode: arm-none-eabi-addr2line -f -C -e build/Release/purrmidi.elf <PC> <LR>\n");
 
+#ifndef PURRMIDI_FAULT_HALT
+    /* Даём отчёту уйти в UART (~1 с, IRQ выключены и SysTick не идёт, поэтому счётный цикл), затем
+     * перезапускаем: музыкальный инструмент не должен молча зависать после сбоя. Для отладки по
+     * SWD соберите с -DPURRMIDI_FAULT_HALT=1 - тогда останется бесконечный цикл. */
+    for (volatile uint32_t i = 0; i < (SystemCoreClock / 4U); ++i) { __NOP(); }
+    NVIC_SystemReset();
+#endif
     for (;;) { }
 }

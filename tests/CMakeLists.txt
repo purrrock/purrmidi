@@ -1,5 +1,23 @@
 cmake_minimum_required(VERSION 3.22)
 
+# Часть тестов использует голый assert(): при Release/RelWithDebInfo (-DNDEBUG) проверки исчезли бы,
+# и тесты «проходили» бы вхолостую. Для тестов NDEBUG всегда отключаем.
+if(MSVC)
+    add_compile_options(/UNDEBUG)
+else()
+    add_compile_options(-UNDEBUG)
+endif()
+
+add_executable(test_usb_midi_packet
+    test_usb_midi_packet.cpp
+    "${CMAKE_CURRENT_LIST_DIR}/../Engine/midi/usb_midi_packet.c"
+)
+target_include_directories(test_usb_midi_packet PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../Engine/midi"
+)
+target_compile_features(test_usb_midi_packet PRIVATE cxx_std_17)
+add_test(NAME test_usb_midi_packet COMMAND test_usb_midi_packet)
+
 add_executable(test_midi_decode
     test_midi_decode.cpp
     "${CMAKE_CURRENT_LIST_DIR}/../platform/windows/midi_decode.cpp"

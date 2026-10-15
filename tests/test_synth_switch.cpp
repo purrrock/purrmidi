@@ -341,8 +341,28 @@ static void test_master_volume_cc7() {
     CHECK(SynthEngine_GetMasterVolume() == SYNTH_MASTER_VOLUME_DEFAULT);
 }
 
+// SynthEngine_Panic(): после «выдернутой клавиатуры» (Note Off не придут) звук должен замолчать
+// у КАЖДОГО движка, а сам активный движок — не смениться.
+static void test_panic_silences_every_engine() {
+    for (uint8_t prog = 0; prog < SYNTH_ENGINE_COUNT; ++prog) {
+        send_pc(prog);
+        const SynthEngineId id = SynthEngine_GetCurrent();
+        if (id == SYNTH_ENGINE_SOUNDFONT && !SynthEngine_IsAvailable(id)) {
+            continue;   // нет SF2 — движок недоступен, проверять нечего
+        }
+        send_note_on(60, 100);
+        send_note_on(64, 100);
+        render_peak(4800);                      // дать нотам зазвучать
+        SynthEngine_Panic();
+        CHECK(SynthEngine_GetCurrent() == id);  // движок остался прежним
+        render_peak(4800);                      // хвост после сброса
+        CHECK(render_peak(4800) == 0);          // полная тишина без Note Off
+    }
+}
+
 int main() {
     test_default_is_epiano();
+    test_panic_silences_every_engine();
     test_program_change_selects_engine();
     test_program_wraps_modulo();
     test_program_change_127_cycles_engines();

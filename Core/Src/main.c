@@ -109,7 +109,9 @@ static uint16_t active_note_count = 0;
 /* 1 = at power-up (before the audio DMA and USB start, so nothing else interferes) print CPU and memory
  * reference measurements ([BENCH]) and the SoundFont diagnostics ([XIP], [SF2DIAG]).
  * This separates "the code itself is slow" from "something steals CPU time while playing". */
-#define BOOT_BENCH 1
+#ifndef BOOT_BENCH
+#define BOOT_BENCH 0   /* включать только для отладки: -DBOOT_BENCH=1 (бенч пишет в «живую» RAM, см. комментарий ниже) */
+#endif
 static volatile uint32_t audio_cyc_max = 0;      /* longest fill so far (CPU cycles) */
 static volatile uint32_t audio_cyc_last = 0;
 static volatile uint32_t audio_calls = 0;
@@ -292,6 +294,10 @@ int main(void)
   MX_DMA_Init();
   MX_USART3_UART_Init();
   MX_SAI1_Init();
+  /* SAI1: без этого прерывания ошибки SAI (underrun/overrun FIFO) никогда не доходят до HAL, и
+   * HAL_SAI_ErrorCallback() срабатывает только при ошибках самого DMA. Приоритет ниже аудио-DMA (0). */
+  HAL_NVIC_SetPriority(SAI1_IRQn, 1, 0);
+  HAL_NVIC_EnableIRQ(SAI1_IRQn);
   MX_USB_HOST_Init();
   MX_SPI4_Init();
   MX_QUADSPI_Init();
@@ -366,7 +372,11 @@ int main(void)
         uint32_t sum = 0;
         if (regions[r].addr >= 0x20000000UL)
         {
-          /* RAM has ECC: initialise the test words (full-word writes) before reading them. */
+          /* RAM has ECC: initialise the test words (full-word writes) before reading them.
+           * ВНИМАНИЕ: тест ПЕРЕЗАПИСЫВАЕТ 1 КБ по этим адресам. На момент запуска бенча (после
+           * SynthEngine_Init/InitSF2) 0x24060000 лежит внутри .axi_heap, а 0x30020000 — внутри
+           * .ram_d2 (голоса Dulcimer). Поэтому бенч выключен по умолчанию (BOOT_BENCH=0); при
+           * включении выберите адреса за пределами занятых секций по .map-файлу. */
           for (uint32_t i = 0; i < 256U; i++) { p[i] = i; }
         }
         uint32_t t0 = DWT->CYCCNT;
@@ -437,7 +447,23 @@ int main(void)
 
     if (MIDI_USB_HasStateChanged())
     {
-        Display_SetMidiConnected(MIDI_USB_IsConnected());
+        const bool usb_connected = MIDI_USB_IsConnected();
+        static bool usb_was_connected = false;
+
+        Display_SetMidiConnected(usb_connected);
+
+        /* Клавиатуру выдернули при зажатых клавишах: Note Off уже не придут -> без этого ноты
+         * «залипают» (звук, зависшая индикация и светодиод). Гасим звук и сбрасываем список клавиш. */
+        if (usb_was_connected && !usb_connected)
+        {
+            SynthEngine_Panic();
+            memset(active_notes, 0, sizeof(active_notes));
+            active_note_count = 0;
+            Display_SetNoteState(active_notes, 0, 0);
+            Display_SetSustain(false);
+            HAL_GPIO_WritePin(DEBUG_LED_GPIO_Port, DEBUG_LED_Pin, GPIO_PIN_RESET);
+        }
+        usb_was_connected = usb_connected;
     }
 
     MIDI_Event_t event;

@@ -139,6 +139,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/chord_detector.c
     Engine/midi/midi_queue.c
     Engine/midi/midi_dispatch.c
+    Engine/midi/usb_midi_packet.c
     Platform/midi_usb/midi_usb.c
     Platform/midi_usb/usb_port_recover.c
 
