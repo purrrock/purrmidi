@@ -14,14 +14,14 @@
                 "cwd": "${workspaceFolder}"
             },
             "isBackground": true,
-"problemMatcher": {
-    "base": "$null",
-    "background": {
-        "activeOnStart": true,
-        "beginsPattern": ".*",
-        "endsPattern": ".*Listening on port 50000 for gdb connections.*"
-    }
-}
+            "problemMatcher": {
+                "base": "$gcc",
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".*",
+                    "endsPattern": ".*Listening on port 50000 for gdb connections.*"
+                }
+            }
         },
         {
             "label": "OpenOCD Stop",
