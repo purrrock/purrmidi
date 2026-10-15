@@ -8,7 +8,7 @@
             "args": [
                 "/d",
                 "/c",
-                "call \"${workspaceFolder}\\openocd-run.cmd\""
+                "call \"${workspaceFolder}\\tools\\openocd-run.cmd\""
             ],
             "options": {
                 "cwd": "${workspaceFolder}"

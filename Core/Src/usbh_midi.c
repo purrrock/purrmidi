@@ -141,7 +141,6 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
 		}
 
 		MIDI_Handle->state = MIDI_IDLE_STATE;
-		MIDI_Handle->diag_hcd_channel = MIDI_Handle->InPipe;
 
 		printf("[USBEP] MIDI IN ep=0x%02X size=%u type=%u interval=%u\r\n",
 		       MIDI_Handle->InEp,
@@ -415,23 +414,13 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
 
         if (URB_Status == USBH_URB_DONE)
         {
-            MIDI_Handle->urb_done_cnt++;
             MIDI_Handle->LastRxLength = USBH_LL_GetLastXferSize(phost, MIDI_Handle->InPipe);
-			
-	MIDI_Handle->rx_bytes_cnt += MIDI_Handle->LastRxLength;
-    if (MIDI_Handle->LastRxLength >= 4U)
-    {
-        MIDI_Handle->usb_midi_packet_cnt +=
-            MIDI_Handle->LastRxLength / 4U;
-    }
-			
+
             USBH_MIDI_ReceiveCallback(phost);
             MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
         }
 		else if (URB_Status == USBH_URB_NOTREADY)
         {
-            MIDI_Handle->urb_notready_cnt++;
-
             if (MIDI_Handle->InEpType == USB_EP_TYPE_INTR)
             {
                 /* HAL halts an interrupt channel after NAK and does NOT re-activate it,
@@ -458,12 +447,10 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
         }
         else if (URB_Status == USBH_URB_ERROR)
         {
-            MIDI_Handle->urb_error_cnt++;
             MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA;
         }
         else if (URB_Status == USBH_URB_STALL)
         {
-            MIDI_Handle->urb_stall_cnt++;
             MIDI_Handle->data_rx_state = MIDI_RECEIVE_DATA_STALL;
         }
         break;
@@ -482,7 +469,6 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
         }
         else
         {
-            MIDI_Handle->stall_to_idle_cnt++;
             MIDI_Handle->data_rx_state = MIDI_IDLE;
         }
         break;
@@ -494,63 +480,6 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------*/
-
-/**
- * @brief  Retrieve USB MIDI diagnostic parameters
- * @param  phost: Host handle
- * @param  pdiag: Pointer to diagnostic struct
- * @retval USBH Status
- */
-USBH_StatusTypeDef USBH_MIDI_GetDiag(USBH_HandleTypeDef *phost, MIDI_Diag_t *pdiag)
-{
-	if (phost == NULL || pdiag == NULL || phost->pActiveClass == NULL || phost->pActiveClass->pData == NULL)
-	{
-		return USBH_FAIL;
-	}
-
-	MIDI_HandleTypeDef *MIDI_Handle = (MIDI_HandleTypeDef *)phost->pActiveClass->pData;
-
-	pdiag->urb_done_cnt = MIDI_Handle->urb_done_cnt;
-	pdiag->urb_notready_cnt = MIDI_Handle->urb_notready_cnt;
-	pdiag->urb_error_cnt = MIDI_Handle->urb_error_cnt;
-	pdiag->urb_stall_cnt = MIDI_Handle->urb_stall_cnt;
-	pdiag->stall_to_idle_cnt = MIDI_Handle->stall_to_idle_cnt;
-
-	pdiag->usb_midi_packet_cnt = MIDI_Handle->usb_midi_packet_cnt;
-	pdiag->rx_bytes_cnt = MIDI_Handle->rx_bytes_cnt;
-
-	pdiag->state = (uint8_t)MIDI_Handle->state;
-	pdiag->data_rx_state = (uint8_t)MIDI_Handle->data_rx_state;
-
-	pdiag->in_ep = MIDI_Handle->InEp;
-	pdiag->in_ep_type = MIDI_Handle->InEpType;
-	pdiag->in_ep_size = MIDI_Handle->InEpSize;
-	pdiag->in_ep_interval = MIDI_Handle->InEpInterval;
-
-	pdiag->hcd_channel = MIDI_Handle->diag_hcd_channel;
-
-	pdiag->hc_state = 0;
-	pdiag->hc_urb_state = 0;
-	pdiag->hc_xfer_count = 0;
-	pdiag->hc_err_cnt = 0;
-	pdiag->hc_toggle_in = 0;
-
-	if (phost->pData != NULL)
-	{
-		HCD_HandleTypeDef *hhcd = (HCD_HandleTypeDef *)phost->pData;
-		uint8_t ch = MIDI_Handle->diag_hcd_channel;
-		if (ch < 16)
-		{
-			pdiag->hc_state = (uint8_t)hhcd->hc[ch].state;
-			pdiag->hc_urb_state = (uint8_t)hhcd->hc[ch].urb_state;
-			pdiag->hc_xfer_count = hhcd->hc[ch].xfer_count;
-			pdiag->hc_err_cnt = (uint8_t)hhcd->hc[ch].ErrCnt;
-			pdiag->hc_toggle_in = (uint8_t)hhcd->hc[ch].toggle_in;
-		}
-	}
-
-	return USBH_OK;
-}
 
 /**
  * @brief  The function informs user that data have been transmitted.

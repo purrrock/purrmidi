@@ -72,8 +72,6 @@
 
 extern USBH_HandleTypeDef hUsbHostFS;
 
-static volatile uint32_t note_on_count = 0;
-static volatile uint32_t note_off_count = 0;
 
 /* Ошибки SAI/DMA: растёт в ISR, главный цикл показывает E02 на дисплее */
 static volatile uint32_t sai_error_count = 0;
@@ -81,9 +79,6 @@ static volatile uint32_t sai_error_count = 0;
 static uint8_t active_notes[128];
 static uint8_t active_note_stack[128];
 static uint16_t active_note_count = 0;
-
-/* 1 = print [STATS] and [USBDIAG1..3] to UART (debug only), 0 = silent */
-#define USB_DIAG_UART 0
 
 /* 1 = try to load 0:/SNDFNT.SF2 from the SD card once at power-up (progress goes to UART).
  * The SD init / file parsing blocks for a while, so it is done here, not while playing.
@@ -106,12 +101,6 @@ static uint16_t active_note_count = 0;
  * (USB, MIDI, display) forever - this is how the system "hangs" even though nothing crashed. */
 #define AUDIO_DIAG_UART 1
 
-/* 1 = at power-up (before the audio DMA and USB start, so nothing else interferes) print CPU and memory
- * reference measurements ([BENCH]) and the SoundFont diagnostics ([XIP], [SF2DIAG]).
- * This separates "the code itself is slow" from "something steals CPU time while playing". */
-#ifndef BOOT_BENCH
-#define BOOT_BENCH 0   /* включать только для отладки: -DBOOT_BENCH=1 (бенч пишет в «живую» RAM, см. комментарий ниже) */
-#endif
 static volatile uint32_t audio_cyc_max = 0;      /* longest fill so far (CPU cycles) */
 static volatile uint32_t audio_cyc_last = 0;
 static volatile uint32_t audio_calls = 0;
@@ -184,49 +173,6 @@ static void Button_K1_Process(void)
         }
     }
 }
-
-#if USB_DIAG_UART
-static void Print_USB_Diag(uint32_t max_loop_dt)
-{
-    MIDI_Diag_t diag = {0};
-    if (USBH_MIDI_GetDiag(&hUsbHostFS, &diag) != USBH_OK)
-    {
-        memset(&diag, 0, sizeof(diag));
-    }
-
-    uint32_t last_tick = MIDI_USB_GetLastPacketTick();
-    uint32_t now = HAL_GetTick();
-    uint32_t silence_ms = now - last_tick;
-
-    printf("[USBDIAG1] dt_max: %lu ms | rearm: %lu | silence: %lu ms | transfers: %lu NOTREADY: %lu ERR: %lu STALL: %lu STALL_IDLE: %lu\r\n",
-           max_loop_dt,
-           MIDI_USB_GetRearmCount(),
-           silence_ms,
-           diag.urb_done_cnt,
-           diag.urb_notready_cnt,
-           diag.urb_error_cnt,
-           diag.urb_stall_cnt,
-           diag.stall_to_idle_cnt);
-
-    printf("[USBDIAG2] RX bytes: %lu events4: %lu | state: %u rx_state: %u | Ep: 0x%02X type: %u size: %u interval: %u\r\n",
-           diag.rx_bytes_cnt,
-           diag.usb_midi_packet_cnt,
-           diag.state,
-           diag.data_rx_state,
-           diag.in_ep,
-           diag.in_ep_type,
-           diag.in_ep_size,
-           diag.in_ep_interval);
-
-    printf("[USBDIAG3] HCD ch: %u | HC state: %u urb: %u xfer: %lu err: %u toggle_in: %u\r\n",
-           diag.hcd_channel,
-           diag.hc_state,
-           diag.hc_urb_state,
-           (unsigned long)diag.hc_xfer_count,
-           diag.hc_err_cnt,
-           diag.hc_toggle_in);
-}
-#endif /* USB_DIAG_UART */
 
 /* Названия инструментов для дисплея (только ASCII, до 17 символов). Порядок = SynthEngineId. */
 static const char * const display_patch_names[SYNTH_ENGINE_COUNT] =
@@ -336,68 +282,6 @@ int main(void)
     printf("[SF2] SoundFont NOT available - the soundfont engine will be skipped\r\n");
   }
 #endif
-#if BOOT_BENCH
-  {
-    /* Reference: a loop of exactly 1M iterations (2M instructions: subs + bne). A healthy
-     * Cortex-M7 needs about 1.0-1.1M cycles. Much more = the CPU is being slowed down
-     * (interrupt storm, bus contention, memory attributes). Done with IRQs on and off. */
-    for (int irq_off = 0; irq_off < 2; irq_off++)
-    {
-      uint32_t n = 1000000U;
-      if (irq_off) { __disable_irq(); }
-      uint32_t t0 = DWT->CYCCNT;
-      __asm volatile("1: subs %0, %0, #1\n\t bne 1b" : "+r"(n));
-      uint32_t dt = DWT->CYCCNT - t0;
-      if (irq_off) { __enable_irq(); }
-      printf("[BENCH] spin 1M iterations, IRQ %s: %lu cycles\r\n", irq_off ? "OFF" : "on ", (unsigned long)dt);
-    }
-
-    /* Where do data accesses go and how fast are they? 1M dependent 32-bit loads from each memory.
-     * Zero-wait TCM = about 1-2 cycles per load. Tens of cycles per load = the CPU reaches that
-     * memory over a slow bus path (TCM interface disabled, wrong memory attributes, ...). */
-    printf("[BENCH] SCB->ITCMCR=0x%08lX DTCMCR=0x%08lX CCR=0x%08lX CACR=0x%08lX\r\n",
-           (unsigned long)SCB->ITCMCR, (unsigned long)SCB->DTCMCR, (unsigned long)SCB->CCR,
-           (unsigned long)SCB->CACR);
-    {
-      static const struct { const char *name; uint32_t addr; } regions[] = {
-        { "ITCM   0x00000400", 0x00000400UL },
-        { "DTCM   0x2001C000", 0x2001C000UL },
-        { "AXI    0x24060000", 0x24060000UL },
-        { "RAM_D2 0x30020000", 0x30020000UL },
-        { "FLASH  0x08010000", 0x08010000UL },
-      };
-      for (unsigned r = 0; r < sizeof(regions) / sizeof(regions[0]); r++)
-      {
-        volatile uint32_t *p = (volatile uint32_t *)regions[r].addr;
-        uint32_t sum = 0;
-        if (regions[r].addr >= 0x20000000UL)
-        {
-          /* RAM has ECC: initialise the test words (full-word writes) before reading them.
-           * ВНИМАНИЕ: тест ПЕРЕЗАПИСЫВАЕТ 1 КБ по этим адресам. На момент запуска бенча (после
-           * SynthEngine_Init/InitSF2) 0x24060000 лежит внутри .axi_heap, а 0x30020000 — внутри
-           * .ram_d2 (голоса Dulcimer). Поэтому бенч выключен по умолчанию (BOOT_BENCH=0); при
-           * включении выберите адреса за пределами занятых секций по .map-файлу. */
-          for (uint32_t i = 0; i < 256U; i++) { p[i] = i; }
-        }
-        uint32_t t0 = DWT->CYCCNT;
-        for (uint32_t i = 0; i < 100000U; i++)
-        {
-          sum += p[i & 0xFFU];       /* 1 KB working set, 4-byte stride */
-        }
-        uint32_t dt = DWT->CYCCNT - t0;
-        printf("[BENCH] 100k loads from %s: %lu cycles (%lu.%02lu per load) sum=%lu\r\n", regions[r].name,
-               (unsigned long)dt, (unsigned long)(dt / 100000U), (unsigned long)((dt / 1000U) % 100U),
-               (unsigned long)sum);
-      }
-    }
-
-    if (SoundFontSynth_IsLoaded())
-    {
-      SoundFontSynth_Profile();
-    }
-
-  }
-#endif
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
   memset(audio_buffer, 0, sizeof(audio_buffer));  /* .dma_buffer is not zeroed by startup */
   if (HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer, AUDIO_BUFFER_SIZE) != HAL_OK)
@@ -417,25 +301,8 @@ int main(void)
   uint32_t seen_audio_shed     = audio_shed_total;
   bool     sf2_missing_shown   = false;
 
-#if USB_DIAG_UART
-  uint32_t prev_loop_tick = HAL_GetTick();
-  uint32_t max_loop_dt = 0;
-  static bool silent_episode_reported = false;
-  static uint32_t last_report = 0;
-#endif
-
   while (1)
   {
-#if USB_DIAG_UART
-    uint32_t current_tick = HAL_GetTick();
-    uint32_t loop_dt = current_tick - prev_loop_tick;
-    prev_loop_tick = current_tick;
-    if (loop_dt > max_loop_dt)
-    {
-        max_loop_dt = loop_dt;
-    }
-#endif
-
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
 
@@ -513,8 +380,6 @@ int main(void)
 
         if (command == MIDI_STATUS_NOTE_ON && event.data2 != 0)
         {
-            note_on_count++;
-
             if (note < 128 && active_notes[note] == 0)
             {
                 active_notes[note] = 1;
@@ -534,8 +399,6 @@ int main(void)
         else if (command == MIDI_STATUS_NOTE_OFF ||
                  (command == MIDI_STATUS_NOTE_ON && event.data2 == 0))
         {
-            note_off_count++;
-
             if (note < 128 && active_notes[note] != 0)
             {
                 active_notes[note] = 0;
@@ -663,35 +526,6 @@ int main(void)
     }
 
     Display_Task();   /* рисует не более одного "грязного" поля за вызов */
-
-#if USB_DIAG_UART
-    uint32_t now = HAL_GetTick();
-    uint32_t silence_ms = now - MIDI_USB_GetLastPacketTick();
-    if (!MIDI_USB_IsConnected() || silence_ms <= 3000)
-    {
-        silent_episode_reported = false;
-    }
-    else if (MIDI_USB_IsConnected() && silence_ms > 3000 && !silent_episode_reported)
-    {
-        Print_USB_Diag(max_loop_dt);
-        silent_episode_reported = true;
-        prev_loop_tick = HAL_GetTick();
-    }
-    if (now - last_report >= 10000)
-    {
-        last_report = now;
-        printf("[STATS] USB pkts: %lu | MIDI evts: %lu | ON: %lu | OFF: %lu | Overruns: %lu | RX errors: %lu\r\n",
-               MIDI_USB_GetPacketsCount(),
-               MIDI_USB_GetEventsCount(),
-               note_on_count,
-               note_off_count,
-               MIDI_Queue_GetOverrunCount(),
-               MIDI_USB_GetReceiveErrorsCount());
-        Print_USB_Diag(max_loop_dt);
-        max_loop_dt = 0;
-        prev_loop_tick = HAL_GetTick();
-    }
-#endif
   }
 
   /* USER CODE END 3 */

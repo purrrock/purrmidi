@@ -20,10 +20,10 @@ add_test(NAME test_usb_midi_packet COMMAND test_usb_midi_packet)
 
 add_executable(test_midi_decode
     test_midi_decode.cpp
-    "${CMAKE_CURRENT_LIST_DIR}/../platform/windows/midi_decode.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../Platform/windows/midi_decode.cpp"
 )
 target_include_directories(test_midi_decode PRIVATE
-    "${CMAKE_CURRENT_LIST_DIR}/../platform/windows"
+    "${CMAKE_CURRENT_LIST_DIR}/../Platform/windows"
 )
 target_compile_features(test_midi_decode PRIVATE cxx_std_17)
 add_test(NAME test_midi_decode COMMAND test_midi_decode)
@@ -123,12 +123,12 @@ add_test(NAME test_chord_detector COMMAND test_chord_detector)
 
 add_executable(test_virtual_keyboard
     test_virtual_keyboard.cpp
-    "${CMAKE_CURRENT_LIST_DIR}/../platform/windows/virtual_keyboard.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../Platform/windows/virtual_keyboard.cpp"
 )
 target_include_directories(test_virtual_keyboard PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../Core/Inc"
     "${CMAKE_CURRENT_LIST_DIR}/../Engine/midi"
-    "${CMAKE_CURRENT_LIST_DIR}/../platform/windows"
+    "${CMAKE_CURRENT_LIST_DIR}/../Platform/windows"
 )
 target_compile_features(test_virtual_keyboard PRIVATE cxx_std_17)
 add_test(NAME test_virtual_keyboard COMMAND test_virtual_keyboard)

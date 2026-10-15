@@ -22,7 +22,6 @@
 #include "stm32h7xx.h"   /* DWT cycle counter for the diagnostics */
 #ifdef PURRMIDI_SF2_XIP
 #include "sf2_loader.h"
-#include "xip_diag.h"
 #endif
 #endif
 
@@ -405,10 +404,8 @@ bool SoundFontSynth_IsAvailable(void)
 
 
 /* ------------------------------------------------------------------------------------------------
- * Diagnostics
- *   - SoundFontSynth_ReportStats(): one line per second while notes are playing (see soundfont_synth.h)
- *   - SoundFontSynth_Profile():     boot-time report: XIP configuration, raw XIP read speed, regions per
- *                                   note and the cost of 1..10 note chords rendered by the real engine
+ * Diagnostics: SoundFontSynth_ReportStats() - one line per second while notes are playing
+ * (see soundfont_synth.h)
  * ------------------------------------------------------------------------------------------------ */
 
 void SoundFontSynth_ResetStats(void)
@@ -463,116 +460,5 @@ void SoundFontSynth_ReportStats(uint32_t now_ms)
     (void)now_ms;
 #endif
 }
-
-#if !SF2_HOST_MODE
-
-namespace {
-
-/* Regions (= TinySoundFont voices) one note needs, for a few keys and velocities. */
-void diag_regions_per_note(void)
-{
-    static const uint8_t keys[] = { 36, 48, 60, 72, 84, 96 };
-    static const uint8_t vels[] = { 40, 100, 127 };
-    unsigned int starts[SF_MAX_NOTE_REGIONS];
-
-    std::fprintf(stderr, "[SF2DIAG] preset 0: \"%s\", presets=%d, sample data %lu samples, max voices 32\n",
-                 tsf_get_presetname(g_tsf, 0) ? tsf_get_presetname(g_tsf, 0) : "?", tsf_get_presetcount(g_tsf),
-                 (unsigned long)tsf_get_smpl_sample_count(g_tsf));
-    std::fprintf(stderr, "[SF2DIAG] voices (regions) per note at velocity 40 / 100 / 127:\n");
-    for (unsigned k = 0; k < sizeof(keys); ++k) {
-        int n[3];
-        for (unsigned v = 0; v < 3U; ++v) {
-            n[v] = tsf_channel_get_note_start_samples(g_tsf, 0, keys[k], velocity_to_float(vels[v]), starts, SF_MAX_NOTE_REGIONS);
-        }
-        std::fprintf(stderr, "[SF2DIAG]   key %3u: %d / %d / %d\n", keys[k], n[0], n[1], n[2]);
-    }
-}
-
-void diag_chord(const char *tag)
-{
-    static int16_t buf[256];
-    static const uint8_t notes[] = { 48, 52, 55, 60, 64, 67, 72, 76, 79, 84 };
-    static const int counts[] = { 1, 3, 6, 10 };
-    const uint32_t us = diag_cycles_per_us();
-    const uint32_t budget_us = 2666U;
-    constexpr int BLOCKS = 60;
-
-    for (unsigned c = 0; c < sizeof(counts) / sizeof(counts[0]); ++c) {
-        const int n = counts[c];
-        SoundFontSynth_Init();
-        /* tsf_reset() leaves the previous voices in a short quick-release: let them die before measuring. */
-        for (int b = 0; b < 8; ++b) { SoundFontSynth_FillStereoBuffer(buf, 128); }
-        SoundFontSynth_ResetStats();
-        for (int k = 0; k < n; ++k) { SoundFontSynth_NoteOn(notes[k], 100); }
-
-        uint32_t first = 0, sum = 0, mx = 0;
-        int voices = 0;
-        for (int b = 0; b < BLOCKS; ++b) {
-            const uint32_t t0 = diag_cycles();
-            SoundFontSynth_FillStereoBuffer(buf, 128);
-            const uint32_t d = diag_cycles() - t0;
-            if (b == 0) { first = d; voices = tsf_active_voice_count(g_tsf); }
-            sum += d;
-            if (d > mx) mx = d;
-        }
-        std::fprintf(stderr,
-            "[SF2DIAG] %s chord n=%2d: voices=%2d | first block=%lu us avg=%lu us max=%lu us (%lu%% of %lu us)%s"
-            " | mix peak=%lu.%02lu FS (over 1.0 FS: %lu samples) | want=%lu started=%lu short=%lu\n",
-            tag, n, voices, (unsigned long)(first / us), (unsigned long)(sum / BLOCKS / us), (unsigned long)(mx / us),
-            (unsigned long)(mx / us * 100U / budget_us), (unsigned long)budget_us, (mx / us > budget_us) ? "  <-- OVER BUDGET" : "",
-            (unsigned long)(g_diag.peak_permille / 1000U), (unsigned long)((g_diag.peak_permille / 10U) % 100U),
-            (unsigned long)g_diag.over_fs_samples, (unsigned long)g_diag.regions_wanted,
-            (unsigned long)g_diag.voices_started, (unsigned long)g_diag.voice_shortfall);
-        if (n >= 6 && voices > 0) {
-            const uint32_t per_voice = sum / BLOCKS / us / (uint32_t)voices;
-            std::fprintf(stderr, "[SF2DIAG]   ~%lu us per voice per block -> about %lu voices fit in 80%% of the block (limit 32)\n",
-                         (unsigned long)per_voice, (unsigned long)(budget_us * 80U / 100U / (per_voice ? per_voice : 1U)));
-        }
-    }
-}
-
-} // namespace
-
-void SoundFontSynth_Profile(void)
-{
-    if (!g_loaded || !g_tsf) {
-        std::fprintf(stderr, "[SF2DIAG] SoundFont not loaded, skipped\n");
-        return;
-    }
-    std::fprintf(stderr, "[SF2DIAG] ===== SoundFont diagnostics (render budget 2666 us per 128-frame block) =====\n");
-#ifdef __OPTIMIZE__
-    std::fprintf(stderr, "[SF2DIAG] soundfont_synth.cpp: optimized build\n");
-#else
-    std::fprintf(stderr, "[SF2DIAG] soundfont_synth.cpp: NOT OPTIMIZED (-O0): render cost below is several times higher than in Release\n");
-#endif
-    diag_regions_per_note();
-
-#ifdef PURRMIDI_SF2_XIP
-    const uint8_t *bank = nullptr;
-    uint32_t bank_size = 0;
-    XipDiag_PrintConfig();
-    if (SF2Loader_GetBank(&bank, &bank_size)) {
-        std::fprintf(stderr, "[SF2DIAG] bank in XIP: %p, %lu bytes\n", (const void *)bank, (unsigned long)bank_size);
-        XipDiag_Bench(bank, bank_size);
-    }
-#endif
-
-    std::fprintf(stderr, "[SF2DIAG] --- chords rendered by the real engine ---\n");
-    diag_chord("D-cache ON ");
-#ifdef PURRMIDI_SF2_XIP
-    SCB_DisableDCache();
-    diag_chord("D-cache OFF");
-    SCB_EnableDCache();
-#endif
-    SoundFontSynth_Init();
-    SoundFontSynth_ResetStats();
-    std::fprintf(stderr, "[SF2DIAG] ===== end of diagnostics =====\n");
-}
-
-#else /* host build */
-
-void SoundFontSynth_Profile(void) {}
-
-#endif
 
 } // extern "C"

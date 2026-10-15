@@ -39,7 +39,7 @@ cmake --preset win-msvc-release
 cmake --build --preset win-msvc-release
 ```
 
-Исполняемый файл будет сохранен в: `build/win-msvc-release/platform/windows/purrmidi_win.exe`.
+Исполняемый файл будет сохранен в: `build/win-msvc-release/Platform/windows/purrmidi_win.exe`.
 
 ### Вариант Б: Кросс-компиляция или сборка с MinGW-w64
 
@@ -48,7 +48,7 @@ cmake --preset win-mingw-release
 cmake --build --preset win-mingw-release
 ```
 
-Исполняемый файл будет сохранен в: `build/win-mingw-release/platform/windows/purrmidi_win.exe`.
+Исполняемый файл будет сохранен в: `build/win-mingw-release/Platform/windows/purrmidi_win.exe`.
 
 ### Выбор синтезатора
 

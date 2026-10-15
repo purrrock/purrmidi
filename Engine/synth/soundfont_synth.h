@@ -89,14 +89,6 @@ bool SoundFontSynth_IsAvailable(void);
 void SoundFontSynth_ReportStats(uint32_t now_ms);
 void SoundFontSynth_ResetStats(void);
 
-/**
- * Только для прошивки STM32: диагностика при запуске системы (до старта аудио DMA, строки [SF2DIAG] и [XIP]):
- * число голосов на ноту, конфигурация XIP (D-cache, MPU, регистры QUADSPI, частота QSPI), скорость чтения банка
- * из XIP без синтезатора и стоимость аккордов из 1/3/6/10 нот в реальном движке при включённом и выключенном
- * D-cache. Пустая заглушка в хостовой сборке.
- */
-void SoundFontSynth_Profile(void);
-
 #ifdef __cplusplus
 }
 #endif
