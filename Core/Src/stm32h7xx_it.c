@@ -73,7 +73,6 @@ void UsageFault_Handler(void)  __attribute__((naked));
 extern HCD_HandleTypeDef hhcd_USB_OTG_FS;
 extern DMA_HandleTypeDef hdma_sai1_a;
 extern SD_HandleTypeDef hsd1;
-extern SAI_HandleTypeDef hsai_BlockA1;
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -236,14 +235,6 @@ void SDMMC1_IRQHandler(void)
   /* USER CODE BEGIN SDMMC1_IRQn 1 */
 
   /* USER CODE END SDMMC1_IRQn 1 */
-}
-
-/**
-  * @brief This function handles SAI1 global interrupt (underrun/overrun and frame-sync errors).
-  */
-void SAI1_IRQHandler(void)
-{
-  HAL_SAI_IRQHandler(&hsai_BlockA1);
 }
 
 /**

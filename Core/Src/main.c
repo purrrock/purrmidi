@@ -234,10 +234,6 @@ int main(void)
   MX_DMA_Init();
   MX_USART3_UART_Init();
   MX_SAI1_Init();
-  /* SAI1: без этого прерывания ошибки SAI (underrun/overrun FIFO) никогда не доходят до HAL, и
-   * HAL_SAI_ErrorCallback() срабатывает только при ошибках самого DMA. Приоритет ниже аудио-DMA (0). */
-  HAL_NVIC_SetPriority(SAI1_IRQn, 1, 0);
-  HAL_NVIC_EnableIRQ(SAI1_IRQn);
   MX_USB_HOST_Init();
   MX_SPI4_Init();
   MX_QUADSPI_Init();
