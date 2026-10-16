@@ -165,8 +165,6 @@ set(PURRMIDI_AUDIO_HOT_SOURCES
     Engine/synth/pluck_synth.cpp
     Engine/synth/sine_synth.c
     Engine/synth/soundfont_synth.cpp
-    Engine/synth/sf2_cache.cpp
-    Engine/synth/sf2_xip.cpp
     Engine/synth/tinysoundfont_impl.cpp
     Engine/synth/synth.c
     Engine/synth/dulcimer_synth.cpp
@@ -207,41 +205,20 @@ set_source_files_properties(
     PROPERTIES COMPILE_DEFINITIONS "TEST"
 )
 
-# SD-карта (SDMMC1 + FatFs): модуль собирается только после того, как CubeMX
-# сгенерировал sdmmc.h и FatFs (см. README, раздел "Работа с SD-картой").
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Core/Inc/sdmmc.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/FATFS/App/fatfs.h")
-    target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-        Core/Src/sd_storage.c
-    )
-endif()
-
 # ---------------------------------------------------------------------------
-# SoundFont: QSPI Flash + XIP (прямое чтение сэмплов с 0x90000000, без RAM-кэша)
+# SoundFont: банк хранится ТОЛЬКО в QSPI Flash и читается на месте (XIP, 0x90000000)
 # ---------------------------------------------------------------------------
-# Включается автоматически, когда CubeMX сгенерировал QUADSPI (Core/Inc/quadspi.h), а также SD/FatFs
-# (они нужны только для обновления банка). Иначе собирается прежний вариант: RAM-кэш + потоковое чтение с SD.
-# Принудительно отключить XIP: -DPURRMIDI_FORCE_SD_CACHE=ON. Подробности: docs/SOUNDFONT_QSPI_SYNTH.md.
-option(PURRMIDI_FORCE_SD_CACHE "Use the legacy SD streaming cache even if QUADSPI is configured" OFF)
-
-if(NOT PURRMIDI_FORCE_SD_CACHE
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Core/Inc/quadspi.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Core/Inc/sdmmc.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/FATFS/App/fatfs.h")
-    message(STATUS "SoundFont backend: QSPI XIP (0x90000000)")
-    target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-        Engine/synth/sf2_xip.cpp
-        Platform/qspi_xip/pm_crc32.c
-        Platform/qspi_xip/sf2_loader_core.c
-        Platform/qspi_xip/sf2_loader.c
-        Platform/qspi_xip/qspi_flash.c
-        Platform/qspi_xip/xip_mpu.c
-    )
-    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE PURRMIDI_SF2_XIP)
-else()
-    message(STATUS "SoundFont backend: SD streaming cache (QUADSPI not configured in CubeMX yet)")
-    target_sources(${CMAKE_PROJECT_NAME} PRIVATE Engine/synth/sf2_cache.cpp)
-endif()
+# SD-карта (SDMMC1 + FatFs) нужна только при запуске: если на карте лежит новый 0:/SNDFNT.SF2, загрузчик
+# перезаписывает им банк во флеше (Platform/qspi_xip/sf2_loader.c), после чего SD отключается.
+# Подробности: docs/SOUNDFONT_QSPI_SYNTH.md.
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+    Core/Src/sd_storage.c
+    Platform/qspi_xip/pm_crc32.c
+    Platform/qspi_xip/sf2_loader_core.c
+    Platform/qspi_xip/sf2_loader.c
+    Platform/qspi_xip/qspi_flash.c
+    Platform/qspi_xip/xip_mpu.c
+)
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Inc

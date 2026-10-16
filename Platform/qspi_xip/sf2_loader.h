@@ -2,7 +2,7 @@
  * @file    sf2_loader.h
  * @brief   Загрузка SoundFont-банка в QSPI Flash с SD-карты и включение XIP (0x90000000).
  *
- * Вызывается один раз при старте (из SF2Cache_OpenFile(), т.е. из SoundFontSynth_InitSF2()):
+ * Вызывается один раз при старте (из SoundFontSynth_InitSF2()):
  *   1. инициализация QSPI Flash;
  *   2. если есть SD-карта с 0:/SNDFNT.SF2 - проверка (RIFF/sfbk, размер, CRC32 против заголовка во флеше);
  *   3. новый/изменённый файл - стирание и запись, проверка CRC32 через XIP, запись заголовка;

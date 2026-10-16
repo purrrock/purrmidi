@@ -70,10 +70,12 @@ add_executable(test_soundfont_host
 target_include_directories(test_soundfont_host PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../Core/Inc"
     "${CMAKE_CURRENT_LIST_DIR}/../Middlewares/Third_Party/TinySoundFont"
+    "${CMAKE_CURRENT_LIST_DIR}/../Platform/host"
+    "${CMAKE_CURRENT_LIST_DIR}/../Platform/qspi_xip"
 )
 target_link_libraries(test_soundfont_host PRIVATE purrmidi_synth_soundfont purrmidi_core)
 target_compile_features(test_soundfont_host PRIVATE cxx_std_17)
-# Работает из корня репозитория: хост-вариант SF2Cache ищет tests/SNDFNT.SF2 относительно
+# Работает из корня репозитория: хост-загрузчик (Platform/host) ищет tests/SNDFNT.SF2 относительно
 # рабочего каталога. Иначе тест молча пропускает все проверки с реальным SoundFont.
 add_test(NAME test_soundfont_host COMMAND test_soundfont_host
          WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/..")
@@ -134,7 +136,7 @@ target_compile_features(test_virtual_keyboard PRIVATE cxx_std_17)
 add_test(NAME test_virtual_keyboard COMMAND test_virtual_keyboard)
 
 # ---------------------------------------------------------------------------
-# QSPI XIP: загрузчик SoundFont-банка во флеш (логика без HAL) и XIP-бэкенд синтезатора
+# QSPI XIP: загрузчик SoundFont-банка во флеш (логика без HAL) и синтезатор поверх «флеша» в ОЗУ
 # ---------------------------------------------------------------------------
 # Ядро загрузчика проверяется на эмуляции NOR-флеша (в том числе сбой питания посреди записи).
 add_executable(test_sf2_loader_core
@@ -148,20 +150,20 @@ target_include_directories(test_sf2_loader_core PRIVATE
 target_compile_features(test_sf2_loader_core PRIVATE cxx_std_17)
 add_test(NAME test_sf2_loader_core COMMAND test_sf2_loader_core)
 
-# XIP-бэкенд (sf2_xip.cpp) + настоящий TinySoundFont; "флеш" - файл tests/SNDFNT.SF2 в памяти.
+# Синтезатор SoundFont + настоящий TinySoundFont; «флеш» - файл банка в памяти (Platform/host).
 add_executable(test_sf2_xip_host
     test_sf2_xip_host.cpp
     "${CMAKE_CURRENT_LIST_DIR}/../Engine/synth/soundfont_synth.cpp"
-    "${CMAKE_CURRENT_LIST_DIR}/../Engine/synth/sf2_xip.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../Platform/host/sf2_loader_host.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/../Engine/synth/tinysoundfont_impl.cpp"
 )
 target_include_directories(test_sf2_xip_host PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../Core/Inc"
     "${CMAKE_CURRENT_LIST_DIR}/../Engine/synth"
     "${CMAKE_CURRENT_LIST_DIR}/../Platform/qspi_xip"
+    "${CMAKE_CURRENT_LIST_DIR}/../Platform/host"
     "${CMAKE_CURRENT_LIST_DIR}/../Middlewares/Third_Party/TinySoundFont"
 )
-target_compile_definitions(test_sf2_xip_host PRIVATE PURRMIDI_TEST_XIP_STUB)
 target_compile_features(test_sf2_xip_host PRIVATE cxx_std_17)
 if(UNIX)
     target_link_libraries(test_sf2_xip_host PRIVATE m)

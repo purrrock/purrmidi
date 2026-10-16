@@ -41,6 +41,7 @@ static SF2SrcStatus src_open(void *ctx, uint32_t *size, uint32_t *stamp)
         const SDStorage_Result r = SDStorage_Mount();
         if (r != SDS_OK) {
             printf("[SF2] SD card not usable: %s\r\n", SDStorage_ResultName(r));
+            SDStorage_PrintDiag();
             return SF2SRC_NO_MEDIA;
         }
         s_sd_mounted_by_us = true;
@@ -49,6 +50,8 @@ static SF2SrcStatus src_open(void *ctx, uint32_t *size, uint32_t *stamp)
     FILINFO fno;
     FRESULT fr = f_stat(SF2_SD_PATH, &fno);
     if (fr == FR_NO_FILE || fr == FR_NO_PATH) {
+        /* Карта есть, а файла нет: чаще всего неверное имя (Windows скрыл расширение: SNDFNT.SF2.sf2). */
+        SDStorage_ListRoot();
         return SF2SRC_NO_FILE;
     }
     if (fr != FR_OK) {

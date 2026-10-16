@@ -100,15 +100,17 @@ target_include_directories(purrmidi_synth_lead PUBLIC
 target_compile_definitions(purrmidi_synth_lead PUBLIC USE_DAISYSP_LGPL)
 target_compile_features(purrmidi_synth_lead PUBLIC cxx_std_17)
 
-# soundfont: синтезатор SF2 на базе TinySoundFont и SF2Cache
+# soundfont: синтезатор SF2 на базе TinySoundFont; банк читается из ОЗУ (хост-аналог QSPI XIP)
 add_library(purrmidi_synth_soundfont STATIC
     "${CMAKE_SOURCE_DIR}/Engine/synth/soundfont_synth.cpp"
-    "${CMAKE_SOURCE_DIR}/Engine/synth/sf2_cache.cpp"
+    "${CMAKE_SOURCE_DIR}/Platform/host/sf2_loader_host.cpp"
     "${CMAKE_SOURCE_DIR}/Engine/synth/tinysoundfont_impl.cpp"
 )
 target_include_directories(purrmidi_synth_soundfont PUBLIC
     "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
+    "${CMAKE_SOURCE_DIR}/Platform/host"
+    "${CMAKE_SOURCE_DIR}/Platform/qspi_xip"
     "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/TinySoundFont"
 )
 target_compile_features(purrmidi_synth_soundfont PUBLIC cxx_std_17)

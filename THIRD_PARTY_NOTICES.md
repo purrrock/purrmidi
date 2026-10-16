@@ -1,8 +1,7 @@
 # Сторонние компоненты и лицензии
 
 Собственный код PurrMidi (каталоги `Core/`, `Engine/`, `Platform/`, `USB_HOST/`, `FATFS/`, `tests/`, `docs/`)
-распространяется на условиях, указанных в файле `LICENSE` в корне репозитория (если файл отсутствует —
-лицензия собственного кода проекта пока не выбрана, см. раздел «Лицензии» в `README.md`).
+распространяется на условиях **MIT License** (файл `LICENSE` в корне репозитория).
 
 Ниже перечислены сторонние компоненты, исходный код которых входит в репозиторий или подтягивается
 подмодулями. Колонка «Где используется» показывает, попадает ли компонент в итоговую прошивку.
@@ -17,7 +16,7 @@
 | **STM32 USB Host Library** (STMicroelectronics) | `Middlewares/ST/STM32_USB_Host_Library/` (`LICENSE.txt`) | ST SLA0044 («Ultimate Liberty Software License Agreement»): использование и распространение допускаются только в составе продуктов на микроконтроллерах/микропроцессорах ST — для STM32H743 это выполняется; не переносите этот код на МК других производителей | прошивка |
 | **FatFs R0.12c** (ChaN) | `Middlewares/Third_Party/FatFs/` (условия — в заголовке `ff.c`) | BSD-подобная, 1 условие: сохранять копирайт и отказ от гарантий в исходниках | прошивка |
 | **ST7735 BSP-драйвер** (STMicroelectronics) — только файлы `st7735.c`, `st7735_reg.c`, `st7735.h`, `st7735_reg.h` | `Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/` | BSD-3-Clause (указано в заголовках файлов) | прошивка. **Внимание:** остальной репозиторий WeActStudio/MiniSTM32H7xx лицензирован GPL-3.0 (`MiniSTM32H7xx/LICENSE`) — эти файлы в сборку **не входят** и использоваться в прошивке не должны |
-| **TinySoundFont** (Bernhard Schelling) | `Middlewares/Third_Party/TinySoundFont/tsf.h` (лицензия — в заголовке файла) | MIT | прошивка, Windows |
+| **TinySoundFont** (Bernhard Schelling) — с доработками PurrMidi (чтение PCM «на месте», `tsf_set_smpl_pcm16`) | `Middlewares/Third_Party/TinySoundFont/tsf.h` (лицензия — в заголовке файла) | MIT | прошивка, Windows |
 | **DaisySP** (Electrosmith) — в прошивку линкуются `Oscillator`, `Svf`, `Adsr` | `Middlewares/Third_Party/DaisySP/` (`LICENSE`) | MIT | прошивка, Windows |
 | **DaisySP-LGPL** (Electrosmith) — вложенный подмодуль DaisySP; в прошивку линкуется только `Pluck` (`PhysicalModeling/pluck.cpp`, движок Pluck) | `Middlewares/Third_Party/DaisySP/DaisySP-LGPL/` (`LICENSE`) | **LGPL-2.1** | прошивка (статически), Windows — см. примечание ниже |
 | **Mutable Instruments eurorack** (Émilie Gillet): `elements/dsp/resonator.cc`, `exciter.cc`, `elements/resources.cc` | `Middlewares/Third_Party/eurorack/` (условия — в заголовках файлов) | MIT | прошивка (движок Dulcimer), Windows |
@@ -48,8 +47,8 @@ If no LICENSE file comes with this software, it is provided AS-IS»). Сгене
 
 | Компонент | Путь | Лицензия | Статус |
 |---|---|---|---|
-| **STK** (Synthesis ToolKit) | `Middlewares/Third_Party/stk/` (`LICENSE`) | MIT-подобная (STK License) | не компилируется ни в прошивке, ни в тестах, ни в Windows-версии — подмодуль используется только как справочный материал |
-| **MiniSTM32H7xx** — всё, кроме 4 файлов драйвера ST7735 (см. выше) | `Middlewares/Third_Party/MiniSTM32H7xx/` | **GPL-3.0** | в сборку не входит |
+| **STK** (Synthesis ToolKit) | `Middlewares/Third_Party/stk/` (`LICENSE`) | MIT-подобная (STK License) | не компилируется ни в прошивке, ни в тестах, ни в Windows-версии — подмодуль сохранён как справочный пример кода |
+| **MiniSTM32H7xx** — всё, кроме 4 файлов драйвера ST7735 (см. выше) | `Middlewares/Third_Party/MiniSTM32H7xx/` | **GPL-3.0** | в сборку не входит; подмодуль сохранён как справочный пример кода |
 
 ## SoundFont-банки и тестовые данные
 

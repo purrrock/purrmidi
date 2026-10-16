@@ -1,6 +1,6 @@
 /**
  * @file    soundfont_synth.cpp
- * @brief   SoundFont synth engine implementation using TinySoundFont & SF2Cache.
+ * @brief   SoundFont synth engine implementation using TinySoundFont; the bank lives in QSPI flash (XIP).
  *
  * Threading model (same as the other engines, see synth_engine.cpp)
  * -----------------------------------------------------------------
@@ -10,31 +10,36 @@
  * context, so the events must never call TinySoundFont directly. They are put into a lock-free
  * SPSC FIFO (producer: main, consumer: audio) and applied at the start of the next render.
  *
- * File I/O stays in the main context: before the NoteOn event is queued, the first blocks of
- * the sample data the new voices will read are loaded into the SF2 cache, so the attack of the
- * note is never replaced by silence.
+ * Sample data
+ * -----------
+ * The SoundFont bank is stored ONLY in the QSPI flash and read in place: on the target the flash is
+ * memory-mapped at 0x90000000 (XIP), and TinySoundFont reads the 16-bit PCM straight from that window
+ * (tsf_set_smpl_pcm16()). Presets/instruments/regions are parsed once from the same window and kept
+ * in the heap. The SD card is touched only by SF2Loader_Ensure() at power-up, to update the bank in
+ * the flash (see sf2_loader.h). On the host (tests, Windows app) sf2_loader_host.cpp provides the same
+ * API and the "flash" is the bank file read into RAM.
  */
 #include "soundfont_synth.h"
-#include "sf2_cache.h"
+#include "sf2_loader.h"
 #include "tsf.h"
+
+/* Host build (unit tests, Windows app) or the STM32 target. */
+#ifndef SF2_HOST_MODE
+#if defined(PURRMIDI_HOST_BUILD) || defined(_WIN32) || defined(WIN32) || defined(__unix__) || defined(__APPLE__)
+#define SF2_HOST_MODE 1
+#else
+#define SF2_HOST_MODE 0
+#endif
+#endif
 
 #if !SF2_HOST_MODE
 #include "stm32h7xx.h"   /* DWT cycle counter for the diagnostics */
-#ifdef PURRMIDI_SF2_XIP
-#include "sf2_loader.h"
-#endif
 #endif
 
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
-
-/* Number of blocks (SF2_BLOCK_SAMPLES samples each) loaded synchronously per voice at NoteOn.
- * Only the SD streaming cache needs this; with QSPI XIP the data is always in place. */
-#ifndef SF2_PRELOAD_BLOCKS_PER_VOICE
-#define SF2_PRELOAD_BLOCKS_PER_VOICE 2U
-#endif
 
 /* 1 = collect per-block statistics (render time, voices, clipping) and print them from the main loop. */
 #ifndef SF2_DIAG_STATS
@@ -229,24 +234,38 @@ void apply_event(const Event &ev)
     }
 }
 
-#ifndef PURRMIDI_SF2_XIP
-/* Main context: make the first blocks of every voice of this note resident before it starts. */
-void preload_note(uint8_t note, uint8_t velocity)
+/* tsf_stream over the memory-mapped bank: TinySoundFont parses the metadata (presets, instruments,
+ * regions) straight from flash; the PCM chunk is skipped by tsf_load() and read later in place. */
+struct BankStream {
+    const uint8_t *base;
+    uint32_t       size;
+    uint32_t       pos;
+};
+BankStream g_stream;
+
+int bank_read(void *data, void *ptr, unsigned int size)
 {
-    unsigned int starts[SF_MAX_NOTE_REGIONS];
-    int n = tsf_channel_get_note_start_samples(g_tsf, 0, (int)note, velocity_to_float(velocity),
-                                               starts, SF_MAX_NOTE_REGIONS);
-    if (n > SF_MAX_NOTE_REGIONS) {
-        n = SF_MAX_NOTE_REGIONS;
-    }
-    for (int i = 0; i < n; ++i) {
-        uint32_t first_block = starts[i] / SF2_BLOCK_SAMPLES;
-        for (uint32_t k = 0; k < SF2_PRELOAD_BLOCKS_PER_VOICE; ++k) {
-            SF2Cache_PreloadBlock(first_block + k);
-        }
-    }
+    BankStream *b = static_cast<BankStream *>(data);
+    if (b->pos >= b->size) return 0;
+    const uint32_t avail = b->size - b->pos;
+    const uint32_t n = (size < avail) ? size : avail;
+    std::memcpy(ptr, b->base + b->pos, n);
+    b->pos += n;
+    return (int)n;
 }
-#endif /* !PURRMIDI_SF2_XIP */
+
+int bank_skip(void *data, unsigned int count)
+{
+    BankStream *b = static_cast<BankStream *>(data);
+    if ((uint64_t)b->pos + count > b->size) return 0;
+    b->pos += count;
+    return 1;
+}
+
+unsigned int bank_tell(void *data)
+{
+    return static_cast<BankStream *>(data)->pos;
+}
 
 } // namespace
 
@@ -262,28 +281,46 @@ bool SoundFontSynth_InitSF2(void)
     g_init_attempted = true;
     fifo_reset();
 
-    std::fprintf(stderr, "[SF2] Opening 0:/SNDFNT.SF2 (SD mount + FatFs)...\n");
-    if (!SF2Cache_OpenFile("0:/SNDFNT.SF2")) {
-        std::fprintf(stderr, "[SF2] Failed to open SoundFont file; see the attempted host paths above.\n");
+    /* One-time boot scenario: QSPI init, optional SD -> flash update, XIP. */
+    const uint8_t *bank = nullptr;
+    uint32_t bank_size = 0;
+    if (!SF2Loader_Ensure() || !SF2Loader_GetBank(&bank, &bank_size)) {
+        std::fprintf(stderr, "[SF2] No SoundFont bank in QSPI flash\n");
         return false;
     }
 
+    g_stream.base = bank;
+    g_stream.size = bank_size;
+    g_stream.pos  = 0;
     struct tsf_stream stream;
-    SF2Cache_InitStream(&stream);
+    stream.data = &g_stream;
+    stream.read = bank_read;
+    stream.skip = bank_skip;
+    stream.tell = bank_tell;
 
-    std::fprintf(stderr, "[SF2] File opened, parsing presets (tsf_load)...\n");
+    std::fprintf(stderr, "[SF2] Bank found (%lu bytes), parsing presets (tsf_load)...\n", (unsigned long)bank_size);
     g_tsf = tsf_load(&stream);
     if (!g_tsf) {
-        std::fprintf(stderr, "[SF2] tsf_load() failed. The file may be invalid, truncated, unsupported, or unreadable.\n");
-        SF2Cache_CloseFile();
+        std::fprintf(stderr, "[SF2] tsf_load() failed. The bank may be invalid, truncated or unsupported.\n");
         return false;
     }
 
+    /* PCM of the 'smpl' chunk is read in place. The offset must be even (int16 alignment) and inside the bank. */
+    const uint32_t smpl_off   = tsf_get_smpl_file_offset(g_tsf);
+    const uint32_t smpl_total = tsf_get_smpl_sample_count(g_tsf);
+    if ((smpl_off & 1U) != 0U || smpl_off >= bank_size) {
+        std::fprintf(stderr, "[SF2] Bad smpl chunk offset %lu\n", (unsigned long)smpl_off);
+        tsf_close(g_tsf);
+        g_tsf = nullptr;
+        return false;
+    }
+    const uint32_t max_samples = (bank_size - smpl_off) / 2U;   /* never read past the end of the bank */
+    tsf_set_smpl_pcm16(g_tsf, reinterpret_cast<const short *>(bank + smpl_off),
+                       (smpl_total < max_samples) ? smpl_total : max_samples);
     std::fprintf(stderr, "[SF2] SoundFont metadata loaded successfully.\n");
 
     tsf_set_output(g_tsf, TSF_STEREO_INTERLEAVED, 48000, SF2_GLOBAL_GAIN_DB);
     tsf_set_max_voices(g_tsf, 32);
-    SF2Cache_SetSmplFileOffset(tsf_get_smpl_file_offset(g_tsf), tsf_get_smpl_sample_count(g_tsf));
 
     /* MIDI channel 0 must exist before the first note: tsf_channel_note_on() ignores notes
      * for channels that have not been created. */
@@ -296,8 +333,8 @@ bool SoundFontSynth_InitSF2(void)
 void SoundFontSynth_Init(void)
 {
     /* Try to load the SoundFont only ONCE. Retrying on every engine selection would block the
-     * main loop (SD init / file parsing) each time the user cycles through the instruments
-     * when the card or the file is missing. */
+     * main loop (QSPI init / metadata parsing) each time the user cycles through the instruments
+     * when the bank is missing. On the target main() loads it at power-up. */
     if (!g_loaded && !g_tsf && !g_init_attempted) {
         SoundFontSynth_InitSF2();
     }
@@ -306,7 +343,6 @@ void SoundFontSynth_Init(void)
         tsf_reset(g_tsf);
         tsf_channel_set_presetnumber(g_tsf, 0, 0, 0);
     }
-    SF2Cache_Reset();
     fifo_reset();
 }
 
@@ -320,10 +356,6 @@ void SoundFontSynth_NoteOn(uint8_t note, uint8_t velocity)
     }
     if (note > 127) return;
     if (velocity > 127) velocity = 127;
-
-#ifndef PURRMIDI_SF2_XIP
-    preload_note(note, velocity);
-#endif
 
     Event ev = { EV_NOTE_ON, note, velocity };
     fifo_push(ev);
@@ -367,7 +399,6 @@ void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
         apply_event(ev);
     }
 
-    SF2Cache_BeginAudioBlock();
 #if SF2_DIAG_STATS
     const uint32_t t0 = diag_cycles();
     render_block(buffer, num_frames);
@@ -387,14 +418,14 @@ void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
 #endif
 }
 
-void SoundFontSynth_Process(void)
-{
-    SF2Cache_ProcessRequests();
-}
-
 bool SoundFontSynth_IsLoaded(void)
 {
     return g_loaded;
+}
+
+uint32_t SoundFontSynth_GetSampleCount(void)
+{
+    return g_tsf ? tsf_get_smpl_sample_count(g_tsf) : 0U;
 }
 
 bool SoundFontSynth_IsAvailable(void)

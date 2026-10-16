@@ -54,8 +54,8 @@ typedef enum {
 } SynthEngineId;
 
 /*
- * Общая громкость с MIDI-клавиатуры: Control Change SYNTH_MASTER_VOLUME_CC (по умолчанию CC11 —
- * «Channel Epression»). Канал не учитывается.
+ * Общая громкость с MIDI-клавиатуры: Control Change SYNTH_MASTER_VOLUME_CC (по умолчанию CC7 —
+ * «Channel Volume»). Канал не учитывается.
  * У PCM5102A нет аппаратной регулировки громкости, поэтому коэффициент применяется программно
  * к выходному буферу в SynthEngine_FillStereoBuffer(), для любого движка. Кривая квадратичная
  * (уровень 127 -> 1.0, 64 -> ≈0.25, 0 -> тишина). Переопределяется через -D при сборке.

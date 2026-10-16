@@ -21,7 +21,6 @@
 #include "synth_engine.h"
 #include "midi_dispatch.h"
 #include "soundfont_synth.h"
-#include "sf2_cache.h"
 
 extern "C" {
 #include "midi_queue.h"
@@ -285,21 +284,18 @@ int main(int argc, char* argv[]) {
                       << " -> synth engine: " << SynthEngine_GetName();
             if (config.verbose) {
                 std::cout << "; SoundFont loaded: "
-                          << (SoundFontSynth_IsLoaded() ? "yes" : "no")
-                          << "; SF2 file open: "
-                          << (SF2Cache_IsFileOpen() ? "yes" : "no");
+                          << (SoundFontSynth_IsLoaded() ? "yes" : "no");
             }
             std::cout << "\n";
         }
     });
 
     if (config.verbose) {
-        std::cout << "[SF2] Host file lookup uses tests/SNDFNT.SF2, then "
-                     "SNDFNT.SF2 relative to the current working directory.\n"
+        std::cout << "[SF2] Host bank lookup: PURRMIDI_TEST_SF2, tests/SNDFNT.SF2, SNDFNT.SF2, "
+                     "SoundFonts/Yamaha S90ES lite.SF2 (relative to the current working directory).\n"
                   << "[SF2] Startup engine: " << SynthEngine_GetName()
                   << "; SoundFont loaded: "
                   << (SoundFontSynth_IsLoaded() ? "yes" : "no (loaded on engine selection)")
-                  << "; SF2 file open: " << (SF2Cache_IsFileOpen() ? "yes" : "no")
                   << "\n";
     }
 
@@ -377,10 +373,6 @@ int main(int argc, char* argv[]) {
         std::cout << "MIDI Monitor running. Press Ctrl+C to stop...\n";
     }
 
-    SF2CacheStats last_sf2_stats{};
-    SF2Cache_ResetStats();
-    auto last_sf2_report = std::chrono::steady_clock::now();
-
     while (g_running.load()) {
         vk.Poll();
 
@@ -402,39 +394,9 @@ int main(int argc, char* argv[]) {
                           << " -> synth engine: " << SynthEngine_GetName();
                 if (config.verbose) {
                     std::cout << "; SoundFont loaded: "
-                              << (SoundFontSynth_IsLoaded() ? "yes" : "no")
-                              << "; SF2 file open: "
-                              << (SF2Cache_IsFileOpen() ? "yes" : "no");
+                              << (SoundFontSynth_IsLoaded() ? "yes" : "no");
                 }
                 std::cout << "\n";
-            }
-        }
-
-        // SF2Cache performs file I/O, so service queued PCM reads from the
-        // main thread, never from the real-time audio callback.
-        if (config.mode == AppConfig::Mode::Play) {
-            SoundFontSynth_Process();
-
-            // --verbose: tell when the SoundFont sample cache could not keep up (the audio
-            // thread then plays silence instead of the missing samples = clicks / dropouts).
-            if (config.verbose) {
-                auto now = std::chrono::steady_clock::now();
-                if (now - last_sf2_report >= std::chrono::milliseconds(250)) {
-                    last_sf2_report = now;
-                    SF2CacheStats st;
-                    SF2Cache_GetStats(&st);
-                    if (st.miss_samples != last_sf2_stats.miss_samples ||
-                        st.load_errors != last_sf2_stats.load_errors) {
-                        std::lock_guard<std::mutex> lock(g_console_mutex);
-                        std::cout << "[SF2] cache underrun: +"
-                                  << (st.miss_samples - last_sf2_stats.miss_samples)
-                                  << " silent sample reads, +"
-                                  << (st.load_errors - last_sf2_stats.load_errors)
-                                  << " read errors (totals: " << st.miss_samples << " / "
-                                  << st.load_errors << ")\n";
-                    }
-                    last_sf2_stats = st;
-                }
             }
         }
 
@@ -455,14 +417,6 @@ int main(int argc, char* argv[]) {
     }
 
     midi_in.ClosePort();
-
-    if (config.mode == AppConfig::Mode::Play && config.verbose) {
-        SF2CacheStats st;
-        SF2Cache_GetStats(&st);
-        std::cout << "[SF2] cache summary: blocks loaded=" << st.blocks_loaded
-                  << ", silent sample reads=" << st.miss_samples
-                  << ", read errors=" << st.load_errors << "\n";
-    }
 
     uint32_t overruns = MIDI_Queue_GetOverrunCount();
     std::cout << "MIDI Queue overrun count: " << overruns << "\n";

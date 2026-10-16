@@ -45,10 +45,8 @@
 #include "soundfont_synth.h"
 #include "diag.h"
 #include "organ_synth.h"
-#ifdef PURRMIDI_SF2_XIP
 #include "xip_mpu.h"   /* MPU-регионы и D-cache для XIP-чтения SoundFont из QSPI Flash */
 #include "sf2_loader.h"
-#endif
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -79,13 +77,6 @@ static volatile uint32_t sai_error_count = 0;
 static uint8_t active_notes[128];
 static uint8_t active_note_stack[128];
 static uint16_t active_note_count = 0;
-
-/* 1 = try to load 0:/SNDFNT.SF2 from the SD card once at power-up (progress goes to UART).
- * The SD init / file parsing blocks for a while, so it is done here, not while playing.
- * If it fails, the SoundFont engine is skipped by the Program Change 127 cycle.
- * 0 = never touch the SD card at start-up (the SoundFont engine is then loaded lazily on the
- * first explicit selection with Program Change 4 and may block the main loop for a while). */
-#define SF2_LOAD_AT_BOOT 1
 
 /* Some keyboards send the "next instrument" Program Change 127 twice per button press
  * (e.g. on press and on release). Repeats closer than this are ignored. */
@@ -219,12 +210,10 @@ int main(void)
 #if ENABLE_ICACHE
   SCB_EnableICache();
 #endif
-#ifdef PURRMIDI_SF2_XIP
   /* D-cache нужен для быстрого XIP-чтения сэмплов из QSPI Flash. Все SRAM с DMA-буферами (AXI, SRAM1-3, SRAM4)
    * объявляются non-cacheable, кэшируется только окно 0x90000000 (оно открывается драйвером QSPI). */
   XipMpu_Config();
   SCB_EnableDCache();
-#endif
 
   /* USER CODE END Init */
 
@@ -251,7 +240,6 @@ int main(void)
   Display_Init();
   MIDI_Queue_Init();
   MIDI_USB_Init();
-  // SDStorage_Mount()
   SynthEngine_Init(); // Включает синтезатор по умолчанию (E-Piano); дальше выбор — по Program Change
   printf("Synth engine: %s\r\n", SynthEngine_GetName());
   Display_SyncPatch();
@@ -265,14 +253,10 @@ int main(void)
   printf("[SYS] SYSCLK=%lu Hz, I-cache %s, audio budget %lu us per %u frames\r\n",
          (unsigned long)SystemCoreClock, ENABLE_ICACHE ? "ON" : "off",
          (unsigned long)(1000000UL * (AUDIO_BUFFER_FRAMES / 2U) / 48000UL), (unsigned)(AUDIO_BUFFER_FRAMES / 2U));
-#if SF2_LOAD_AT_BOOT
-#ifdef PURRMIDI_SF2_XIP
-  /* Банк читается из QSPI Flash (XIP). Если вставлена SD-карта с новым/изменённым 0:/SNDFNT.SF2, он сначала
-   * переписывается во флеш (до ~минуты, прогресс на дисплее и в UART), см. docs/SOUNDFONT_QSPI_SYNTH.md. */
+  /* SoundFont-банк хранится только в QSPI Flash и читается через XIP. SD-карта нужна лишь здесь, при запуске:
+   * если на ней лежит новый/изменённый 0:/SNDFNT.SF2, он сначала переписывается во флеш (до ~минуты, прогресс на
+   * дисплее и в UART), после чего SD отключается. См. docs/SOUNDFONT_QSPI_SYNTH.md. */
   printf("[SF2] Preparing SoundFont (QSPI XIP, SD is used only to update the bank)...\r\n");
-#else
-  printf("[SF2] Loading SoundFont from SD...\r\n");
-#endif
   if (SoundFontSynth_InitSF2())
   {
     printf("[SF2] SoundFont ready\r\n");
@@ -281,7 +265,6 @@ int main(void)
   {
     printf("[SF2] SoundFont NOT available - the soundfont engine will be skipped\r\n");
   }
-#endif
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
   memset(audio_buffer, 0, sizeof(audio_buffer));  /* .dma_buffer is not zeroed by startup */
   if (HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer, AUDIO_BUFFER_SIZE) != HAL_OK)
@@ -310,7 +293,6 @@ int main(void)
     Button_K1_Process();
     USB_PortLostRecover(&hUsbHostFS);   /* port silently disabled by HW -> re-enumerate */
     MIDI_USB_Process();
-    SoundFontSynth_Process();
 
     if (MIDI_USB_HasStateChanged())
     {

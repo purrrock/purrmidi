@@ -118,8 +118,13 @@ unsigned int tsf_get_smpl_file_offset(const struct tsf* f);
 unsigned int tsf_get_smpl_sample_count(const struct tsf* f);
 /* Reports the first sample each voice of tsf_channel_note_on(channel, key, vel) will read.
    Read-only (does not start voices). Returns the number of matching regions; at most max_out
-   start positions are written to out_starts. Used to pre-load sample data before the voice starts. */
+   start positions are written to out_starts. Used by the SoundFont diagnostics (regions per note). */
 int tsf_channel_get_note_start_samples(const struct tsf* f, int channel, int key, float vel, unsigned int* out_starts, int max_out);
+/* PurrMidi modification: the PCM data of the 'smpl' chunk is NOT copied into RAM. The application tells TSF where
+   the 16-bit samples live (memory-mapped QSPI flash on the target, a RAM image on the host); the voices read them
+   in place. 'count' is the number of samples; reads beyond it return silence. The memory must stay valid and
+   unchanged while the tsf object is in use. */
+void tsf_set_smpl_pcm16(struct tsf* f, const short* pcm, unsigned int count);
 #ifdef __cplusplus
 }
 #endif
@@ -348,9 +353,11 @@ struct tsf
 {
 	struct tsf_preset* presets;
 	float* fontSamples;
-	/* PurrMidi modification: streaming SF2 fields */
+	/* PurrMidi modification: SF2 sample data is read in place (see tsf_set_smpl_pcm16) */
 	unsigned int smpl_file_offset;
 	unsigned int smpl_sample_count;
+	const short* smplPcm;
+	unsigned int smplPcmCount;
 	struct tsf_voice* voices;
 	struct tsf_channels* channels;
 
@@ -471,9 +478,6 @@ struct tsf_preset
 
 struct tsf_voice
 {
-	/* PurrMidi modification: cache slot hints */
-	int last_cache_slot;
-	int last_cache_slot_next;
 	int playingPreset, playingKey, playingChannel, heldSustain;
 	struct tsf_region* region;
 	double pitchInputTimecents, pitchOutputFactor;
@@ -1232,14 +1236,6 @@ static void tsf_voice_endquick(tsf* f, struct tsf_voice* v)
 	}
 }
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-short tsf_get_sample_pcm16(struct tsf* f, unsigned int pos, int* last_slot_hint);
-#ifdef __cplusplus
-}
-#endif
-
 static void tsf_voice_calcpitchratio(struct tsf_voice* v, float pitchShift, float outSampleRate)
 {
 	double note = v->playingKey + v->region->transpose + v->region->tune / 100.0;
@@ -1252,7 +1248,8 @@ static void tsf_voice_calcpitchratio(struct tsf_voice* v, float pitchShift, floa
 static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, int numSamples)
 {
 	struct tsf_region* region = v->region;
-	float* input = f->fontSamples; (void)input;
+	const short* smplPcm = f->smplPcm; // PurrMidi modification: in-place 16-bit PCM
+	const unsigned int smplCount = f->smplPcmCount;
 	float* outL = outputBuffer;
 	float* outR = (f->outputmode == TSF_STEREO_UNWEAVED ? outL + numSamples : TSF_NULL);
 
@@ -1323,10 +1320,10 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 				{
 					unsigned int pos = (unsigned int)tmpSourceSamplePosition, nextPos = (pos >= tmpLoopEnd && isLooping ? tmpLoopStart : pos + 1);
 
-					// PurrMidi modification: streamed linear interpolation via cache lookup
+					// PurrMidi modification: linear interpolation straight from the in-place 16-bit PCM
 					float alpha = (float)(tmpSourceSamplePosition - pos);
-					short s1_short = tsf_get_sample_pcm16(f, pos, &v->last_cache_slot);
-					short s2_short = tsf_get_sample_pcm16(f, nextPos, &v->last_cache_slot_next);
+					short s1_short = (pos < smplCount ? smplPcm[pos] : (short)0);
+					short s2_short = (nextPos < smplCount ? smplPcm[nextPos] : (short)0);
 					float val = ((float)s1_short / 32767.0f) * (1.0f - alpha) + ((float)s2_short / 32767.0f) * alpha;
 
 					// Low-pass filter.
@@ -1347,10 +1344,10 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 				{
 					unsigned int pos = (unsigned int)tmpSourceSamplePosition, nextPos = (pos >= tmpLoopEnd && isLooping ? tmpLoopStart : pos + 1);
 
-					// PurrMidi modification: streamed linear interpolation via cache lookup
+					// PurrMidi modification: linear interpolation straight from the in-place 16-bit PCM
 					float alpha = (float)(tmpSourceSamplePosition - pos);
-					short s1_short = tsf_get_sample_pcm16(f, pos, &v->last_cache_slot);
-					short s2_short = tsf_get_sample_pcm16(f, nextPos, &v->last_cache_slot_next);
+					short s1_short = (pos < smplCount ? smplPcm[pos] : (short)0);
+					short s2_short = (nextPos < smplCount ? smplPcm[nextPos] : (short)0);
 					float val = ((float)s1_short / 32767.0f) * (1.0f - alpha) + ((float)s2_short / 32767.0f) * alpha;
 
 					// Low-pass filter.
@@ -1370,10 +1367,10 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 				{
 					unsigned int pos = (unsigned int)tmpSourceSamplePosition, nextPos = (pos >= tmpLoopEnd && isLooping ? tmpLoopStart : pos + 1);
 
-					// PurrMidi modification: streamed linear interpolation via cache lookup
+					// PurrMidi modification: linear interpolation straight from the in-place 16-bit PCM
 					float alpha = (float)(tmpSourceSamplePosition - pos);
-					short s1_short = tsf_get_sample_pcm16(f, pos, &v->last_cache_slot);
-					short s2_short = tsf_get_sample_pcm16(f, nextPos, &v->last_cache_slot_next);
+					short s1_short = (pos < smplCount ? smplPcm[pos] : (short)0);
+					short s2_short = (nextPos < smplCount ? smplPcm[nextPos] : (short)0);
 					float val = ((float)s1_short / 32767.0f) * (1.0f - alpha) + ((float)s2_short / 32767.0f) * alpha;
 
 					// Low-pass filter.
@@ -1405,6 +1402,12 @@ extern "C" {
 #endif
 unsigned int tsf_get_smpl_file_offset(const struct tsf* f) { return f ? f->smpl_file_offset : 0; }
 unsigned int tsf_get_smpl_sample_count(const struct tsf* f) { return f ? f->smpl_sample_count : 0; }
+void tsf_set_smpl_pcm16(struct tsf* f, const short* pcm, unsigned int count)
+{
+	if (!f) return;
+	f->smplPcm = pcm;
+	f->smplPcmCount = pcm ? count : 0;
+}
 #ifdef __cplusplus
 }
 #endif

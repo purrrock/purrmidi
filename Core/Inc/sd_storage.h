@@ -1,11 +1,14 @@
 /**
  * @file    sd_storage.h
- * @brief   microSD (SDMMC1) + FatFs для PurrMidi.
+ * @brief   microSD (SDMMC1) + FatFs для PurrMidi - только чтение, только при запуске.
+ *
+ * SD-карта используется лишь для обновления SoundFont-банка в QSPI Flash (sf2_loader.c): карту
+ * монтируют при старте, читают 0:/SNDFNT.SF2 и размонтируют. Синтезатор карту не использует.
  *
  * Модуль решает проблему "DTCM и DMA": IDMA контроллера SDMMC1 не видит DTCM
  * (там лежат .data/.bss/стек/куча), а FatFs передаёт драйверу диска указатели
  * на внутренние буферы объектов FATFS и FIL. Диск-драйвер из этого модуля
- * сам проверяет адрес буфера и, если он не в AXI SRAM, читает/пишет через
+ * сам проверяет адрес буфера и, если он не в AXI SRAM, читает через
  * промежуточный (bounce) буфер из секции .dma_buffer. Поэтому FATFS, FIL и
  * пользовательские буферы можно держать в любой памяти.
  *
@@ -60,9 +63,6 @@ void SDStorage_ListRoot(void);
 void SDStorage_Unmount(void);
 
 bool SDStorage_IsMounted(void);
-
-/** Путь тома для f_open() и т.п. (обычно "0:/"). */
-const char *SDStorage_Path(void);
 
 /** true, если карта вставлена. Если в CubeMX пин PD4 не назван SD_DETECT, всегда true. */
 bool SDStorage_CardPresent(void);

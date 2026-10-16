@@ -1,13 +1,17 @@
 /**
  * @file    sd_storage.c
- * @brief   FatFs-драйвер диска поверх HAL SD (SDMMC1, IDMA) с bounce-буфером.
+ * @brief   FatFs-драйвер диска (только чтение) поверх HAL SD (SDMMC1, IDMA) с bounce-буфером.
+ *
+ * SD-карта нужна прошивке только при запуске: sf2_loader.c читает с неё 0:/SNDFNT.SF2, чтобы обновить
+ * SoundFont-банк в QSPI Flash, после чего SDStorage_Unmount() выключает SDMMC1. Запись на карту не нужна.
  *
  * Требования к проекту (см. README, раздел "Работа с SD-картой"):
  *  - в CubeMX включён SDMMC1 (4 бита), FATFS в режиме "User-defined";
  *  - вызов MX_SDMMC1_SD_Init() и MX_FATFS_Init() отключён
- *    (Project Manager -> Advanced Settings -> Generated Function Calls);
- *  - FatFs: FF_FS_READONLY = 0 (нужны write и ioctl), FF_MIN_SS = FF_MAX_SS = 512,
- *    FF_LBA64 = 0.
+ *    (Project Manager -> Advanced Settings -> Generated Function Calls): сгенерированный
+ *    MX_SDMMC1_SD_Init() при отсутствии карты вызывает Error_Handler() и вешает прибор, а карта
+ *    теперь вставлена только на время обновления банка;
+ *  - FatFs: _FS_READONLY = 1, _MIN_SS = _MAX_SS = 512.
  */
 #include "sd_storage.h"
 
@@ -39,9 +43,6 @@
 
 #ifndef SD_READ_TIMEOUT_MS
 #define SD_READ_TIMEOUT_MS      1000U
-#endif
-#ifndef SD_WRITE_TIMEOUT_MS
-#define SD_WRITE_TIMEOUT_MS     3000U
 #endif
 
 /* Уровень сигнала SD_DETECT, когда карта вставлена (проверьте по схеме платы). */
@@ -79,7 +80,6 @@ static SDStorage_Diag s_diag = { SDS_OK, -1, -1, -1, 0U, -1, -1 };
 /* ----------------------- callbacks HAL (вызываются из IRQ) ------------------ */
 
 void HAL_SD_RxCpltCallback(SD_HandleTypeDef *hsd)    { if (hsd == &hsd1) s_xfer_state = 1; }
-void HAL_SD_TxCpltCallback(SD_HandleTypeDef *hsd)    { if (hsd == &hsd1) s_xfer_state = 1; }
 void HAL_SD_ErrorCallback(SD_HandleTypeDef *hsd)     { if (hsd == &hsd1) s_xfer_state = 2; }
 void HAL_SD_AbortCallback(SD_HandleTypeDef *hsd)     { if (hsd == &hsd1) s_xfer_state = 2; }
 
@@ -136,19 +136,6 @@ static int xfer_read(uint8_t *buf, uint32_t sector, uint32_t n)
     return 0;
 }
 
-static int xfer_write(const uint8_t *buf, uint32_t sector, uint32_t n)
-{
-    if (wait_card_ready(SD_WRITE_TIMEOUT_MS) != 0) return -1;
-    if (dcache_enabled()) {
-        SCB_CleanDCache_by_Addr((uint32_t *)(uintptr_t)buf, (int32_t)(n * SD_SECTOR_SIZE));
-    }
-    s_xfer_state = 0;
-    if (HAL_SD_WriteBlocks_DMA(&hsd1, (uint8_t *)(uintptr_t)buf, sector, n) != HAL_OK) return -1;
-    if (wait_xfer_done(SD_WRITE_TIMEOUT_MS) != 0) return -1;
-    /* Карта ещё программирует блоки: дождаться возврата в состояние TRANSFER. */
-    return wait_card_ready(SD_WRITE_TIMEOUT_MS);
-}
-
 /* ------------------------------ диск-драйвер FatFs -------------------------- */
 
 static DSTATUS sd_status(BYTE lun)
@@ -186,26 +173,11 @@ static DRESULT sd_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
     return RES_OK;
 }
 
+/* Диск только для чтения (_FS_READONLY = 1): FatFs сюда не заходит, заглушка нужна для структуры драйвера. */
 static DRESULT sd_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
 {
-    (void)lun;
-    if (!s_hw_ready) return RES_NOTRDY;
-    if (count == 0U) return RES_PARERR;
-
-    while (count > 0U) {
-        uint32_t n = (count > SD_DIRECT_MAX_SECTORS) ? SD_DIRECT_MAX_SECTORS : count;
-        if (buffer_is_dma_safe(buff, n * SD_SECTOR_SIZE)) {
-            if (xfer_write(buff, sector, n) != 0) return RES_ERROR;
-        } else {
-            n = (count > SD_BOUNCE_SECTORS) ? SD_BOUNCE_SECTORS : count;
-            memcpy(s_bounce, buff, n * SD_SECTOR_SIZE);
-            if (xfer_write(s_bounce, sector, n) != 0) return RES_ERROR;
-        }
-        buff   += n * SD_SECTOR_SIZE;
-        sector += n;
-        count  -= n;
-    }
-    return RES_OK;
+    (void)lun; (void)buff; (void)sector; (void)count;
+    return RES_WRPRT;
 }
 
 static DRESULT sd_ioctl(BYTE lun, BYTE cmd, void *buff)
@@ -216,7 +188,7 @@ static DRESULT sd_ioctl(BYTE lun, BYTE cmd, void *buff)
 
     switch (cmd) {
     case CTRL_SYNC:
-        return (wait_card_ready(SD_WRITE_TIMEOUT_MS) == 0) ? RES_OK : RES_ERROR;
+        return RES_OK;      /* записи нет - синхронизировать нечего */
     case GET_SECTOR_COUNT:
         if (HAL_SD_GetCardInfo(&hsd1, &info) != HAL_OK) return RES_ERROR;
         *(DWORD *)buff = info.LogBlockNbr;
@@ -408,9 +380,4 @@ void SDStorage_Unmount(void)
 bool SDStorage_IsMounted(void)
 {
     return s_mounted != 0U;
-}
-
-const char *SDStorage_Path(void)
-{
-    return s_path;
 }
