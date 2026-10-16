@@ -195,7 +195,8 @@ void DebugMon_Handler(void)
 void PendSV_Handler(void)
 {
   /* USER CODE BEGIN PendSV_IRQn 0 */
-
+  /* Рендер звука: PendSV имеет самый низкий приоритет, любое другое прерывание его вытесняет. */
+  Audio_ProcessPending();
   /* USER CODE END PendSV_IRQn 0 */
   /* USER CODE BEGIN PendSV_IRQn 1 */
 

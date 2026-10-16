@@ -30,9 +30,10 @@
  *   SynthEngine_Init / NoteOn / NoteOff / ControlChange / ProgramChange / Select
  *       — из основного цикла (main / MIDI-поток), только из ОДНОГО контекста;
  *   SynthEngine_FillStereoBuffer
- *       — из аудио-прерывания DMA (STM32) или аудио-потока (ПК).
+ *       — из PendSV (STM32; DMA-прерывание только запрашивает рендер, см. Engine/audio/audio_halves.h)
+ *         или из аудио-потока (ПК).
  *
- * Переключение движка не блокирует аудио-прерывание: пока идёт смена,
+ * Переключение движка не блокирует аудио-контекст: пока идёт смена,
  * FillStereoBuffer просто отдаёт тишину (см. synth_engine.cpp).
  */
 

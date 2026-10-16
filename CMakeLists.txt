@@ -140,6 +140,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Engine/midi/midi_queue.c
     Engine/midi/midi_dispatch.c
     Engine/midi/usb_midi_packet.c
+    Engine/audio/audio_halves.c
     Platform/midi_usb/midi_usb.c
     Platform/midi_usb/usb_port_recover.c
 
@@ -223,6 +224,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Inc
     Engine/midi
+    Engine/audio
     Engine/synth
     Platform/midi_usb
     Platform/qspi_xip

@@ -47,6 +47,7 @@
 #include "organ_synth.h"
 #include "xip_mpu.h"   /* MPU-регионы и D-cache для XIP-чтения SoundFont из QSPI Flash */
 #include "sf2_loader.h"
+#include "audio_halves.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -86,10 +87,10 @@ static uint16_t active_note_count = 0;
  * without a cache (several wait states per fetch). */
 #define ENABLE_ICACHE 1
 
-/* 1 = time every audio DMA interrupt with the DWT cycle counter and report it on the UART:
- *   [AUDIO] soundfont: isr max=NNN us (NN% of 2666 us budget) ...
- * An interrupt that takes longer than its budget (one DMA half-buffer) starves the main loop
- * (USB, MIDI, display) forever - this is how the system "hangs" even though nothing crashed. */
+/* 1 = time every audio block render with the DWT cycle counter and report it on the UART:
+ *   [AUDIO] soundfont: fill max=NNN us (NN% of 2666 us budget) ...
+ * A render that takes longer than its budget (one DMA half-buffer) starves the main loop
+ * (USB, MIDI, display): the render runs in PendSV, which preempts the main loop. */
 #define AUDIO_DIAG_UART 1
 
 static volatile uint32_t audio_cyc_max = 0;      /* longest fill so far (CPU cycles) */
@@ -99,7 +100,11 @@ static volatile uint32_t audio_over80 = 0;       /* fills that used > 80% of the
 static volatile uint32_t audio_over100 = 0;      /* fills that used > 100% of the budget */
 static volatile bool     audio_reset_stats = false;
 static volatile uint32_t audio_shed_blocks = 0;  /* blocks still to be output as silence (CPU load shedding) */
-static volatile uint32_t audio_shed_total = 0;   /* blocks dropped so far */
+static volatile uint32_t audio_shed_total = 0;   /* blocks dropped so far (load shedding + blocks that missed their deadline) */
+
+/* Which halves of the DMA ring wait for new samples. The DMA interrupt only marks a half as free and pends PendSV;
+ * the synth is rendered in PendSV (lowest priority), so USB/SDMMC/SysTick can preempt it. See audio_halves.h. */
+static AudioHalves audio_halves;
 /* Audio: 48 kHz, stereo, 16 bit. Circular DMA ring split into two halves.
  * It must NOT be placed in DTCM (DMA2 cannot reach it): own section in AXI SRAM,
  * see .dma_buffer in the linker script. With the QSPI XIP backend the D-cache is ON, but XipMpu_Config()
@@ -267,6 +272,7 @@ int main(void)
   }
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
   memset(audio_buffer, 0, sizeof(audio_buffer));  /* .dma_buffer is not zeroed by startup */
+  AudioHalves_Init(&audio_halves);
   if (HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer, AUDIO_BUFFER_SIZE) != HAL_OK)
   {
     Error_Handler();
@@ -425,6 +431,7 @@ int main(void)
         static uint32_t reported_max = 0;
         static uint32_t reported_over80 = 0;
         static uint32_t reported_shed = 0;
+        static uint32_t reported_late = 0;
         uint32_t t_now = HAL_GetTick();
 
         if (audio_reset_stats)
@@ -442,19 +449,21 @@ int main(void)
             last_audio_report = t_now;
             uint32_t m = audio_cyc_max;
             uint32_t o80 = audio_over80;
-            if (m > reported_max + reported_max / 8U || o80 != reported_over80 || audio_shed_total != reported_shed)
+            if (m > reported_max + reported_max / 8U || o80 != reported_over80 || audio_shed_total != reported_shed ||
+                AudioHalves_LateCount(&audio_halves) != reported_late)
             {
                 const uint32_t us = SystemCoreClock / 1000000U;
                 const uint32_t budget = (SystemCoreClock / 48000U) * (AUDIO_BUFFER_FRAMES / 2U);
-                printf("[AUDIO] %s: isr last=%lu us max=%lu us (%lu%% of %lu us) >80%%: %lu >100%%: %lu shed=%lu calls=%lu\r\n",
+                printf("[AUDIO] %s: fill last=%lu us max=%lu us (%lu%% of %lu us) >80%%: %lu >100%%: %lu shed=%lu late=%lu calls=%lu\r\n",
                        SynthEngine_GetName(),
                        (unsigned long)(audio_cyc_last / us), (unsigned long)(m / us),
                        (unsigned long)(m / (budget / 100U)), (unsigned long)(budget / us),
                        (unsigned long)o80, (unsigned long)audio_over100, (unsigned long)audio_shed_total,
-                       (unsigned long)audio_calls);
+                       (unsigned long)AudioHalves_LateCount(&audio_halves), (unsigned long)audio_calls);
                 reported_max = m;
                 reported_over80 = o80;
                 reported_shed = audio_shed_total;
+                reported_late = AudioHalves_LateCount(&audio_halves);
             }
         }
 
@@ -489,8 +498,9 @@ int main(void)
             Display_ShowError(DISPLAY_ERR_AUDIO_DMA);
         }
 
-        /* Load shedding: блоки заменены тишиной, т.е. звук реально пропал (счётчик не сбрасывается) */
-        const uint32_t shed = audio_shed_total;
+        /* Load shedding и пропущенные сроки: блоки заменены тишиной или проиграны недозаполненными,
+         * т.е. звук реально пострадал (счётчики не сбрасываются) */
+        const uint32_t shed = audio_shed_total + AudioHalves_LateCount(&audio_halves);
         if (shed != seen_audio_shed)
         {
             seen_audio_shed = shed;
@@ -573,18 +583,29 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 
-/* Audio DMA callbacks (DMA2_Stream0 ISR): refill the half that was just played.
+/* Audio rendering architecture
+ * ----------------------------
+ * DMA2_Stream0 ISR (priority 0, a few microseconds): HAL calls the callbacks below, which only record which half of
+ * the ring was just played (AudioHalves_Request) and set the PendSV pending bit.
+ * PendSV (priority 15 = lowest, preempts only the main loop): Audio_ProcessPending() renders the synth into the free
+ * half. Every other interrupt - USB (0), SAI errors (1), SDMMC (5), SysTick (14) - preempts the render, so a block
+ * that takes up to 2.67 ms no longer blocks USB and the HAL tick.
  * Half-transfer -> first half is free; transfer-complete -> second half is free. */
+static inline void audio_request_half(unsigned half)
+{
+    (void)AudioHalves_Request(&audio_halves, half);
+    SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;      /* run Audio_ProcessPending() from PendSV */
+    __DSB();
+}
 
 /* Fills one half of the DMA ring and measures how long it took. */
 static void audio_fill(int16_t *dst)
 {
     const uint32_t frames = AUDIO_BUFFER_FRAMES / 2U;
 
-    /* Load shedding. If a fill took longer than one block period, the next DMA interrupt is already
-     * pending when this one returns, so the main loop (USB, MIDI, SD/SoundFont cache loader, display)
-     * would never run again and the system would look frozen. Output silence for a few blocks instead:
-     * the audio drops out, but main gets the CPU time it needs and can recover. */
+    /* Load shedding. PendSV preempts the main loop, so a render that takes more than one block period would leave
+     * the main loop (USB, MIDI, display) no CPU time at all and the system would look frozen. Output silence
+     * for a few blocks instead: the audio drops out, but main gets the CPU time it needs and can recover. */
     if (audio_shed_blocks != 0U)
     {
         audio_shed_blocks--;
@@ -611,7 +632,7 @@ static void audio_fill(int16_t *dst)
         if (audio_over100++ == 0U) {
             /* Last gasp: the main loop is probably starved from now on, so report right here. */
             const uint32_t us = SystemCoreClock / 1000000U;
-            Diag_Puts("\n[AUDIO] ISR OVERRUN: fill took ");
+            Diag_Puts("\n[AUDIO] RENDER OVERRUN: fill took ");
             Diag_PutDec(dt / us);
             Diag_Puts(" us, budget ");
             Diag_PutDec(budget / us);
@@ -622,17 +643,42 @@ static void audio_fill(int16_t *dst)
     }
 }
 
+/* Called from PendSV_Handler (stm32h7xx_it.c): renders every half that is waiting. */
+void Audio_ProcessPending(void)
+{
+    unsigned half;
+    bool stale;
+
+    while (AudioHalves_Next(&audio_halves, &half, &stale))
+    {
+        int16_t *dst = &audio_buffer[half * (AUDIO_BUFFER_SIZE / 2U)];
+
+        if (stale)
+        {
+            /* Both halves were waiting: the older one missed its deadline and the DMA is playing it right now.
+             * Silence is better than a repeat of the old block. */
+            audio_shed_total++;
+            memset(dst, 0, (AUDIO_BUFFER_SIZE / 2U) * sizeof(int16_t));
+        }
+        else
+        {
+            audio_fill(dst);
+        }
+        AudioHalves_Done(&audio_halves, half);
+    }
+}
+
 void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai)
 {
     if (hsai->Instance == SAI1_Block_A) {
-        audio_fill(&audio_buffer[0]);
+        audio_request_half(0U);
     }
 }
 
 void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai)
 {
     if (hsai->Instance == SAI1_Block_A) {
-        audio_fill(&audio_buffer[AUDIO_BUFFER_SIZE / 2]);
+        audio_request_half(1U);
     }
 }
 

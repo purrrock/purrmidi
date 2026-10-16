@@ -53,6 +53,8 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
+/** Рендер звука (вызывается из PendSV_Handler): заполняет освободившиеся половины DMA-буфера. */
+void Audio_ProcessPending(void);
 
 /* USER CODE END EFP */
 

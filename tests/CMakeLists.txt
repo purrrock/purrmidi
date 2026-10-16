@@ -8,6 +8,20 @@ else()
     add_compile_options(-UNDEBUG)
 endif()
 
+add_executable(test_audio_halves
+    test_audio_halves.cpp
+    "${CMAKE_CURRENT_LIST_DIR}/../Engine/audio/audio_halves.c"
+)
+target_include_directories(test_audio_halves PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../Engine/audio"
+)
+target_compile_features(test_audio_halves PRIVATE cxx_std_17)
+if(UNIX)
+    find_package(Threads REQUIRED)
+    target_link_libraries(test_audio_halves PRIVATE Threads::Threads)
+endif()
+add_test(NAME test_audio_halves COMMAND test_audio_halves)
+
 add_executable(test_usb_midi_packet
     test_usb_midi_packet.cpp
     "${CMAKE_CURRENT_LIST_DIR}/../Engine/midi/usb_midi_packet.c"
