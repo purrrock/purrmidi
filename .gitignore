@@ -57,3 +57,6 @@ third_party/cmake_install.cmake
 .clangd
 tests/data
 
+# STM32CubeMX makes .bak copies of generated files in Backup/ on every regeneration
+**/Backup/
+*.bak

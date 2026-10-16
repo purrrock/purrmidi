@@ -25,6 +25,12 @@ extern "C" {
  */
 void SF2LoaderHost_SetPath(const char *path);
 
+/**
+ * Тестовый хук: имитирует закрытое окно XIP (readable = false): SF2Loader_BankReadable() вернёт false, как на плате,
+ * когда QSPI переведён в индексный режим. По умолчанию (и после SF2LoaderHost_Unload) окно открыто.
+ */
+void SF2LoaderHost_SetReadable(bool readable);
+
 /** Освободить банк в ОЗУ и сбросить состояние загрузчика. */
 void SF2LoaderHost_Unload(void);
 

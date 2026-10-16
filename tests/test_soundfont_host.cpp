@@ -9,6 +9,7 @@
 #include <thread>
 #include <vector>
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 
@@ -83,6 +84,31 @@ static void test_bank_loading_and_rendering() {
 
     SoundFontSynth_NoteOff(60);
     SoundFontSynth_FillStereoBuffer(buffer.data(), 256);
+}
+
+// Контракт XIP: пока окно банка закрыто (на плате - QSPI в индексном режиме), синтезатор не читает банк и молчит;
+// когда окно снова открыто - звук продолжается. Ни ноты, ни рендер не должны падать.
+static void test_xip_window_closed_gives_silence_and_recovers() {
+    SF2LoaderHost_SetPath(nullptr);
+    if (!SoundFontSynth_InitSF2()) {
+        std::cout << "[INFO] SoundFont bank not found, skipping XIP guard test" << std::endl;
+        return;
+    }
+    std::vector<int16_t> buffer(256 * 2, 0x5555);
+
+    SoundFontSynth_NoteOn(60, 110);
+    SoundFontSynth_FillStereoBuffer(buffer.data(), 256);
+    CHECK(get_buffer_peak(buffer.data(), 256) > 0);        // окно открыто: звук есть
+
+    SF2LoaderHost_SetReadable(false);                      // «QSPI вышел из XIP»
+    std::fill(buffer.begin(), buffer.end(), (int16_t)0x5555);
+    SoundFontSynth_NoteOn(64, 110);                        // события в этот момент не теряются и не ломают рендер
+    SoundFontSynth_FillStereoBuffer(buffer.data(), 256);
+    CHECK(get_buffer_peak(buffer.data(), 256) == 0);       // буфер перезаписан тишиной, банк не читался
+
+    SF2LoaderHost_SetReadable(true);                       // окно снова открыто
+    SoundFontSynth_FillStereoBuffer(buffer.data(), 256);
+    CHECK(get_buffer_peak(buffer.data(), 256) > 0);        // звук вернулся
 }
 
 static std::string write_temp_file(const char *name, const std::vector<uint8_t> &data) {
@@ -236,6 +262,7 @@ static void test_events_while_rendering() {
 int main() {
     test_engine_registration_and_pc();
     test_bank_loading_and_rendering();
+    test_xip_window_closed_gives_silence_and_recovers();
     test_missing_or_corrupt_bank_handling();
     test_sustained_notes_have_no_holes();
     test_events_while_rendering();

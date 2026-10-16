@@ -136,6 +136,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/usbh_midi.c
     Core/Src/display.c
     Core/Src/diag.c
+    Core/Src/watchdog.c
+    Core/Src/ram_init.c
     Core/Src/chord_detector.c
     Engine/midi/midi_queue.c
     Engine/midi/midi_dispatch.c

@@ -266,25 +266,31 @@ SECTIONS
 
 
 
-  /* Large SF2 PCM cache: D2 SRAM is accessible to the CPU and avoids consuming DTCM. */
+  /* Large SF2 PCM cache: D2 SRAM is accessible to the CPU and avoids consuming DTCM.
+     Zeroed with 64-bit writes before the C++ constructors run (Core/Src/ram_init.c, ECC-safe). */
   .ram_d2 (NOLOAD) : ALIGN(32)
   {
     . = ALIGN(32);
+    _sram_d2 = .;
     *(.ram_d2)
     *(.ram_d2*)
     . = ALIGN(32);
+    _eram_d2 = .;
   } >RAM_D2
 
   /* DMA buffers: DMA1/DMA2 cannot access DTCM (.data/.bss live there),
-     so audio ring buffer goes to AXI SRAM. Not zeroed by startup -> clear it in code. */
+     so audio ring buffer goes to AXI SRAM. Not zeroed by startup; cleared with 64-bit writes before the C++
+     constructors run (Core/Src/ram_init.c, ECC-safe). */
   .dma_buffer (NOLOAD) : ALIGN(32)
   {
+    _sdma_buffer = .;
     *(.dma_buffer)
     *(.dma_buffer*)
     . = ALIGN(32);
+    _edma_buffer = .;
   } >RAM
 
-  /* Куча malloc() (см. Core/Src/sysmem.c). Не обнуляется при старте. */
+  /* Куча malloc() (см. Core/Src/sysmem.c). Обнуляется до конструкторов C++ (Core/Src/ram_init.c). */
   .axi_heap (NOLOAD) : ALIGN(8)
   {
     _axi_heap_start = .;

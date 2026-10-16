@@ -11,6 +11,7 @@ std::vector<uint8_t> g_flash;        /* «QSPI Flash» хоста: файл ба
 SF2L_Report          g_report{};
 bool                 g_done = false; /* сценарий уже выполнялся (результат запомнен) */
 bool                 g_ok   = false;
+volatile bool        g_readable = true;   /* имитация открытого/закрытого окна XIP */
 std::string          g_path;         /* явный путь (SF2LoaderHost_SetPath) */
 bool                 g_have_path = false;
 
@@ -40,6 +41,12 @@ void SF2LoaderHost_Unload(void)
     g_report = SF2L_Report{};
     g_done = false;
     g_ok = false;
+    g_readable = true;
+}
+
+void SF2LoaderHost_SetReadable(bool readable)
+{
+    g_readable = readable;
 }
 
 void SF2LoaderHost_SetPath(const char *path)
@@ -89,6 +96,11 @@ bool SF2Loader_GetBank(const uint8_t **base, uint32_t *size)
     *base = g_flash.data();
     *size = static_cast<uint32_t>(g_flash.size());
     return true;
+}
+
+bool SF2Loader_BankReadable(void)
+{
+    return g_ok && g_readable;
 }
 
 const SF2L_Report *SF2Loader_GetReport(void)

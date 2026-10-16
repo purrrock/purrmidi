@@ -48,6 +48,7 @@
 #include "xip_mpu.h"   /* MPU-регионы и D-cache для XIP-чтения SoundFont из QSPI Flash */
 #include "sf2_loader.h"
 #include "audio_halves.h"
+#include "watchdog.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -105,6 +106,11 @@ static volatile uint32_t audio_shed_total = 0;   /* blocks dropped so far (load 
 /* Which halves of the DMA ring wait for new samples. The DMA interrupt only marks a half as free and pends PendSV;
  * the synth is rendered in PendSV (lowest priority), so USB/SDMMC/SysTick can preempt it. See audio_halves.h. */
 static AudioHalves audio_halves;
+static volatile uint32_t audio_blocks_done = 0;   /* halves processed by PendSV so far: proof that the audio is alive */
+
+/* Watchdog policy (see watchdog.h): the main loop kicks the IWDG at most every WATCHDOG_CHECK_MS and only if the audio
+ * made progress since the previous check. A hung main loop AND a stopped audio (lost DMA/PendSV) both end in a reset. */
+#define WATCHDOG_CHECK_MS  100U
 /* Audio: 48 kHz, stereo, 16 bit. Circular DMA ring split into two halves.
  * It must NOT be placed in DTCM (DMA2 cannot reach it): own section in AXI SRAM,
  * see .dma_buffer in the linker script. With the QSPI XIP backend the D-cache is ON, but XipMpu_Config()
@@ -121,6 +127,7 @@ static void MPU_Config(void);
 void MX_USB_HOST_Process(void);
 
 /* USER CODE BEGIN PFP */
+static void watchdog_service(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -226,6 +233,7 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
+  Watchdog_Start();     /* IWDG1 с загрузочным таймаутом ~8 с; до main-цикла «кормится» вручную */
 
   /* USER CODE END SysInit */
 
@@ -238,13 +246,16 @@ int main(void)
   MX_SPI4_Init();
   MX_QUADSPI_Init();
   /* USER CODE BEGIN 2 */
+  Watchdog_ReportResetCause();
   Display_Init();
+  Watchdog_Kick();
   MIDI_Queue_Init();
   MIDI_USB_Init();
   SynthEngine_Init(); // Включает синтезатор по умолчанию (E-Piano); дальше выбор — по Program Change
   printf("Synth engine: %s\r\n", SynthEngine_GetName());
   Display_SyncPatch();
   Display_SyncVolume();
+  Watchdog_Kick();
 #ifdef __OPTIMIZE__
   printf("[SYS] build: optimized (main.c compiled with -O1..-O3/-Os)\r\n");
 #else
@@ -266,8 +277,9 @@ int main(void)
   {
     printf("[SF2] SoundFont NOT available - the soundfont engine will be skipped\r\n");
   }
+  Watchdog_Kick();
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
-  memset(audio_buffer, 0, sizeof(audio_buffer));  /* .dma_buffer is not zeroed by startup */
+  memset(audio_buffer, 0, sizeof(audio_buffer));  /* silence from the very first DMA cycle (also after a soft reset) */
   AudioHalves_Init(&audio_halves);
   if (HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer, AUDIO_BUFFER_SIZE) != HAL_OK)
   {
@@ -275,6 +287,7 @@ int main(void)
   }
   printf("Waiting for USB device to be attached...\r\n");
   HAL_GPIO_WritePin(DEBUG_LED_GPIO_Port, DEBUG_LED_Pin, GPIO_PIN_RESET);
+  Watchdog_EnterRuntime();    /* инициализация закончена: рабочий таймаут ~1,5 с */
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -289,6 +302,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
+    watchdog_service();
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
@@ -661,6 +675,28 @@ void Audio_ProcessPending(void)
             audio_fill(dst);
         }
         AudioHalves_Done(&audio_halves, half);
+        audio_blocks_done++;
+    }
+}
+
+/* Main loop: feed the watchdog if (and only if) the audio keeps running. */
+static void watchdog_service(void)
+{
+    static uint32_t last_check_tick = 0;
+    static uint32_t last_blocks     = 0;
+    const uint32_t now = HAL_GetTick();
+
+    if ((now - last_check_tick) < WATCHDOG_CHECK_MS)
+    {
+        return;
+    }
+    last_check_tick = now;
+
+    const uint32_t blocks = audio_blocks_done;
+    if (blocks != last_blocks)
+    {
+        last_blocks = blocks;
+        Watchdog_Kick();
     }
 }
 

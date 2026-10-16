@@ -399,6 +399,14 @@ void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
         apply_event(ev);
     }
 
+    /* XIP guard: if the bank window is closed (QSPI switched to indirect mode, see sf2_loader.h), reading the PCM
+     * would fault (MemManage on the target). Events above only touch voice bookkeeping in the heap, so they are
+     * applied anyway; the voices simply stand still and continue when the window opens again. */
+    if (!SF2Loader_BankReadable()) {
+        std::memset(buffer, 0, (size_t)num_frames * 2U * sizeof(int16_t));
+        return;
+    }
+
 #if SF2_DIAG_STATS
     const uint32_t t0 = diag_cycles();
     render_block(buffer, num_frames);

@@ -37,7 +37,7 @@
 #define READ_CHUNK           0x10000U
 
 static bool    s_inited;
-static bool    s_mapped;
+static volatile bool s_mapped;   /* XIP читаем: читается из PendSV (SF2Loader_BankReadable), пишется из main */
 static uint8_t s_jedec[3];
 
 /* ------------------------------ команды ------------------------------------ */
@@ -279,8 +279,11 @@ bool QSPIFlash_MemoryMap(const uint8_t **base)
     m.TimeOutActivation = QSPI_TIMEOUT_COUNTER_DISABLE;
     if (HAL_QSPI_MemoryMapped(&hqspi, &c, &m) != HAL_OK) return fail();
 
-    s_mapped = true;
+    /* Порядок важен: аудио-рендер (PendSV) может вытеснить main в любой точке и читает XIP, как только видит
+     * s_mapped == true. Поэтому окно MPU открываем ДО установки признака. */
     XipMpu_SetXipEnabled(true);     /* кэшируемое окно открывается только когда отображение уже работает */
+    __DMB();
+    s_mapped = true;
     if (base) *base = (const uint8_t *)QSPIFLASH_XIP_BASE;
     return true;
 }
@@ -288,8 +291,12 @@ bool QSPIFlash_MemoryMap(const uint8_t **base)
 void QSPIFlash_Unmap(void)
 {
     if (!s_mapped) return;
-    XipMpu_SetXipEnabled(false);
+    /* Порядок важен (см. QSPIFlash_MemoryMap): сначала сбрасываем признак - все следующие блоки рендера отдадут тишину
+     * вместо чтения XIP, - и только потом закрываем MPU-окно и останавливаем отображение. Рендер не может быть
+     * «посередине»: PendSV не выполняется параллельно с main, а main как раз здесь. */
     s_mapped = false;
+    __DMB();
+    XipMpu_SetXipEnabled(false);
     (void)HAL_QSPI_Abort(&hqspi);
 }
 

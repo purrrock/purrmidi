@@ -9,6 +9,7 @@
 #include "ff.h"
 #include "sd_storage.h"
 #include "display.h"
+#include "watchdog.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -123,6 +124,8 @@ static void on_progress(void *ctx, SF2L_Phase phase, uint32_t done, uint32_t tot
     static int        last_print = -1;
     (void)ctx;
 
+    Watchdog_Kick();    /* обновление банка идёт до минуты: сторожевой таймер кормим на каждом шаге */
+
     const int pct = total ? (int)(((uint64_t)done * 100U) / total) : 100;
     const uint32_t now = HAL_GetTick();
 
@@ -202,6 +205,13 @@ bool SF2Loader_GetBank(const uint8_t **base, uint32_t *size)
     if (base) *base = s_report.base;
     if (size) *size = s_report.size;
     return true;
+}
+
+bool SF2Loader_BankReadable(void)
+{
+    /* QSPIFlash_IsMapped() - единственный источник правды: окно XIP читаемо, пока драйвер в Memory-Mapped режиме
+     * (любая индексная операция QSPI - Read/Erase/Program - сама выходит из него, см. qspi_flash.h). */
+    return s_ok && s_report.base != NULL && QSPIFlash_IsMapped();
 }
 
 const SF2L_Report *SF2Loader_GetReport(void)

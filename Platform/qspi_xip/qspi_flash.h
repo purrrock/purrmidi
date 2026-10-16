@@ -39,7 +39,10 @@ bool QSPIFlash_Init(void);
 /** JEDEC ID (производитель, тип, ёмкость), заполняется в QSPIFlash_Init(). */
 void QSPIFlash_GetJedecId(uint8_t id[3]);
 
-/* Indirect-режим. Если включён XIP, функции сами из него выходят. Адреса - смещения от начала флеша. */
+/* Indirect-режим. Если включён XIP, функции сами из него выходят. Адреса - смещения от начала флеша.
+ * ВНИМАНИЕ: выход из XIP закрывает окно 0x90000000 (MPU), и чтение по указателям банка после этого - MemManage.
+ * Все потребители XIP обязаны проверять QSPIFlash_IsMapped() (для синтезатора это делает SF2Loader_BankReadable());
+ * после индексных операций окно нужно открыть заново вызовом QSPIFlash_MemoryMap(). */
 bool QSPIFlash_Read(uint32_t addr, void *dst, uint32_t len);
 bool QSPIFlash_EraseSector(uint32_t addr);                         /* 4 КБ, addr кратен 4096   */
 bool QSPIFlash_EraseBlock64(uint32_t addr);                        /* 64 КБ, addr кратен 65536 */
@@ -48,7 +51,7 @@ bool QSPIFlash_ProgramPage(uint32_t addr, const void *src, uint32_t len);   /* l
 /* Memory-mapped (XIP). */
 bool QSPIFlash_MemoryMap(const uint8_t **base);
 void QSPIFlash_Unmap(void);
-bool QSPIFlash_IsMapped(void);
+bool QSPIFlash_IsMapped(void);     /* true - окно XIP читаемо (безопасно вызывать из прерываний) */
 
 #ifdef __cplusplus
 }
