@@ -152,14 +152,23 @@ bool ChordDetector_Detect(
     const char *root_str = note_names[best_root_pc];
     const char *suffix_str = chord_templates[best_template_idx].suffix;
 
+    int written;
+
     if (best_has_slash == 0)
     {
-        snprintf(name, name_size, "%s%s", root_str, suffix_str);
+        written = snprintf(name, name_size, "%s%s", root_str, suffix_str);
     }
     else
     {
         const char *bass_str = note_names[bass_pc];
-        snprintf(name, name_size, "%s%s/%s", root_str, suffix_str, bass_str);
+        written = snprintf(name, name_size, "%s%s/%s", root_str, suffix_str, bass_str);
+    }
+
+    /* Имя не поместилось в буфер (snprintf молча обрезает): не отдаём обрезок как «распознанный» аккорд */
+    if (written < 0 || (size_t)written >= name_size)
+    {
+        name[0] = '\0';
+        return false;
     }
 
     return true;

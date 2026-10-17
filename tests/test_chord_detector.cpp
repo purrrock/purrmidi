@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstring>
 #include <iostream>
+#include <string>
 #include <vector>
 
 /*
@@ -132,6 +133,97 @@ static void test_note_off_regression()
     assert(tracker.get_last_active_note() == 0);
 }
 
+
+/* Все шаблоны × все корни × все обращения: имя должно быть однозначно восстановимо */
+static void test_all_templates_all_inversions()
+{
+    struct Tpl { std::vector<int> iv; const char *suffix; };
+    const std::vector<Tpl> tpls = {
+        {{0, 4, 7}, ""},      {{0, 3, 7}, "m"},     {{0, 4, 7, 10}, "7"},  {{0, 4, 7, 11}, "maj7"},
+        {{0, 3, 7, 10}, "m7"}, {{0, 3, 6, 10}, "m7b5"}, {{0, 2, 4, 7}, "add9"}, {{0, 2, 3, 7}, "madd9"},
+    };
+    static const char *const names[12] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
+
+    for (const Tpl &t : tpls)
+    {
+        for (int root = 0; root < 12; root++)
+        {
+            for (size_t b = 0; b < t.iv.size(); b++)
+            {
+                std::vector<uint8_t> notes;
+                const int bass = 36 + root + t.iv[b];
+                notes.push_back((uint8_t)bass);
+                for (size_t k = 0; k < t.iv.size(); k++)
+                {
+                    if (k == b) continue;
+                    int n = 36 + root + t.iv[k];
+                    while (n <= bass) n += 12;
+                    notes.push_back((uint8_t)n);
+                }
+                std::string exp = std::string(names[root]) + t.suffix;
+                if (b != 0) exp += std::string("/") + names[(root + t.iv[b]) % 12];
+                test_case(notes, true, exp.c_str());
+            }
+        }
+    }
+}
+
+static void test_remaining_templates()
+{
+    test_case({60, 63, 66}, true, "Cdim");
+    test_case({60, 63, 66, 69}, true, "Cdim7");
+    test_case({60, 64, 68}, true, "Caug");
+    test_case({60, 65, 67}, true, "Csus4");
+    test_case({60, 62, 67}, true, "Csus2");
+
+    /* Симметричные аккорды: корнем считается бас */
+    test_case({63, 66, 69, 72}, true, "D#dim7");
+    test_case({64, 68, 72}, true, "Eaug");
+
+    /* sus2/sus4 эквивалентны: при басе не-корне побеждает более ранний шаблон (sus4) */
+    test_case({62, 67, 72}, true, "Gsus4/D");
+    test_case({55, 60, 62}, true, "Gsus4");
+}
+
+static void test_edge_cases()
+{
+    /* Три ноты, но только два класса высот (C4 E4 C5) — не аккорд */
+    test_case({60, 64, 72}, false, "");
+    /* Пять нот, шаблона нет */
+    test_case({60, 64, 67, 70, 74}, false, "");
+
+    uint8_t notes[128] = {0};
+    notes[60] = notes[64] = notes[67] = 1;
+    char name[16];
+
+    /* NULL / нулевой размер */
+    assert(!ChordDetector_Detect(nullptr, 3, name, sizeof(name)));
+    assert(!ChordDetector_Detect(notes, 3, nullptr, sizeof(name)));
+    assert(!ChordDetector_Detect(notes, 3, name, 0));
+
+    /* Счётчик >= 3, но массив пуст */
+    uint8_t empty[128] = {0};
+    std::strcpy(name, "junk");
+    assert(!ChordDetector_Detect(empty, 5, name, sizeof(name)));
+    assert(name[0] == '\0');
+
+    /* Буфер ровно впритык: "C" + '\0' */
+    char tiny[2] = {'x', 'x'};
+    assert(ChordDetector_Detect(notes, 3, tiny, sizeof(tiny)));
+    assert(std::strcmp(tiny, "C") == 0);
+
+    /* Буфер на 1 байт меньше нужного: обрезок не выдаём за аккорд */
+    notes[60] = notes[64] = notes[67] = 0;
+    notes[59] = notes[62] = notes[65] = notes[69] = 1; /* Bm7b5 (5 символов + '\0') */
+    char small[5];
+    std::strcpy(small, "junk");
+    assert(!ChordDetector_Detect(notes, 4, small, sizeof(small)));
+    assert(small[0] == '\0');
+    char fit[6];
+    assert(ChordDetector_Detect(notes, 4, fit, sizeof(fit)));
+    assert(std::strcmp(fit, "Bm7b5") == 0);
+}
+
 int main()
 {
     /* 0 notes -> blank/no chord */
@@ -185,6 +277,10 @@ int main()
     test_case({48, 60, 64, 67}, true, "C");
     test_case({52, 60, 67}, true, "C/E");
     test_case({55, 60, 64, 67}, true, "C/G");
+
+    test_all_templates_all_inversions();
+    test_remaining_templates();
+    test_edge_cases();
 
     /* Regression tests for Note Off & Note On velocity=0 active note tracking */
     test_note_off_regression();
