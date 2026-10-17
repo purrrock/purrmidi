@@ -1,4 +1,6 @@
 #include "dulcimer_synth.h"
+#include "synth_arena.h"
+#include "synth_common.h"
 #include "elements/dsp/resonator.h"
 #include "elements/dsp/exciter.h"
 #include "stmlib/utils/random.h"
@@ -44,12 +46,9 @@ struct DulcimerVoice {
     bool sustain_held{false};
 };
 
-// Размещаем массив голосов резонатора в D2 SRAM (.ram_d2), чтобы не переполнять AXI SRAM (RAM)
-#if defined(__GNUC__) && !defined(__EMSCRIPTEN__) && defined(__arm__)
-static DulcimerVoice voices[DULCIMER_VOICES] __attribute__((section(".ram_d2"), aligned(32)));
-#else
-static DulcimerVoice voices[DULCIMER_VOICES];
-#endif
+// Голоса лежат в общей арене памяти (synth_arena.h): одновременно звучит один движок. Указатель устанавливается
+// в DulcimerSynth_Init(); если арену забрал другой движок, SynthArena_IsOwner(&voices) == false.
+static DulcimerVoice* voices = nullptr;
 
 static uint32_t global_trigger_counter = 0;
 
@@ -60,22 +59,9 @@ static std::atomic<float> user_damping{0.30f};    // Damping
 static std::atomic<float> user_position{0.40f};   // Strike position
 static std::atomic<float> user_timbre{0.70f};     // Exciter mallet timbre
 
-static DulcimerEvent event_fifo[EVENT_FIFO_SIZE];
-static std::atomic<uint32_t> fifo_head{0};
-static std::atomic<uint32_t> fifo_tail{0};
-static std::atomic<uint32_t> dropped_note_on_count{0};
-
-static std::atomic<uint8_t> global_note_press_count[128];
+// Очередь событий, учёт нажатий и протокол аварийного восстановления (общий компонент, см. synth_common.h)
+static synth::NoteInput<DulcimerEvent, EVENT_FIFO_SIZE, NOTE_ON_FIFO_LIMIT> input;
 static bool audio_sustain_pedal = false;
-
-enum RecoveryState : uint32_t {
-    RECOVERY_NORMAL = 0,
-    RECOVERY_REQUESTED = 1,
-    RECOVERY_IN_PROGRESS = 2
-};
-
-static std::atomic<uint32_t> recovery_state{RECOVERY_NORMAL};
-static std::atomic<uint32_t> active_producer_ops{0};
 
 static inline float clamp_f(float val, float min_val, float max_val) {
     if (val < min_val) return min_val;
@@ -88,49 +74,12 @@ static inline float mtof_norm(uint8_t note) {
     return f_hz / DULCIMER_SAMPLE_RATE;
 }
 
-static bool event_fifo_push_note_on(const DulcimerEvent& event) {
-    uint32_t head = fifo_head.load(std::memory_order_relaxed);
-    uint32_t tail = fifo_tail.load(std::memory_order_acquire);
-
-    if (head - tail >= NOTE_ON_FIFO_LIMIT) {
-        dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
-
-    event_fifo[head & (EVENT_FIFO_SIZE - 1)] = event;
-    fifo_head.store(head + 1, std::memory_order_release);
-    return true;
-}
-
-static bool event_fifo_push_critical(const DulcimerEvent& event) {
-    uint32_t head = fifo_head.load(std::memory_order_relaxed);
-    uint32_t tail = fifo_tail.load(std::memory_order_acquire);
-
-    if (head - tail >= EVENT_FIFO_SIZE) {
-        return false;
-    }
-
-    event_fifo[head & (EVENT_FIFO_SIZE - 1)] = event;
-    fifo_head.store(head + 1, std::memory_order_release);
-    return true;
-}
-
-static bool event_fifo_pop(DulcimerEvent& event) {
-    uint32_t tail = fifo_tail.load(std::memory_order_relaxed);
-    uint32_t head = fifo_head.load(std::memory_order_acquire);
-
-    if (head == tail) {
-        return false;
-    }
-
-    event = event_fifo[tail & (EVENT_FIFO_SIZE - 1)];
-    fifo_tail.store(tail + 1, std::memory_order_release);
-    return true;
-}
-
 extern "C" {
 
 void DulcimerSynth_Init(void) {
+    // Голоса создаются в общей арене заново: данные прежнего владельца (другого движка) стираются.
+    voices = SynthArena_NewArray<DulcimerVoice, DULCIMER_VOICES>(&voices);
+
     global_trigger_counter = 0;
     audio_sustain_pedal = false;
 
@@ -165,15 +114,7 @@ void DulcimerSynth_Init(void) {
     user_position.store(0.40f, std::memory_order_relaxed);
     user_timbre.store(0.70f, std::memory_order_relaxed);
 
-    for (int i = 0; i < 128; i++) {
-        global_note_press_count[i].store(0, std::memory_order_relaxed);
-    }
-
-    active_producer_ops.store(0, std::memory_order_relaxed);
-    recovery_state.store(RECOVERY_NORMAL, std::memory_order_relaxed);
-    fifo_head.store(0, std::memory_order_relaxed);
-    fifo_tail.store(0, std::memory_order_relaxed);
-    dropped_note_on_count.store(0, std::memory_order_relaxed);
+    input.Reset();
 }
 
 void DulcimerSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
@@ -183,20 +124,6 @@ void DulcimerSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     }
 
     if (midi_note >= 128) return;
-
-    active_producer_ops.fetch_add(1, std::memory_order_seq_cst);
-    if (recovery_state.load(std::memory_order_seq_cst) != RECOVERY_NORMAL) {
-        active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
-        dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
-        return;
-    }
-
-    uint8_t count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
-    while (count < 255) {
-        if (global_note_press_count[midi_note].compare_exchange_weak(count, count + 1, std::memory_order_relaxed)) {
-            break;
-        }
-    }
 
     float norm_freq = mtof_norm(midi_note);
     float norm_vel  = clamp_f((float)velocity * (1.0f / 127.0f), 0.0f, 1.0f);
@@ -208,33 +135,11 @@ void DulcimerSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     event.freq   = norm_freq;
     event.vel    = norm_vel;
 
-    if (!event_fifo_push_note_on(event)) {
-        uint8_t cur_count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
-        while (cur_count > 0) {
-            if (global_note_press_count[midi_note].compare_exchange_weak(cur_count, cur_count - 1, std::memory_order_relaxed)) {
-                break;
-            }
-        }
-    }
-
-    active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
+    input.NoteOn(midi_note, event);
 }
 
 void DulcimerSynth_NoteOff(uint8_t midi_note) {
     if (midi_note >= 128) return;
-
-    active_producer_ops.fetch_add(1, std::memory_order_seq_cst);
-    if (recovery_state.load(std::memory_order_seq_cst) != RECOVERY_NORMAL) {
-        active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
-        return;
-    }
-
-    uint8_t count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
-    while (count > 0) {
-        if (global_note_press_count[midi_note].compare_exchange_weak(count, count - 1, std::memory_order_relaxed)) {
-            break;
-        }
-    }
 
     DulcimerEvent event;
     event.type   = EVENT_NOTE_OFF;
@@ -243,11 +148,7 @@ void DulcimerSynth_NoteOff(uint8_t midi_note) {
     event.freq   = 0.0f;
     event.vel    = 0.0f;
 
-    if (!event_fifo_push_critical(event)) {
-        recovery_state.store(RECOVERY_REQUESTED, std::memory_order_seq_cst);
-    }
-
-    active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
+    input.NoteOff(midi_note, event);
 }
 
 void DulcimerSynth_ControlChange(uint8_t cc_num, uint8_t value) {
@@ -277,24 +178,13 @@ void DulcimerSynth_ControlChange(uint8_t cc_num, uint8_t value) {
             break;
 
         case 64: { // Sustain pedal
-            active_producer_ops.fetch_add(1, std::memory_order_seq_cst);
-            if (recovery_state.load(std::memory_order_seq_cst) != RECOVERY_NORMAL) {
-                active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
-                break;
-            }
-
             DulcimerEvent event;
             event.type   = EVENT_CONTROL_CHANGE;
             event.param1 = cc_num;
             event.param2 = value;
             event.freq   = 0.0f;
             event.vel    = 0.0f;
-
-            if (!event_fifo_push_critical(event)) {
-                recovery_state.store(RECOVERY_REQUESTED, std::memory_order_seq_cst);
-            }
-
-            active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
+            input.Critical(event);
             break;
         }
 
@@ -304,35 +194,26 @@ void DulcimerSynth_ControlChange(uint8_t cc_num, uint8_t value) {
 }
 
 void DulcimerSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_samples) {
-    // 1. Recovery state machine checks
-    uint32_t rec_st = recovery_state.load(std::memory_order_seq_cst);
-    if (rec_st != RECOVERY_NORMAL) {
-        recovery_state.store(RECOVERY_IN_PROGRESS, std::memory_order_seq_cst);
-
-        if (active_producer_ops.load(std::memory_order_seq_cst) == 0) {
-            audio_sustain_pedal = false;
-
-            for (int i = 0; i < DULCIMER_VOICES; i++) {
-                voices[i].press_count  = 0;
-                voices[i].sustain_held = false;
-                voices[i].gate         = false;
-                voices[i].voice_state.store(-1, std::memory_order_relaxed);
-            }
-
-            for (int i = 0; i < 128; i++) {
-                global_note_press_count[i].store(0, std::memory_order_relaxed);
-            }
-
-            uint32_t current_head = fifo_head.load(std::memory_order_relaxed);
-            fifo_tail.store(current_head, std::memory_order_release);
-
-            recovery_state.store(RECOVERY_NORMAL, std::memory_order_seq_cst);
-        }
+    if (!SynthArena_IsOwner(&voices)) {     // арену забрал другой движок или Init() ещё не вызывался
+        std::memset(buffer, 0, (size_t)num_samples * 2U * sizeof(int16_t));
+        return;
     }
+
+    // 1. Recovery state machine checks (см. synth_common.h, NoteInput::ServiceRecovery)
+    input.ServiceRecovery([]() {
+        audio_sustain_pedal = false;
+
+        for (int i = 0; i < DULCIMER_VOICES; i++) {
+            voices[i].press_count  = 0;
+            voices[i].sustain_held = false;
+            voices[i].gate         = false;
+            voices[i].voice_state.store(-1, std::memory_order_relaxed);
+        }
+    });
 
     // 2. Process pending events in FIFO
     DulcimerEvent event;
-    while (event_fifo_pop(event)) {
+    while (input.Pop(event)) {
         if (event.type == EVENT_NOTE_ON) {
             int target_voice = -1;
 
@@ -369,12 +250,7 @@ void DulcimerSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_samples) {
                 // Cleanly release stolen voice's previous note press count if stolen
                 int32_t stolen_note = voices[target_voice].voice_state.load(std::memory_order_relaxed);
                 if (stolen_note >= 0 && stolen_note < 128) {
-                    uint8_t cur_cnt = global_note_press_count[stolen_note].load(std::memory_order_relaxed);
-                    while (cur_cnt > 0) {
-                        if (global_note_press_count[stolen_note].compare_exchange_weak(cur_cnt, cur_cnt - 1, std::memory_order_relaxed)) {
-                            break;
-                        }
-                    }
+                    input.ReleasePress((uint8_t)stolen_note);
                 }
             }
 

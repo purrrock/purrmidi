@@ -266,21 +266,23 @@ SECTIONS
 
 
 
-  /* Large SF2 PCM cache: D2 SRAM is accessible to the CPU and avoids consuming DTCM.
-     Zeroed with 64-bit writes before the C++ constructors run (Core/Src/ram_init.c, ECC-safe). */
-  .ram_d2 (NOLOAD) : ALIGN(32)
-  {
-    . = ALIGN(32);
-    _sram_d2 = .;
-    *(.ram_d2)
-    *(.ram_d2*)
-    . = ALIGN(32);
-    _eram_d2 = .;
-  } >RAM_D2
+  /* ---------------------------------------------------------------------------------------------------------
+     Карта SRAM (подробности: README, раздел "DMA, D-Cache и память STM32"):
 
-  /* DMA buffers: DMA1/DMA2 cannot access DTCM (.data/.bss live there),
-     so audio ring buffer goes to AXI SRAM. Not zeroed by startup; cleared with 64-bit writes before the C++
-     constructors run (Core/Src/ram_init.c, ECC-safe). */
+       D2 SRAM  (0x30000000, 288K) - только DMA-буферы (.dma_buffer). MPU: Normal Non-cacheable, поэтому DMA и CPU
+                                      видят одни и те же данные без операций с кэшем.
+       AXI SRAM (0x24000000, 512K) - всё остальное: арена голосов (.synth_arena) и куча malloc (.axi_heap).
+                                      MPU: Normal Write-back, кэшируется D-cache (линии задержки физических моделей
+                                      и данные TinySoundFont читаются в разы быстрее, чем из некэшируемой памяти).
+       DTCM    (0x20000000, 128K)  - .data/.bss и стек (недоступна DMA).
+
+     Все три секции ниже NOLOAD: startup-код их не инициализирует и не копирует в них начальные значения. Поэтому
+     в них НЕЛЬЗЯ класть объекты с инициализаторами (значения будут потеряны); память целиком обнуляется 64-битными
+     записями до конструкторов C++ (Core/Src/ram_init.c, защита от ECC-ошибок), а объекты создаются явно в коде.
+     --------------------------------------------------------------------------------------------------------- */
+
+  /* DMA buffers: DMA1/DMA2 and SDMMC1 IDMA cannot access DTCM (.data/.bss live there). D2 SRAM is the natural home
+     of DMA2 (SAI1) buffers; the MPU region of D2 is non-cacheable. */
   .dma_buffer (NOLOAD) : ALIGN(32)
   {
     _sdma_buffer = .;
@@ -288,6 +290,16 @@ SECTIONS
     *(.dma_buffer*)
     . = ALIGN(32);
     _edma_buffer = .;
+  } >RAM_D2
+
+  /* Общая арена голосов звуковых движков (Engine/synth/synth_arena.cpp): одновременно звучит один движок. */
+  .synth_arena (NOLOAD) : ALIGN(32)
+  {
+    _ssynth_arena = .;
+    *(.synth_arena)
+    *(.synth_arena*)
+    . = ALIGN(32);
+    _esynth_arena = .;
   } >RAM
 
   /* Куча malloc() (см. Core/Src/sysmem.c). Обнуляется до конструкторов C++ (Core/Src/ram_init.c). */
@@ -298,6 +310,17 @@ SECTIONS
     . = ALIGN(8);
     _axi_heap_end = .;
   } >RAM
+
+  /* Границы целых областей для обнуления при старте (Core/Src/ram_init.c). */
+  _sram_axi = ORIGIN(RAM);
+  _eram_axi = ORIGIN(RAM) + LENGTH(RAM);
+  _sram_d2  = ORIGIN(RAM_D2);
+  _eram_d2  = ORIGIN(RAM_D2) + LENGTH(RAM_D2);
+
+  /* Проверки раскладки (ошибка линковки, а не тихий сбой на плате). */
+  ASSERT((_edma_buffer - _sdma_buffer) <= 64K, "ERROR: .dma_buffer is larger than 64 KB - DMA buffers must stay small")
+  ASSERT(_esynth_arena - _ssynth_arena >= 144K, "ERROR: .synth_arena is smaller than SYNTH_ARENA_BYTES (synth_arena.h)")
+  ASSERT(_axi_heap_end <= _eram_axi, "ERROR: AXI SRAM overflow (.synth_arena + .axi_heap do not fit)")
 
   /* Remove information from the standard libraries */
   /DISCARD/ :

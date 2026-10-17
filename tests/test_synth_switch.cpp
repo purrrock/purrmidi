@@ -6,10 +6,16 @@
 #include <cstring>
 #include <iostream>
 #include <thread>
+#include <algorithm>
 #include <vector>
 
 #include "midi_dispatch.h"
 #include "synth_engine.h"
+#include "synth_arena.h"
+#include "flute_synth.h"
+#include "saxophone_synth.h"
+#include "lead_synth.h"
+#include "pluck_synth.h"
 
 static int g_failures = 0;
 
@@ -360,9 +366,46 @@ static void test_panic_silences_every_engine() {
     }
 }
 
+// Общая арена: движок, у которого арену забрал другой, обязан молчать (а не читать чужую память), а IsNoteActive - не падать.
+static void test_stale_engine_is_safe_after_arena_switch() {
+    send_pc(5);                                       // Dulcimer занимает арену
+    send_note_on(60, 100);
+    render_peak(2400);
+    CHECK(SynthArena_Owner() != nullptr);
+
+    std::vector<int16_t> buf(256 * 2, 0x5555);
+    FluteSynth_FillStereoBuffer(buf.data(), 256);     // Flute арену не владеет -> тишина, без обращения к voices
+    for (int16_t v : buf) CHECK(v == 0);
+    std::fill(buf.begin(), buf.end(), (int16_t)0x5555);
+    SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
+    for (int16_t v : buf) CHECK(v == 0);
+    std::fill(buf.begin(), buf.end(), (int16_t)0x5555);
+    LeadSynth_FillStereoBuffer(buf.data(), 256);
+    for (int16_t v : buf) CHECK(v == 0);
+    for (int i = 0; i < 256; ++i) CHECK(PluckSynth_NextSample() == 0);
+    CHECK(!FluteSynth_IsNoteActive(60));
+    CHECK(!SaxophoneSynth_IsNoteActive(60));
+    CHECK(!LeadSynth_IsNoteActive(60));
+    CHECK(!PluckSynth_IsNoteActive(60));
+
+    // Действующий движок продолжает работать.
+    CHECK(render_peak(2400) > 0);
+
+    // Обход всех движков с общей арены по кругу: каждый после выбора звучит.
+    const uint8_t order[] = {6, 7, 1, 2, 5, 6};
+    for (uint8_t prog : order) {
+        send_pc(prog);
+        send_note_on(64, 110);
+        CHECK(render_peak(4800) > 0);
+        send_note_off(64);
+        render_peak(4800);
+    }
+}
+
 int main() {
     test_default_is_epiano();
     test_panic_silences_every_engine();
+    test_stale_engine_is_safe_after_arena_switch();
     test_program_change_selects_engine();
     test_program_wraps_modulo();
     test_program_change_127_cycles_engines();

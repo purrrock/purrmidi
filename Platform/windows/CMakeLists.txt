@@ -24,6 +24,15 @@ endif()
 # Синтезаторы: каждый — отдельная статическая библиотека со своим API
 # ---------------------------------------------------------------------------
 
+# common: общая арена памяти голосов (synth_arena.h); synth_common.h - только заголовок
+add_library(purrmidi_synth_common STATIC
+    "${CMAKE_SOURCE_DIR}/Engine/synth/synth_arena.cpp"
+)
+target_include_directories(purrmidi_synth_common PUBLIC
+    "${CMAKE_SOURCE_DIR}/Engine/synth"
+)
+target_compile_features(purrmidi_synth_common PUBLIC cxx_std_17)
+
 # sine: одноголосая синусоида
 add_library(purrmidi_synth_sine STATIC
     "${CMAKE_SOURCE_DIR}/Engine/synth/synth.c"
@@ -79,6 +88,7 @@ target_include_directories(purrmidi_synth_pluck PUBLIC
 )
 target_compile_definitions(purrmidi_synth_pluck PUBLIC USE_DAISYSP_LGPL)
 target_compile_features(purrmidi_synth_pluck PUBLIC cxx_std_17)
+target_link_libraries(purrmidi_synth_pluck PUBLIC purrmidi_synth_common)
 
 # lead: полифонический субтрактивный лид-синтезатор на DaisySP (Oscillator, Svf, Adsr)
 add_library(purrmidi_synth_lead STATIC
@@ -99,6 +109,7 @@ target_include_directories(purrmidi_synth_lead PUBLIC
 )
 target_compile_definitions(purrmidi_synth_lead PUBLIC USE_DAISYSP_LGPL)
 target_compile_features(purrmidi_synth_lead PUBLIC cxx_std_17)
+target_link_libraries(purrmidi_synth_lead PUBLIC purrmidi_synth_common)
 
 # soundfont: синтезатор SF2 на базе TinySoundFont; банк читается из ОЗУ (хост-аналог QSPI XIP)
 add_library(purrmidi_synth_soundfont STATIC
@@ -131,6 +142,7 @@ target_include_directories(purrmidi_synth_dulcimer PUBLIC
 )
 target_compile_definitions(purrmidi_synth_dulcimer PUBLIC TEST)
 target_compile_features(purrmidi_synth_dulcimer PUBLIC cxx_std_17)
+target_link_libraries(purrmidi_synth_dulcimer PUBLIC purrmidi_synth_common)
 
 # flute: полифонический физический модулятор флейты (STK Flute)
 add_library(purrmidi_synth_flute STATIC
@@ -141,6 +153,7 @@ target_include_directories(purrmidi_synth_flute PUBLIC
     "${CMAKE_SOURCE_DIR}/Engine/synth"
 )
 target_compile_features(purrmidi_synth_flute PUBLIC cxx_std_17)
+target_link_libraries(purrmidi_synth_flute PUBLIC purrmidi_synth_common)
 
 # saxophone: полифонический физический модулятор саксофона (STK Single Reed)
 add_library(purrmidi_synth_saxophone STATIC
@@ -151,6 +164,7 @@ target_include_directories(purrmidi_synth_saxophone PUBLIC
     "${CMAKE_SOURCE_DIR}/Engine/synth"
 )
 target_compile_features(purrmidi_synth_saxophone PUBLIC cxx_std_17)
+target_link_libraries(purrmidi_synth_saxophone PUBLIC purrmidi_synth_common)
 
 foreach(_synth sine pluck lead epiano organ soundfont dulcimer flute saxophone)
     if(MSVC)

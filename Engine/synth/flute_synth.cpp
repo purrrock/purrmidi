@@ -1,4 +1,6 @@
 #include "flute_synth.h"
+#include "synth_arena.h"
+#include "synth_common.h"
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -120,24 +122,9 @@ struct FluteVoice {
     bool sustain_held{false};
 };
 
-// Таблица частот MIDI-нот 0..127 (предрассчитана)
-static float kMidiToFreq[128];
-static bool kMidiToFreqInitialized = false;
-
-static void InitMidiToFreqTable(void) {
-    if (kMidiToFreqInitialized) return;
-    for (int i = 0; i < 128; i++) {
-        kMidiToFreq[i] = 440.0f * std::pow(2.0f, (float)(i - 69) / 12.0f);
-    }
-    kMidiToFreqInitialized = true;
-}
-
-// Размещение буферов голосов в секции .ram_d2 (D2 SRAM) на STM32H7 во избежание переполнения AXI SRAM
-#if defined(__GNUC__) && !defined(__EMSCRIPTEN__) && defined(__arm__)
-static FluteVoice voices[FLUTE_VOICES] __attribute__((section(".ram_d2"), aligned(32)));
-#else
-static FluteVoice voices[FLUTE_VOICES];
-#endif
+// Голоса лежат в общей арене памяти (synth_arena.h): одновременно звучит один движок. Указатель устанавливается
+// в FluteSynth_Init(); если арену забрал другой движок, SynthArena_IsOwner(&voices) == false.
+static FluteVoice* voices = nullptr;
 
 static uint32_t global_trigger_counter = 0;
 
@@ -149,23 +136,9 @@ static std::atomic<float> cc_bore_damping{FLUTE_DEFAULT_DAMPING};
 static std::atomic<float> cc_release_sec{FLUTE_DEFAULT_RELEASE};
 static std::atomic<float> cc_attack_sec{FLUTE_DEFAULT_ATTACK};
 
-static FluteEvent event_fifo[EVENT_FIFO_SIZE];
-static std::atomic<uint32_t> fifo_head{0};
-static std::atomic<uint32_t> fifo_tail{0};
-static std::atomic<uint32_t> dropped_note_on_count{0};
-
-static std::atomic<uint8_t> global_note_press_count[128];
+// Очередь событий, учёт нажатий и протокол аварийного восстановления (общий компонент, см. synth_common.h)
+static synth::NoteInput<FluteEvent, EVENT_FIFO_SIZE, NOTE_ON_FIFO_LIMIT> input;
 static bool audio_sustain_pedal = false;
-
-// Протокол восстановления при переполнении FIFO
-enum RecoveryState : uint32_t {
-    RECOVERY_NORMAL = 0,
-    RECOVERY_REQUESTED = 1,
-    RECOVERY_IN_PROGRESS = 2
-};
-
-static std::atomic<uint32_t> recovery_state{RECOVERY_NORMAL};
-static std::atomic<uint32_t> active_producer_ops{0};
 
 static inline float clamp_f(float val, float min_val, float max_val) {
     if (val < min_val) return min_val;
@@ -174,57 +147,16 @@ static inline float clamp_f(float val, float min_val, float max_val) {
 }
 
 static inline float soft_limit(float x) {
-    float a = std::abs(x);
-    if (a <= FLUTE_LIMIT_KNEE) return x;
-    float room = FLUTE_LIMIT_CEIL - FLUTE_LIMIT_KNEE;
-    float y = FLUTE_LIMIT_KNEE + room * std::tanh((a - FLUTE_LIMIT_KNEE) / room);
-    return (x < 0.0f) ? -y : y;
-}
-
-static bool event_fifo_push_note_on(const FluteEvent& event) {
-    uint32_t head = fifo_head.load(std::memory_order_relaxed);
-    uint32_t tail = fifo_tail.load(std::memory_order_acquire);
-
-    if (head - tail >= NOTE_ON_FIFO_LIMIT) {
-        dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
-
-    event_fifo[head & (EVENT_FIFO_SIZE - 1)] = event;
-    fifo_head.store(head + 1, std::memory_order_release);
-    return true;
-}
-
-static bool event_fifo_push_critical(const FluteEvent& event) {
-    uint32_t head = fifo_head.load(std::memory_order_relaxed);
-    uint32_t tail = fifo_tail.load(std::memory_order_acquire);
-
-    if (head - tail >= EVENT_FIFO_SIZE) {
-        return false;
-    }
-
-    event_fifo[head & (EVENT_FIFO_SIZE - 1)] = event;
-    fifo_head.store(head + 1, std::memory_order_release);
-    return true;
-}
-
-static bool event_fifo_pop(FluteEvent& event) {
-    uint32_t tail = fifo_tail.load(std::memory_order_relaxed);
-    uint32_t head = fifo_head.load(std::memory_order_acquire);
-
-    if (head == tail) {
-        return false;
-    }
-
-    event = event_fifo[tail & (EVENT_FIFO_SIZE - 1)];
-    fifo_tail.store(tail + 1, std::memory_order_release);
-    return true;
+    return synth::SoftLimit(x, FLUTE_LIMIT_KNEE, FLUTE_LIMIT_CEIL);
 }
 
 extern "C" {
 
 void FluteSynth_Init(void) {
-    InitMidiToFreqTable();
+    synth::MidiFreqInit();
+
+    // Голоса создаются в общей арене заново: данные прежнего владельца (другого движка) стираются.
+    voices = SynthArena_NewArray<FluteVoice, FLUTE_VOICES>(&voices);
 
     global_trigger_counter = 0;
     audio_sustain_pedal = false;
@@ -258,15 +190,7 @@ void FluteSynth_Init(void) {
         v.sustain_held = false;
     }
 
-    for (int i = 0; i < 128; i++) {
-        global_note_press_count[i].store(0, std::memory_order_relaxed);
-    }
-
-    active_producer_ops.store(0, std::memory_order_relaxed);
-    recovery_state.store(RECOVERY_NORMAL, std::memory_order_relaxed);
-    fifo_head.store(0, std::memory_order_relaxed);
-    fifo_tail.store(0, std::memory_order_relaxed);
-    dropped_note_on_count.store(0, std::memory_order_relaxed);
+    input.Reset();
 }
 
 void FluteSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
@@ -276,22 +200,7 @@ void FluteSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     }
     if (midi_note >= 128) return;
 
-    active_producer_ops.fetch_add(1, std::memory_order_seq_cst);
-    if (recovery_state.load(std::memory_order_seq_cst) != RECOVERY_NORMAL) {
-        active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
-        dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
-        return;
-    }
-
-    uint8_t count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
-    while (count < 255) {
-        if (global_note_press_count[midi_note].compare_exchange_weak(count, count + 1, std::memory_order_relaxed)) {
-            break;
-        }
-    }
-
-    InitMidiToFreqTable();
-    float freq = kMidiToFreq[midi_note];
+    float freq = synth::MidiFreq(midi_note);
     freq = clamp_f(freq, FLUTE_MIN_FREQ, FLUTE_MAX_FREQ);
 
     float norm_vel = (float)velocity * (1.0f / 127.0f);
@@ -304,48 +213,22 @@ void FluteSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     event.freq = freq;
     event.velocity_gain = vel_gain;
 
-    if (!event_fifo_push_note_on(event)) {
-        uint8_t cur_count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
-        while (cur_count > 0) {
-            if (global_note_press_count[midi_note].compare_exchange_weak(cur_count, cur_count - 1, std::memory_order_relaxed)) {
-                break;
-            }
-        }
-    }
-
-    active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
+    input.NoteOn(midi_note, event);
 }
 
 void FluteSynth_NoteOff(uint8_t midi_note) {
     if (midi_note >= 128) return;
 
-    active_producer_ops.fetch_add(1, std::memory_order_seq_cst);
-    if (recovery_state.load(std::memory_order_seq_cst) != RECOVERY_NORMAL) {
-        active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
-        return;
-    }
-
-    uint8_t count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
-    while (count > 0) {
-        if (global_note_press_count[midi_note].compare_exchange_weak(count, count - 1, std::memory_order_relaxed)) {
-            break;
-        }
-    }
-
-    FluteEvent event;
+    FluteEvent event{};
     event.type = EVENT_NOTE_OFF;
     event.param1 = midi_note;
     event.param2 = 0;
 
-    if (!event_fifo_push_critical(event)) {
-        recovery_state.store(RECOVERY_REQUESTED, std::memory_order_seq_cst);
-    }
-
-    active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
+    input.NoteOff(midi_note, event);
 }
 
 bool FluteSynth_IsNoteActive(uint8_t midi_note) {
-    if (midi_note >= 128) return false;
+    if (midi_note >= 128 || !SynthArena_IsOwner(&voices)) return false;
     for (int i = 0; i < FLUTE_VOICES; i++) {
         if (voices[i].voice_state.load(std::memory_order_acquire) == (int32_t)midi_note) {
             return true;
@@ -355,7 +238,7 @@ bool FluteSynth_IsNoteActive(uint8_t midi_note) {
 }
 
 uint32_t FluteSynth_GetDroppedEventsCount(void) {
-    return dropped_note_on_count.load(std::memory_order_relaxed);
+    return input.Dropped();
 }
 
 void FluteSynth_ControlChange(uint8_t control, uint8_t value) {
@@ -387,22 +270,11 @@ void FluteSynth_ControlChange(uint8_t control, uint8_t value) {
             break;
 
         case 64: { // CC 64: Sustain Pedal
-            active_producer_ops.fetch_add(1, std::memory_order_seq_cst);
-            if (recovery_state.load(std::memory_order_seq_cst) != RECOVERY_NORMAL) {
-                active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
-                break;
-            }
-
-            FluteEvent event;
+            FluteEvent event{};
             event.type = EVENT_CONTROL_CHANGE;
             event.param1 = control;
             event.param2 = value;
-
-            if (!event_fifo_push_critical(event)) {
-                recovery_state.store(RECOVERY_REQUESTED, std::memory_order_seq_cst);
-            }
-
-            active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
+            input.Critical(event);
             break;
         }
 
@@ -412,34 +284,20 @@ void FluteSynth_ControlChange(uint8_t control, uint8_t value) {
 }
 
 static int16_t FluteSynth_NextSample(void) {
-    uint32_t rec_st = recovery_state.load(std::memory_order_seq_cst);
-    if (rec_st != RECOVERY_NORMAL) {
-        recovery_state.store(RECOVERY_IN_PROGRESS, std::memory_order_seq_cst);
+    input.ServiceRecovery([]() {
+        audio_sustain_pedal = false;
 
-        if (active_producer_ops.load(std::memory_order_seq_cst) == 0) {
-            audio_sustain_pedal = false;
-
-            for (int i = 0; i < FLUTE_VOICES; i++) {
-                voices[i].press_count = 0;
-                voices[i].sustain_held = false;
-                voices[i].gate = false;
-                voices[i].breath_env = 0.0f;
-                voices[i].voice_state.store(-1, std::memory_order_release);
-            }
-
-            for (int i = 0; i < 128; i++) {
-                global_note_press_count[i].store(0, std::memory_order_relaxed);
-            }
-
-            uint32_t current_head = fifo_head.load(std::memory_order_relaxed);
-            fifo_tail.store(current_head, std::memory_order_release);
-
-            recovery_state.store(RECOVERY_NORMAL, std::memory_order_seq_cst);
+        for (int i = 0; i < FLUTE_VOICES; i++) {
+            voices[i].press_count = 0;
+            voices[i].sustain_held = false;
+            voices[i].gate = false;
+            voices[i].breath_env = 0.0f;
+            voices[i].voice_state.store(-1, std::memory_order_release);
         }
-    }
+    });
 
     FluteEvent event;
-    while (event_fifo_pop(event)) {
+    while (input.Pop(event)) {
         if (event.type == EVENT_NOTE_ON) {
             int target_voice = -1;
 
@@ -610,6 +468,10 @@ static int16_t FluteSynth_NextSample(void) {
 }
 
 void FluteSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames) {
+    if (!SynthArena_IsOwner(&voices)) {     // арену забрал другой движок или Init() ещё не вызывался
+        std::memset(buffer, 0, (size_t)num_frames * 2U * sizeof(int16_t));
+        return;
+    }
     for (uint32_t i = 0; i < num_frames; i++) {
         int16_t sample = FluteSynth_NextSample();
         buffer[i * 2]     = sample; // L

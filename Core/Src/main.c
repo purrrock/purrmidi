@@ -112,9 +112,9 @@ static volatile uint32_t audio_blocks_done = 0;   /* halves processed by PendSV 
  * made progress since the previous check. A hung main loop AND a stopped audio (lost DMA/PendSV) both end in a reset. */
 #define WATCHDOG_CHECK_MS  100U
 /* Audio: 48 kHz, stereo, 16 bit. Circular DMA ring split into two halves.
- * It must NOT be placed in DTCM (DMA2 cannot reach it): own section in AXI SRAM,
- * see .dma_buffer in the linker script. With the QSPI XIP backend the D-cache is ON, but XipMpu_Config()
- * marks all SRAM (AXI, SRAM1-3, SRAM4) non-cacheable, so no cache maintenance is needed for DMA. */
+ * It must NOT be placed in DTCM (DMA2 cannot reach it): it lives in .dma_buffer, i.e. D2 SRAM (see the linker script).
+ * The D-cache is ON, but XipMpu_Config() marks D2 SRAM non-cacheable (AXI SRAM is write-back cacheable and holds no
+ * DMA buffers), so no cache maintenance is needed for DMA. Any new DMA buffer must also go into .dma_buffer. */
 #define AUDIO_BUFFER_FRAMES  256U                      /* stereo frames in the whole ring (2 x 128) */
 #define AUDIO_BUFFER_SIZE    (AUDIO_BUFFER_FRAMES * 2U) /* int16 items passed to SAI DMA */
 static int16_t audio_buffer[AUDIO_BUFFER_SIZE] __attribute__((section(".dma_buffer"), aligned(32)));
@@ -222,8 +222,8 @@ int main(void)
 #if ENABLE_ICACHE
   SCB_EnableICache();
 #endif
-  /* D-cache нужен для быстрого XIP-чтения сэмплов из QSPI Flash. Все SRAM с DMA-буферами (AXI, SRAM1-3, SRAM4)
-   * объявляются non-cacheable, кэшируется только окно 0x90000000 (оно открывается драйвером QSPI). */
+  /* D-cache нужен для быстрого XIP-чтения сэмплов из QSPI Flash и данных движков в AXI SRAM (write-back). DMA-буферы
+   * лежат в D2 SRAM (.dma_buffer), она non-cacheable (MPU, см. xip_mpu.c). */
   XipMpu_Config();
   SCB_EnableDCache();
 

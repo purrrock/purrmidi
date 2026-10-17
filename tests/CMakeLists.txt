@@ -130,6 +130,21 @@ target_link_libraries(test_synth_switch PRIVATE purrmidi_core Threads::Threads)
 target_compile_features(test_synth_switch PRIVATE cxx_std_17)
 add_test(NAME test_synth_switch COMMAND test_synth_switch)
 
+add_executable(test_synth_common
+    test_synth_common.cpp
+)
+target_link_libraries(test_synth_common PRIVATE purrmidi_synth_common)
+target_compile_features(test_synth_common PRIVATE cxx_std_17)
+add_test(NAME test_synth_common COMMAND test_synth_common)
+
+add_executable(test_engine_golden
+    test_engine_golden.cpp
+)
+find_package(Threads REQUIRED)
+target_link_libraries(test_engine_golden PRIVATE purrmidi_core Threads::Threads)
+target_compile_features(test_engine_golden PRIVATE cxx_std_17)
+add_test(NAME test_engine_golden COMMAND test_engine_golden)
+
 add_executable(test_chord_detector
     test_chord_detector.cpp
 )

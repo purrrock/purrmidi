@@ -31,7 +31,7 @@
 #define SD_CLOCK_DIV            4U
 #endif
 
-/* Размер bounce-буфера в секторах (16 -> 8 КБ в AXI SRAM). */
+/* Размер bounce-буфера в секторах (16 -> 8 КБ в D2 SRAM, секция .dma_buffer). */
 #ifndef SD_BOUNCE_SECTORS
 #define SD_BOUNCE_SECTORS       16U
 #endif
@@ -60,9 +60,10 @@
 
 #define SD_SECTOR_SIZE          512U
 
-/* AXI SRAM: единственная область, про которую точно известно, что IDMA SDMMC1 её видит. */
-#define DMA_RAM_BASE            0x24000000UL
-#define DMA_RAM_SIZE            (512UL * 1024UL)
+/* Прямая DMA-передача разрешена только в секцию .dma_buffer (D2 SRAM, Normal non-cacheable в MPU): IDMA SDMMC1 её
+ * видит, а кэш D-cache с ней не связан. AXI SRAM кэшируется (write-back): запись IDMA в неё без чистки/инвалидации
+ * кэша испортила бы данные, поэтому всё остальное идёт через bounce-буфер. Границы задаёт линкер-скрипт. */
+extern uint8_t _sdma_buffer[], _edma_buffer[];
 
 /* ------------------------------ состояние ---------------------------------- */
 
@@ -90,15 +91,18 @@ static inline bool dcache_enabled(void)
     return (SCB->CCR & SCB_CCR_DC_Msk) != 0U;
 }
 
-/* Буфер можно отдавать IDMA напрямую: он в AXI SRAM и выровнен.
- * 4 байта нужно самому IDMA; при включённом D-cache - 32 байта (строка кэша). */
+/* Буфер можно отдавать IDMA напрямую: он целиком лежит в .dma_buffer (D2 SRAM) и выровнен.
+ * 4 байта нужно самому IDMA; при включённом D-cache требуем 32 байта (строка кэша) - запас на случай, если секцию
+ * когда-нибудь сделают кэшируемой. */
 static bool buffer_is_dma_safe(const void *p, uint32_t bytes)
 {
     uint32_t a = (uint32_t)(uintptr_t)p;
     uint32_t align_mask = dcache_enabled() ? 31U : 3U;
 
     if ((a & align_mask) != 0U) return false;
-    if (a < DMA_RAM_BASE || (a + bytes) > (DMA_RAM_BASE + DMA_RAM_SIZE)) return false;
+    const uint32_t lo = (uint32_t)(uintptr_t)_sdma_buffer;
+    const uint32_t hi = (uint32_t)(uintptr_t)_edma_buffer;
+    if (a < lo || (a + bytes) > hi) return false;
     return true;
 }
 

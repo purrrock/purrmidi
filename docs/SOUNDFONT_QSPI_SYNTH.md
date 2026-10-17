@@ -67,7 +67,7 @@ SD: 0:/SNDFNT.SF2 ──(новый/изменён?)──► QSPI Flash ══X
 С включённым D-Cache строка 32 байта (16 отсчётов) подтягивается из флеш-памяти за одну транзакцию:
 * Функция `XipMpu_Config()` настраивает MPU-регион для адресов `0x90000000...0x907FFFFF` (8 МБ, Normal, Read-Only, Write-Through, Outer/Inner Cacheable).
 * Функция `SCB_EnableDCache()` включает D-Cache.
-* Все области SRAM (AXI SRAM, SRAM1–SRAM4) остаются Normal Non-Cacheable, что гарантирует корректную работу DMA (SAI1, SDMMC1) без когерентных сбоев.
+* DMA-буферы (SAI1, SDMMC1) лежат только в D2 SRAM (Normal Non-cacheable); AXI SRAM (арена голосов и куча TinySoundFont) кэшируется write-back. XIP-окно QSPI кэшируется write-through (только чтение).
 
 ### 3.3. Настройка CubeMX для QUADSPI
 

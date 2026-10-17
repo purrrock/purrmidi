@@ -1,9 +1,10 @@
 /**
  * @file    ram_init.c
- * @brief   Обнуление «голых» SRAM-секций до запуска C++-конструкторов.
+ * @brief   Обнуление AXI SRAM и D2 SRAM целиком до запуска C++-конструкторов.
  *
- * Секции .dma_buffer, .ram_d2 и .axi_heap помечены в линкер-скрипте как NOLOAD: startup-код их не обнуляет, после
- * включения питания там случайные данные. На STM32H7 AXI SRAM защищена ECC (слово 64 бита, у остальных SRAM - 32+7):
+ * Секции .dma_buffer (D2), .synth_arena и .axi_heap (AXI) помечены в линкер-скрипте как NOLOAD: startup-код их не
+ * обнуляет, после включения питания там случайные данные. Обнуляются обе области целиком (а не только занятые
+ * секции): так любая будущая секция в них тоже получает корректные ECC-биты. На STM32H7 AXI SRAM защищена ECC (слово 64 бита, у остальных SRAM - 32+7):
  * проверочные биты в неинициализированной памяти неверны, поэтому первая же неполная запись (байт, полуслово или
  * 32 бита в 64-битное слово AXI) требует чтения-модификации-записи старого слова и может дать ECC-ошибку
  * (NMI/BusFault). ST рекомендует перед использованием записать всю память целыми 64-битными словами - это и делает
@@ -11,14 +12,13 @@
  *
  * Запуск: через .preinit_array, то есть из __libc_init_array() ПЕРЕД всеми статическими конструкторами C++ (объекты
  * в этих секциях конструируются позже и не затираются). Startup-файл CubeMX менять не нужно.
- * Стоимость: около 0,5 МБ записей, порядка 1-2 мс.
+ * Стоимость: 0,8 МБ записей, порядка 1-3 мс.
  */
 #include <stdint.h>
 
-/* Границы секций задаёт линкер-скрипт (STM32H743xx_FLASH.ld). Выровнены минимум по 8 байт. */
-extern uint8_t _sdma_buffer[], _edma_buffer[];
+/* Границы областей задаёт линкер-скрипт (STM32H743xx_FLASH.ld): ORIGIN/LENGTH регионов RAM и RAM_D2. */
+extern uint8_t _sram_axi[], _eram_axi[];
 extern uint8_t _sram_d2[], _eram_d2[];
-extern uint8_t _axi_heap_start[], _axi_heap_end[];
 
 /* Запись нулей 64-битными словами (STRD). Вызов memset() не годится: он пишет по 8/32 бит. */
 static void zero_ecc_safe(uint8_t *start, uint8_t *end)
@@ -56,9 +56,8 @@ static void zero_ecc_safe(uint8_t *start, uint8_t *end)
 
 static void ram_init(void)
 {
-    zero_ecc_safe(_sdma_buffer, _edma_buffer);
+    zero_ecc_safe(_sram_axi, _eram_axi);
     zero_ecc_safe(_sram_d2, _eram_d2);
-    zero_ecc_safe(_axi_heap_start, _axi_heap_end);
 }
 
 /* Запись в .preinit_array: __libc_init_array() вызывает её раньше .init_array (конструкторов C++). */

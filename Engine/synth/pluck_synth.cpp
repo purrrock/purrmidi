@@ -1,4 +1,6 @@
 #include "pluck_synth.h"
+#include "synth_arena.h"
+#include "synth_common.h"
 #include "daisysp.h"
 #include "PhysicalModeling/pluck.h"
 #include "Utility/dsp.h"
@@ -47,12 +49,9 @@ struct PluckVoice {
     bool sustain_held{false};
 };
 
-// Буферы голосов размещаются в AXI SRAM (.dma_buffer), чтобы не переполнять DTCMRAM на STM32H7
-#if defined(__GNUC__) && !defined(__EMSCRIPTEN__) && defined(__arm__)
-static PluckVoice voices[PLUCK_VOICES] __attribute__((section(".dma_buffer"), aligned(32)));
-#else
-static PluckVoice voices[PLUCK_VOICES];
-#endif
+// Голоса лежат в общей арене памяти (synth_arena.h): одновременно звучит один движок. Указатель устанавливается
+// в PluckSynth_Init(); если арену забрал другой движок, SynthArena_IsOwner(&voices) == false.
+static PluckVoice* voices = nullptr;
 
 static uint32_t global_trigger_counter = 0;
 static float release_coeff = 0.0f;
@@ -61,66 +60,9 @@ static float release_coeff = 0.0f;
 static std::atomic<float> user_decay{0.96f};
 static std::atomic<float> user_damp{0.92f};
 
-static PluckEvent event_fifo[EVENT_FIFO_SIZE];
-static std::atomic<uint32_t> fifo_head{0};
-static std::atomic<uint32_t> fifo_tail{0};
-static std::atomic<uint32_t> dropped_note_on_count{0};
-
-static std::atomic<uint8_t> global_note_press_count[128];
+// Очередь событий, учёт нажатий и протокол аварийного восстановления (общий компонент, см. synth_common.h)
+static synth::NoteInput<PluckEvent, EVENT_FIFO_SIZE, NOTE_ON_FIFO_LIMIT> input;
 static bool audio_sustain_pedal = false;
-
-// Протокол аварийного восстановления при переполнении FIFO.
-// Состояния протокола восстановления:
-enum RecoveryState : uint32_t {
-    RECOVERY_NORMAL = 0,       // Штатная работа
-    RECOVERY_REQUESTED = 1,    // Запрошено восстановление из-за переполнения FIFO
-    RECOVERY_IN_PROGRESS = 2   // Аудиопоток проводит сброс состояния
-};
-
-static std::atomic<uint32_t> recovery_state{RECOVERY_NORMAL};
-static std::atomic<uint32_t> active_producer_ops{0};
-
-// Постановка обычных событий Note On в FIFO
-static bool event_fifo_push_note_on(const PluckEvent& event) {
-    uint32_t head = fifo_head.load(std::memory_order_relaxed);
-    uint32_t tail = fifo_tail.load(std::memory_order_acquire);
-
-    if (head - tail >= NOTE_ON_FIFO_LIMIT) {
-        dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
-
-    event_fifo[head & (EVENT_FIFO_SIZE - 1)] = event;
-    fifo_head.store(head + 1, std::memory_order_release);
-    return true;
-}
-
-// Постановка критичных событий (Note Off, CC64) в FIFO с использованием полной емкости (резервирование слотов)
-static bool event_fifo_push_critical(const PluckEvent& event) {
-    uint32_t head = fifo_head.load(std::memory_order_relaxed);
-    uint32_t tail = fifo_tail.load(std::memory_order_acquire);
-
-    if (head - tail >= EVENT_FIFO_SIZE) {
-        return false;
-    }
-
-    event_fifo[head & (EVENT_FIFO_SIZE - 1)] = event;
-    fifo_head.store(head + 1, std::memory_order_release);
-    return true;
-}
-
-static bool event_fifo_pop(PluckEvent& event) {
-    uint32_t tail = fifo_tail.load(std::memory_order_relaxed);
-    uint32_t head = fifo_head.load(std::memory_order_acquire);
-
-    if (head == tail) {
-        return false;
-    }
-
-    event = event_fifo[tail & (EVENT_FIFO_SIZE - 1)];
-    fifo_tail.store(tail + 1, std::memory_order_release);
-    return true;
-}
 
 static inline float clamp_f(float val, float min_val, float max_val) {
     if (val < min_val) return min_val;
@@ -135,6 +77,9 @@ static inline float compensate_damp(float damp, float freq) {
 }
 
 void PluckSynth_Init(void) {
+    // Голоса создаются в общей арене заново: данные прежнего владельца (другого движка) стираются.
+    voices = SynthArena_NewArray<PluckVoice, PLUCK_VOICES>(&voices);
+
     release_coeff = expf(-1.0f / (PLUCK_SAMPLE_RATE * PLUCK_RELEASE_TIME_SEC));
     global_trigger_counter = 0;
     audio_sustain_pedal = false;
@@ -161,15 +106,7 @@ void PluckSynth_Init(void) {
     user_decay.store(0.96f, std::memory_order_relaxed);
     user_damp.store(0.92f, std::memory_order_relaxed);
 
-    for (int i = 0; i < 128; i++) {
-        global_note_press_count[i].store(0, std::memory_order_relaxed);
-    }
-
-    active_producer_ops.store(0, std::memory_order_relaxed);
-    recovery_state.store(RECOVERY_NORMAL, std::memory_order_relaxed);
-    fifo_head.store(0, std::memory_order_relaxed);
-    fifo_tail.store(0, std::memory_order_relaxed);
-    dropped_note_on_count.store(0, std::memory_order_relaxed);
+    input.Reset();
 }
 
 void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
@@ -179,27 +116,6 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     }
 
     if (midi_note >= 128) return;
-
-    /*
-     * Протокол входа производителя:
-     * 1. Регистрируем начало операции производителем посредством seq_cst инкремента active_producer_ops.
-     * 2. Проверяем recovery_state (seq_cst). Если состояние отлична от RECOVERY_NORMAL,
-     *    операция немедленно отклоняется, active_producer_ops уменьшается, а глобальные счётчики не меняются.
-     */
-    active_producer_ops.fetch_add(1, std::memory_order_seq_cst);
-    if (recovery_state.load(std::memory_order_seq_cst) != RECOVERY_NORMAL) {
-        active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
-        dropped_note_on_count.fetch_add(1, std::memory_order_relaxed);
-        return;
-    }
-
-    // Предварительный атомарный инкремент с насыщением (max 255)
-    uint8_t count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
-    while (count < 255) {
-        if (global_note_press_count[midi_note].compare_exchange_weak(count, count + 1, std::memory_order_relaxed)) {
-            break;
-        }
-    }
 
     float freq = mtof((float)midi_note);
     float min_freq = (PLUCK_SAMPLE_RATE / (float)(PLUCK_BUFFER_SIZE - 4));
@@ -221,48 +137,18 @@ void PluckSynth_NoteOn(uint8_t midi_note, uint8_t velocity) {
     event.decay       = decay;
     event.damp_offset = damp_offset;
 
-    if (!event_fifo_push_note_on(event)) {
-        // Если событие отброшено из-за переполнения FIFO, откатываем инкремент
-        uint8_t cur_count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
-        while (cur_count > 0) {
-            if (global_note_press_count[midi_note].compare_exchange_weak(cur_count, cur_count - 1, std::memory_order_relaxed)) {
-                break;
-            }
-        }
-    }
-
-    // Завершение операции производителя
-    active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
+    input.NoteOn(midi_note, event);
 }
 
 void PluckSynth_NoteOff(uint8_t midi_note) {
     if (midi_note >= 128) return;
 
-    active_producer_ops.fetch_add(1, std::memory_order_seq_cst);
-    if (recovery_state.load(std::memory_order_seq_cst) != RECOVERY_NORMAL) {
-        active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
-        return;
-    }
-
-    uint8_t count = global_note_press_count[midi_note].load(std::memory_order_relaxed);
-    while (count > 0) {
-        if (global_note_press_count[midi_note].compare_exchange_weak(count, count - 1, std::memory_order_relaxed)) {
-            break;
-        }
-    }
-
-    PluckEvent event;
+    PluckEvent event{};
     event.type   = EVENT_NOTE_OFF;
     event.param1 = midi_note;
     event.param2 = 0;
 
-    if (!event_fifo_push_critical(event)) {
-        // Критичное событие не удалось поставить из-за 100% переполнения FIFO.
-        // Запрашиваем аварийное восстановление без компенсационных откатов счётчика.
-        recovery_state.store(RECOVERY_REQUESTED, std::memory_order_seq_cst);
-    }
-
-    active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
+    input.NoteOff(midi_note, event);
 }
 
 void PluckSynth_SetDecay(float decay) {
@@ -274,7 +160,7 @@ void PluckSynth_SetDamp(float damp) {
 }
 
 bool PluckSynth_IsNoteActive(uint8_t midi_note) {
-    if (midi_note >= 128) return false;
+    if (midi_note >= 128 || !SynthArena_IsOwner(&voices)) return false;
     for (int i = 0; i < PLUCK_VOICES; i++) {
         if (voices[i].voice_state.load(std::memory_order_acquire) == (int32_t)midi_note) {
             return true;
@@ -284,7 +170,7 @@ bool PluckSynth_IsNoteActive(uint8_t midi_note) {
 }
 
 uint32_t PluckSynth_GetDroppedEventsCount(void) {
-    return dropped_note_on_count.load(std::memory_order_relaxed);
+    return input.Dropped();
 }
 
 void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
@@ -302,22 +188,11 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
             break;
 
         case 64: {
-            active_producer_ops.fetch_add(1, std::memory_order_seq_cst);
-            if (recovery_state.load(std::memory_order_seq_cst) != RECOVERY_NORMAL) {
-                active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
-                break;
-            }
-
-            PluckEvent event;
+            PluckEvent event{};
             event.type   = EVENT_CONTROL_CHANGE;
             event.param1 = control;
             event.param2 = value;
-
-            if (!event_fifo_push_critical(event)) {
-                recovery_state.store(RECOVERY_REQUESTED, std::memory_order_seq_cst);
-            }
-
-            active_producer_ops.fetch_sub(1, std::memory_order_seq_cst);
+            input.Critical(event);
             break;
         }
 
@@ -327,46 +202,25 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
 }
 
 int16_t PluckSynth_NextSample(void) {
-    /*
-     * Протокол перехода в RECOVERING и проверки активных операций:
-     * 1. Проверяем recovery_state (seq_cst). Если состояние RECOVERY_REQUESTED или RECOVERY_IN_PROGRESS,
-     *    аудиопоток переводит состояние в RECOVERY_IN_PROGRESS.
-     * 2. Проверяем active_producer_ops (seq_cst). Если active_producer_ops > 0, операции производителя
-     *    всё ещё активны. Мы НЕ спин-лупим и НЕ блокируемся, а откладываем сброс до следующего сэмпла/вызова.
-     * 3. Только когда active_producer_ops == 0, гарантируется эксклюзивный доступ к состоянию.
-     * 4. Проводится сброс: сброс педали сустейна, демпфирование голосов, обнуление global_note_press_count,
-     *    монотонное опустошение FIFO (fifo_tail = fifo_head).
-     * 5. По завершении сброса recovery_state переводится обратно в RECOVERY_NORMAL (seq_cst), разрешая приём новых событий.
-     */
-    uint32_t rec_st = recovery_state.load(std::memory_order_seq_cst);
-    if (rec_st != RECOVERY_NORMAL) {
-        recovery_state.store(RECOVERY_IN_PROGRESS, std::memory_order_seq_cst);
-
-        if (active_producer_ops.load(std::memory_order_seq_cst) == 0) {
-            // Эксклюзивный сброс состояния при отсутствии активных операций производителя
-            audio_sustain_pedal = false;
-
-            for (int i = 0; i < PLUCK_VOICES; i++) {
-                voices[i].press_count  = 0;
-                voices[i].sustain_held = false;
-            }
-
-            for (int i = 0; i < 128; i++) {
-                global_note_press_count[i].store(0, std::memory_order_relaxed);
-            }
-
-            // Монотонный сброс FIFO без сброса базовых индексов
-            uint32_t current_head = fifo_head.load(std::memory_order_relaxed);
-            fifo_tail.store(current_head, std::memory_order_release);
-
-            recovery_state.store(RECOVERY_NORMAL, std::memory_order_seq_cst);
-        }
+    if (!SynthArena_IsOwner(&voices)) {     // арену забрал другой движок или Init() ещё не вызывался
+        return 0;
     }
+
+    // Протокол аварийного восстановления (см. synth_common.h, NoteInput::ServiceRecovery): когда ни один производитель
+    // не находится в критической секции, сбрасываем педаль и удержания нажатий, счётчики и очередь событий.
+    input.ServiceRecovery([]() {
+        audio_sustain_pedal = false;
+
+        for (int i = 0; i < PLUCK_VOICES; i++) {
+            voices[i].press_count  = 0;
+            voices[i].sustain_held = false;
+        }
+    });
 
     PluckEvent event;
 
     // 1. Последовательная строго хронологическая обработка событий из FIFO
-    while (event_fifo_pop(event)) {
+    while (input.Pop(event)) {
         if (event.type == EVENT_NOTE_ON) {
             int target_voice = -1;
 
