@@ -312,12 +312,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-    watchdog_service();
-    Diag_Flush();                       /* сообщения, отложенные из прерываний (см. diag.h) */
-    if (!USB_PortLostRecoverPending())  /* пока идёт пауза после сбоя порта, стек USB не трогаем */
-    {
-      MX_USB_HOST_Process();
-    }
+    MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
     Button_K1_Process();

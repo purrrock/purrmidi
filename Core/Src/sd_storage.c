@@ -270,7 +270,7 @@ SDStorage_Result SDStorage_Mount(void)
     s_diag.link_ret     = -1;
     s_diag.f_mount_res  = -1;
 #ifdef SD_DETECT_Pin
-    s_diag.detect_level = (HAL_GPIO_ReadPin(SD_DETECT_GPIO_Port, SD_DETECT_Pin) == GPIO_PIN_SET) ? 1 : 0;
+    s_diag.detect_level = (HAL_GPIO_ReadPin(SD_DETECT_GPIO_Port, SD_DETECT_Pin) == GPIO_PIN_RESET) ? 1 : 0;
 #endif
 
 #if SD_DETECT_ENFORCE

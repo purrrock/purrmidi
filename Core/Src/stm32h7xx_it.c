@@ -72,9 +72,9 @@ void UsageFault_Handler(void)  __attribute__((naked));
 /* External variables --------------------------------------------------------*/
 extern HCD_HandleTypeDef hhcd_USB_OTG_FS;
 extern DMA_HandleTypeDef hdma_sai1_a;
+extern SD_HandleTypeDef hsd1;
 extern DMA_HandleTypeDef hdma_spi4_tx;
 extern SPI_HandleTypeDef hspi4;
-extern SD_HandleTypeDef hsd1;
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -226,20 +226,6 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
-  * @brief This function handles SDMMC1 global interrupt.
-  */
-void SDMMC1_IRQHandler(void)
-{
-  /* USER CODE BEGIN SDMMC1_IRQn 0 */
-
-  /* USER CODE END SDMMC1_IRQn 0 */
-  HAL_SD_IRQHandler(&hsd1);
-  /* USER CODE BEGIN SDMMC1_IRQn 1 */
-
-  /* USER CODE END SDMMC1_IRQn 1 */
-}
-
-/**
   * @brief This function handles DMA1 stream0 global interrupt.
   */
 void DMA1_Stream0_IRQHandler(void)
@@ -254,17 +240,17 @@ void DMA1_Stream0_IRQHandler(void)
 }
 
 /**
-  * @brief This function handles SPI4 global interrupt.
+  * @brief This function handles SDMMC1 global interrupt.
   */
-void SPI4_IRQHandler(void)
+void SDMMC1_IRQHandler(void)
 {
-  /* USER CODE BEGIN SPI4_IRQn 0 */
+  /* USER CODE BEGIN SDMMC1_IRQn 0 */
 
-  /* USER CODE END SPI4_IRQn 0 */
-  HAL_SPI_IRQHandler(&hspi4);
-  /* USER CODE BEGIN SPI4_IRQn 1 */
+  /* USER CODE END SDMMC1_IRQn 0 */
+  HAL_SD_IRQHandler(&hsd1);
+  /* USER CODE BEGIN SDMMC1_IRQn 1 */
 
-  /* USER CODE END SPI4_IRQn 1 */
+  /* USER CODE END SDMMC1_IRQn 1 */
 }
 
 /**
@@ -279,6 +265,20 @@ void DMA2_Stream0_IRQHandler(void)
   /* USER CODE BEGIN DMA2_Stream0_IRQn 1 */
 
   /* USER CODE END DMA2_Stream0_IRQn 1 */
+}
+
+/**
+  * @brief This function handles SPI4 global interrupt.
+  */
+void SPI4_IRQHandler(void)
+{
+  /* USER CODE BEGIN SPI4_IRQn 0 */
+
+  /* USER CODE END SPI4_IRQn 0 */
+  HAL_SPI_IRQHandler(&hspi4);
+  /* USER CODE BEGIN SPI4_IRQn 1 */
+
+  /* USER CODE END SPI4_IRQn 1 */
 }
 
 /**
