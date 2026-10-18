@@ -45,19 +45,6 @@
 #define SD_READ_TIMEOUT_MS      1000U
 #endif
 
-/* Уровень сигнала SD_DETECT, когда карта вставлена (проверьте по схеме платы). */
-#ifndef SD_DETECT_ACTIVE_LEVEL
-#define SD_DETECT_ACTIVE_LEVEL  GPIO_PIN_RESET
-#endif
-
-/* 1 = если SD_DETECT показывает "карты нет", SDStorage_Mount() сразу возвращает SDS_ERR_NO_CARD.
- * 0 (по умолчанию) = датчик только пишется в диагностику, а инициализация карты всё равно
- * пробуется: HAL_SD_Init сам вернёт ошибку, если карты действительно нет. Датчик на плате
- * идёт через перемычку SB2, и без подтяжки в gpio.c его уровень может быть произвольным. */
-#ifndef SD_DETECT_ENFORCE
-#define SD_DETECT_ENFORCE       0
-#endif
-
 #define SD_SECTOR_SIZE          512U
 
 /* Прямая DMA-передача разрешена только в секцию .dma_buffer (D2 SRAM, Normal non-cacheable в MPU): IDMA SDMMC1 её
@@ -76,7 +63,7 @@ static volatile uint8_t s_xfer_state;   /* 0 - идёт, 1 - готово, 2 - �
 static uint8_t s_hw_ready;              /* SDMMC1 + карта инициализированы */
 static uint8_t s_linked;
 static uint8_t s_mounted;
-static SDStorage_Diag s_diag = { SDS_OK, -1, -1, -1, 0U, -1, -1 };
+static SDStorage_Diag s_diag = { SDS_OK, -1, -1, 0U, -1, -1, 0, 0U, 0U, 0U };
 
 /* ----------------------- callbacks HAL (вызываются из IRQ) ------------------ */
 
@@ -106,6 +93,16 @@ static bool buffer_is_dma_safe(const void *p, uint32_t bytes)
     return true;
 }
 
+/* Запоминает первую ошибку чтения для SDStorage_PrintDiag(): FatFs наружу отдаёт только FR_DISK_ERR. */
+static void note_read_fail(int stage, uint32_t sector)
+{
+    if (s_diag.rd_stage != 0) return;
+    s_diag.rd_stage      = stage;
+    s_diag.rd_sector     = sector;
+    s_diag.rd_error      = HAL_SD_GetError(&hsd1);
+    s_diag.rd_card_state = (uint32_t)HAL_SD_GetCardState(&hsd1);
+}
+
 static int wait_card_ready(uint32_t timeout_ms)
 {
     uint32_t t0 = HAL_GetTick();
@@ -130,10 +127,10 @@ static int wait_xfer_done(uint32_t timeout_ms)
 /* Одна DMA-передача n секторов; buf обязан быть DMA-safe. */
 static int xfer_read(uint8_t *buf, uint32_t sector, uint32_t n)
 {
-    if (wait_card_ready(SD_READ_TIMEOUT_MS) != 0) return -1;
+    if (wait_card_ready(SD_READ_TIMEOUT_MS) != 0) { note_read_fail(1, sector); return -1; }
     s_xfer_state = 0;
-    if (HAL_SD_ReadBlocks_DMA(&hsd1, buf, sector, n) != HAL_OK) return -1;
-    if (wait_xfer_done(SD_READ_TIMEOUT_MS) != 0) return -1;
+    if (HAL_SD_ReadBlocks_DMA(&hsd1, buf, sector, n) != HAL_OK) { note_read_fail(2, sector); return -1; }
+    if (wait_xfer_done(SD_READ_TIMEOUT_MS) != 0) { note_read_fail(3, sector); return -1; }
     if (dcache_enabled()) {
         SCB_InvalidateDCache_by_Addr((uint32_t *)buf, (int32_t)(n * SD_SECTOR_SIZE));
     }
@@ -220,15 +217,6 @@ static const Diskio_drvTypeDef s_driver = {
 
 /* ------------------------------ публичный API ------------------------------- */
 
-bool SDStorage_CardPresent(void)
-{
-#ifdef SD_DETECT_Pin
-    return HAL_GPIO_ReadPin(SD_DETECT_GPIO_Port, SD_DETECT_Pin) == SD_DETECT_ACTIVE_LEVEL;
-#else
-    return true;
-#endif
-}
-
 static int sd_hw_init(void)
 {
     /* HAL_SD_DeInit() на необнулённом дескрипторе с Instance == NULL приведёт к HardFault. */
@@ -263,23 +251,17 @@ SDStorage_Result SDStorage_Mount(void)
     if (s_mounted) return SDS_OK;
 
     s_diag.result       = SDS_OK;
-    s_diag.detect_level = -1;
     s_diag.hal_init     = -1;
     s_diag.hal_wide     = -1;
     s_diag.hal_error    = 0U;
     s_diag.link_ret     = -1;
     s_diag.f_mount_res  = -1;
-#ifdef SD_DETECT_Pin
-    s_diag.detect_level = (HAL_GPIO_ReadPin(SD_DETECT_GPIO_Port, SD_DETECT_Pin) == GPIO_PIN_RESET) ? 1 : 0;
-#endif
+    s_diag.rd_stage     = 0;
+    s_diag.rd_sector    = 0U;
+    s_diag.rd_error     = 0U;
+    s_diag.rd_card_state = 0U;
 
-#if SD_DETECT_ENFORCE
-    if (!SDStorage_CardPresent()) {
-        s_diag.result = SDS_ERR_NO_CARD;
-        return SDS_ERR_NO_CARD;
-    }
-#endif
-
+    /* Наличие карты не проверяем отдельным датчиком: HAL_SD_Init() сам вернёт ошибку, если карты нет. */
     if (sd_hw_init() != 0) {
         s_diag.result = SDS_ERR_INIT;
         return SDS_ERR_INIT;
@@ -319,7 +301,6 @@ const char *SDStorage_ResultName(SDStorage_Result r)
 {
     switch (r) {
     case SDS_OK:          return "OK";
-    case SDS_ERR_NO_CARD: return "NO_CARD (SD_DETECT)";
     case SDS_ERR_INIT:    return "INIT (HAL_SD_Init / 4-bit)";
     case SDS_ERR_LINK:    return "LINK (FATFS_LinkDriver)";
     case SDS_ERR_MOUNT:   return "MOUNT (f_mount)";
@@ -330,11 +311,14 @@ const char *SDStorage_ResultName(SDStorage_Result r)
 void SDStorage_PrintDiag(void)
 {
     fprintf(stderr, "[SD] result=%s\n", SDStorage_ResultName(s_diag.result));
-    fprintf(stderr, "[SD] SD_DETECT raw level=%d (-1 = pin not named SD_DETECT; present when %d)\n",
-            s_diag.detect_level, (SD_DETECT_ACTIVE_LEVEL == GPIO_PIN_SET) ? 1 : 0);
     fprintf(stderr, "[SD] HAL_SD_Init=%d wide4b=%d hsd.ErrorCode=0x%08lX link=%d f_mount=%d\n",
             s_diag.hal_init, s_diag.hal_wide, (unsigned long)s_diag.hal_error,
             s_diag.link_ret, s_diag.f_mount_res);
+    if (s_diag.rd_stage != 0) {
+        fprintf(stderr, "[SD] first read failure: stage=%d sector=%lu hsd.ErrorCode=0x%08lX card_state=%lu\n",
+                s_diag.rd_stage, (unsigned long)s_diag.rd_sector,
+                (unsigned long)s_diag.rd_error, (unsigned long)s_diag.rd_card_state);
+    }
     if (s_hw_ready) {
         fprintf(stderr, "[SD] card type=%lu blocks=%lu\n",
                 (unsigned long)hsd1.SdCard.CardType, (unsigned long)hsd1.SdCard.LogBlockNbr);

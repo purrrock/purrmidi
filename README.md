@@ -273,13 +273,13 @@ SD-карта нужна **только для обновления банка**
 
 | Строка в логе | Что означает |
 |---|---|
-| `SD mount failed: NO_CARD` | Включена проверка `SD_DETECT_ENFORCE=1`, и датчик показывает «карты нет». |
 | `SD mount failed: INIT`, `hsd.ErrorCode=0x...` | `HAL_SD_Init` не смог поднять карту: контакт, питание, тактирование, несовместимая карта. Код расшифровывается по маске `HAL_SD_ERROR_*`. |
 | `SD mount failed: LINK` | `FATFS_LinkDriver` не удался: в проекте остался вызов `MX_FATFS_Init` или `_VOLUMES` ≠ 1. |
 | `SD mount failed: MOUNT`, `f_mount=13` | Карта читается, но FatFs не нашёл файловую систему (`FR_NO_FILESYSTEM`). Проверьте разметку и формат. |
+| `SD mount failed: MOUNT`, `f_mount=1`, `first read failure: stage=...` | `FR_DISK_ERR`: чтение сектора не удалось. `stage=1` - карта не вернулась в состояние TRANSFER, `2` - `HAL_SD_ReadBlocks_DMA` отказал, `3` - таймаут/ошибка DMA; рядом печатаются `hsd.ErrorCode` и состояние карты. |
 | `f_open(...) failed: FRESULT=4` | Файла с таким именем в корне нет. Следом печатается список корня `[SD] root directory`, там видны реальные имена (частый случай: Windows скрыл расширение, и файл называется `SNDFNT.SF2.sf2`). |
 
-Датчик карты `SD_DETECT` (PD4) по умолчанию только пишется в диагностику (`SD_DETECT_ENFORCE=0`) и не блокирует монтирование.
+Датчик наличия карты (`SD_DETECT`, PD4) не используется: карта определяется самой инициализацией `HAL_SD_Init`.
 
 Подробности работы QSPI Flash XIP и конфигурации сэмплирования: `docs/SOUNDFONT_QSPI_SYNTH.md`.
 

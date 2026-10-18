@@ -315,6 +315,10 @@ int main(void)
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
+    /* ВАЖНО: весь пользовательский код цикла - только внутри USER CODE, иначе CubeMX удалит его при
+     * перегенерации (так пропадал watchdog_service() и сторожевой таймер перезапускал прошивку). */
+    watchdog_service();
+    Diag_Flush();                       /* сообщения, отложенные из прерываний (см. diag.h) */
     Button_K1_Process();
     USB_PortLostRecover(&hUsbHostFS);   /* port silently disabled by HW -> re-enumerate */
     MIDI_USB_Process();

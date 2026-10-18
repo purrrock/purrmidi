@@ -27,7 +27,6 @@ extern "C" {
 
 typedef enum {
     SDS_OK = 0,        /* карта инициализирована и смонтирована */
-    SDS_ERR_NO_CARD,   /* датчик SD_DETECT показывает, что карты нет */
     SDS_ERR_INIT,      /* HAL_SD_Init / переключение на 4 бита не удалось */
     SDS_ERR_LINK,      /* FATFS_LinkDriver не удался (см. "Number of volumes" и MX_FATFS_Init) */
     SDS_ERR_MOUNT      /* f_mount не удался (нет файловой системы FAT/exFAT?) */
@@ -40,12 +39,16 @@ SDStorage_Result SDStorage_Mount(void);
 /** Диагностика последней попытки SDStorage_Mount(): на каком этапе и почему не получилось. */
 typedef struct {
     SDStorage_Result result;   /* итог последнего SDStorage_Mount() */
-    int      detect_level;     /* сырой уровень SD_DETECT (0/1), -1 если пин не назван SD_DETECT */
     int      hal_init;         /* результат HAL_SD_Init (HAL_OK=0, HAL_ERROR=1, ...), -1 если не вызывался */
     int      hal_wide;         /* результат HAL_SD_ConfigWideBusOperation, -1 если не вызывался */
     uint32_t hal_error;        /* hsd1.ErrorCode (маска HAL_SD_ERROR_*, 0 = нет ошибки) */
     int      link_ret;         /* результат FATFS_LinkDriver (0 = успех), -1 если не вызывался */
     int      f_mount_res;      /* FRESULT от f_mount, -1 если не вызывался */
+    /* Первая неудачная операция чтения секторов (причина FR_DISK_ERR); rd_stage == 0 - ошибок не было. */
+    int      rd_stage;         /* 1 - карта не вернулась в TRANSFER, 2 - HAL_SD_ReadBlocks_DMA отказал, 3 - таймаут/ошибка DMA */
+    uint32_t rd_sector;        /* номер сектора неудачного чтения */
+    uint32_t rd_error;         /* HAL_SD_GetError() на момент сбоя */
+    uint32_t rd_card_state;    /* HAL_SD_GetCardState() на момент сбоя */
 } SDStorage_Diag;
 
 const SDStorage_Diag *SDStorage_GetDiag(void);
@@ -63,9 +66,6 @@ void SDStorage_ListRoot(void);
 void SDStorage_Unmount(void);
 
 bool SDStorage_IsMounted(void);
-
-/** true, если карта вставлена. Если в CubeMX пин PD4 не назван SD_DETECT, всегда true. */
-bool SDStorage_CardPresent(void);
 
 #ifdef __cplusplus
 }

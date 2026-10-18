@@ -69,8 +69,6 @@ void Audio_ProcessPending(void);
 #define LCD_CS_GPIO_Port GPIOE
 #define LCD_DC_Pin GPIO_PIN_13
 #define LCD_DC_GPIO_Port GPIOE
-#define SD_DETECT_Pin GPIO_PIN_4
-#define SD_DETECT_GPIO_Port GPIOD
 
 /* USER CODE BEGIN Private defines */
 

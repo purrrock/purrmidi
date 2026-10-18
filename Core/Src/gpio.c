@@ -77,12 +77,6 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : SD_DETECT_Pin */
-  GPIO_InitStruct.Pin = SD_DETECT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(SD_DETECT_GPIO_Port, &GPIO_InitStruct);
-
 }
 
 /* USER CODE BEGIN 2 */
