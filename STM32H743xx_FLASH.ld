@@ -282,7 +282,8 @@ SECTIONS
      --------------------------------------------------------------------------------------------------------- */
 
   /* DMA buffers: DMA1/DMA2 and SDMMC1 IDMA cannot access DTCM (.data/.bss live there). D2 SRAM is the natural home
-     of DMA2 (SAI1) buffers; the MPU region of D2 is non-cacheable. */
+     of DMA2 (SAI1) buffers; the MPU region of D2 is non-cacheable.
+     НЕ для SD: SDMMC1 IDMA D2 SRAM не видит - буферы SD лежат в .sd_dma_buffer (AXI SRAM). */
   .dma_buffer (NOLOAD) : ALIGN(32)
   {
     _sdma_buffer = .;
@@ -291,6 +292,18 @@ SECTIONS
     . = ALIGN(32);
     _edma_buffer = .;
   } >RAM_D2
+
+  /* Буферы SD-карты (bounce-буфер sd_storage.c, буфер загрузчика SF2). IDMA SDMMC1 лежит в домене D1 и видит ТОЛЬКО
+     AXI SRAM (AN5200): в D2 SRAM (.dma_buffer) чтение с карты не работает (FR_DISK_ERR при f_mount). AXI SRAM
+     кэшируется, поэтому драйвер SD сам инвалидирует D-cache вокруг каждой передачи (буферы выровнены по 32 байта). */
+  .sd_dma_buffer (NOLOAD) : ALIGN(32)
+  {
+    _ssd_dma_buffer = .;
+    *(.sd_dma_buffer)
+    *(.sd_dma_buffer*)
+    . = ALIGN(32);
+    _esd_dma_buffer = .;
+  } >RAM
 
   /* Общая арена голосов звуковых движков (Engine/synth/synth_arena.cpp): одновременно звучит один движок. */
   .synth_arena (NOLOAD) : ALIGN(32)
@@ -319,6 +332,7 @@ SECTIONS
 
   /* Проверки раскладки (ошибка линковки, а не тихий сбой на плате). */
   ASSERT((_edma_buffer - _sdma_buffer) <= 64K, "ERROR: .dma_buffer is larger than 64 KB - DMA buffers must stay small")
+  ASSERT((_esd_dma_buffer - _ssd_dma_buffer) <= 64K, "ERROR: .sd_dma_buffer is larger than 64 KB")
   ASSERT(_esynth_arena - _ssynth_arena >= 144K, "ERROR: .synth_arena is smaller than SYNTH_ARENA_BYTES (synth_arena.h)")
   ASSERT(_axi_heap_end <= _eram_axi, "ERROR: AXI SRAM overflow (.synth_arena + .axi_heap do not fit)")
 

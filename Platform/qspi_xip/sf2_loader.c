@@ -14,11 +14,12 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Буфер обмена SD -> QSPI. AXI SRAM: IDMA SDMMC1 читает прямо в него (без bounce-копии). Кратен 256. */
+/* Буфер обмена SD -> QSPI. AXI SRAM (.sd_dma_buffer): IDMA SDMMC1 видит только её и читает прямо в буфер (без
+ * bounce-копии), кэш инвалидирует sd_storage.c. Кратен 256. */
 #ifndef SF2_XFER_BYTES
 #define SF2_XFER_BYTES  8192U
 #endif
-static uint8_t s_xfer[SF2_XFER_BYTES] __attribute__((section(".dma_buffer"), aligned(32)));
+static uint8_t s_xfer[SF2_XFER_BYTES] __attribute__((section(".sd_dma_buffer"), aligned(32)));
 
 static FIL            s_file;
 static bool           s_file_open;

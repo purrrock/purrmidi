@@ -31,7 +31,7 @@
 #define SD_CLOCK_DIV            4U
 #endif
 
-/* Размер bounce-буфера в секторах (16 -> 8 КБ в D2 SRAM, секция .dma_buffer). */
+/* Размер bounce-буфера в секторах (16 -> 8 КБ в AXI SRAM, секция .sd_dma_buffer). */
 #ifndef SD_BOUNCE_SECTORS
 #define SD_BOUNCE_SECTORS       16U
 #endif
@@ -47,15 +47,16 @@
 
 #define SD_SECTOR_SIZE          512U
 
-/* Прямая DMA-передача разрешена только в секцию .dma_buffer (D2 SRAM, Normal non-cacheable в MPU): IDMA SDMMC1 её
- * видит, а кэш D-cache с ней не связан. AXI SRAM кэшируется (write-back): запись IDMA в неё без чистки/инвалидации
- * кэша испортила бы данные, поэтому всё остальное идёт через bounce-буфер. Границы задаёт линкер-скрипт. */
-extern uint8_t _sdma_buffer[], _edma_buffer[];
+/* IDMA SDMMC1 находится в домене D1 и видит ТОЛЬКО AXI SRAM (ST AN5200). D2 SRAM (.dma_buffer), DTCM и SRAM4 для
+ * него недоступны: чтение оттуда даёт зависшую передачу/мусор, и f_mount падает с FR_DISK_ERR. Поэтому и bounce-буфер,
+ * и прямые буферы обязаны лежать в AXI SRAM. */
+#define DMA_RAM_BASE            0x24000000UL
+#define DMA_RAM_SIZE            (512UL * 1024UL)
 
 /* ------------------------------ состояние ---------------------------------- */
 
 static uint8_t s_bounce[SD_BOUNCE_SECTORS * SD_SECTOR_SIZE]
-    __attribute__((section(".dma_buffer"), aligned(32)));
+    __attribute__((section(".sd_dma_buffer"), aligned(32)));
 
 static FATFS s_fs;
 static char  s_path[4];                 /* заполняет FATFS_LinkDriver: "0:/" */
@@ -78,18 +79,16 @@ static inline bool dcache_enabled(void)
     return (SCB->CCR & SCB_CCR_DC_Msk) != 0U;
 }
 
-/* Буфер можно отдавать IDMA напрямую: он целиком лежит в .dma_buffer (D2 SRAM) и выровнен.
- * 4 байта нужно самому IDMA; при включённом D-cache требуем 32 байта (строка кэша) - запас на случай, если секцию
- * когда-нибудь сделают кэшируемой. */
+/* Буфер можно отдавать IDMA напрямую: он целиком лежит в AXI SRAM и выровнен.
+ * 4 байта нужно самому IDMA; при включённом D-cache требуем 32 байта (строка кэша): AXI SRAM кэшируется write-back,
+ * а размер передачи (кратный 512 байтам) тогда тоже кратен строке, так что инвалидация не заденет соседние данные. */
 static bool buffer_is_dma_safe(const void *p, uint32_t bytes)
 {
     uint32_t a = (uint32_t)(uintptr_t)p;
     uint32_t align_mask = dcache_enabled() ? 31U : 3U;
 
     if ((a & align_mask) != 0U) return false;
-    const uint32_t lo = (uint32_t)(uintptr_t)_sdma_buffer;
-    const uint32_t hi = (uint32_t)(uintptr_t)_edma_buffer;
-    if (a < lo || (a + bytes) > hi) return false;
+    if (a < DMA_RAM_BASE || (a + bytes) > (DMA_RAM_BASE + DMA_RAM_SIZE)) return false;
     return true;
 }
 
@@ -128,6 +127,10 @@ static int wait_xfer_done(uint32_t timeout_ms)
 static int xfer_read(uint8_t *buf, uint32_t sector, uint32_t n)
 {
     if (wait_card_ready(SD_READ_TIMEOUT_MS) != 0) { note_read_fail(1, sector); return -1; }
+    /* AXI SRAM кэшируется (write-back): грязные строки буфера не должны вытесниться поверх данных IDMA. */
+    if (dcache_enabled()) {
+        SCB_InvalidateDCache_by_Addr((uint32_t *)buf, (int32_t)(n * SD_SECTOR_SIZE));
+    }
     s_xfer_state = 0;
     if (HAL_SD_ReadBlocks_DMA(&hsd1, buf, sector, n) != HAL_OK) { note_read_fail(2, sector); return -1; }
     if (wait_xfer_done(SD_READ_TIMEOUT_MS) != 0) { note_read_fail(3, sector); return -1; }

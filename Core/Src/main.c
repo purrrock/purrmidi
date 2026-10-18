@@ -91,11 +91,13 @@ static uint16_t active_note_count = 0;
  * without a cache (several wait states per fetch). */
 #define ENABLE_ICACHE 1
 
-/* 1 = time every audio block render with the DWT cycle counter and report it on the UART:
+/* 1 = periodically print render-time statistics on the UART:
  *   [AUDIO] soundfont: fill max=NNN us (NN% of 2666 us budget) ...
+ * Off by default: the log stays quiet. The timing itself is always measured, and a real overrun
+ * (render longer than its budget) is still reported once via "[AUDIO] RENDER OVERRUN" below.
  * A render that takes longer than its budget (one DMA half-buffer) starves the main loop
  * (USB, MIDI, display): the render runs in PendSV, which preempts the main loop. */
-#define AUDIO_DIAG_UART 1
+#define AUDIO_DIAG_UART 0
 
 static volatile uint32_t audio_cyc_max = 0;      /* longest fill so far (CPU cycles) */
 static volatile uint32_t audio_cyc_last = 0;

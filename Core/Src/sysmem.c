@@ -36,8 +36,8 @@ static uint8_t *__sbrk_heap_end = NULL;
  *
  * @verbatim
  * DTCM:     #  .data  #  .bss  #  (small spare)  #  MSP stack  #
- * AXI SRAM: #  .synth_arena (voices of the active engine)  #  .axi_heap  <- newlib heap grows here  #
- * D2 SRAM:  #  .dma_buffer (SAI ring, SD bounce buffer, SF2 loader buffer)  #
+ * AXI SRAM: #  .sd_dma_buffer (SD bounce + SF2 loader buffer)  #  .synth_arena (voices of the active engine)  #  .axi_heap  <- newlib heap grows here  #
+ * D2 SRAM:  #  .dma_buffer (SAI ring, display canvas)  #
  * @endverbatim
  *
  * The heap starts at '_axi_heap_start' and ends at '_axi_heap_end' (the size is set by

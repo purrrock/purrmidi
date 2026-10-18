@@ -38,14 +38,14 @@ void XipMpu_Config(void)
                MPU_INSTRUCTION_ACCESS_DISABLE, MPU_REGION_DISABLE);
 
     /* AXI SRAM: Normal, WRITE-BACK + write-allocate (TEX=001, C=1, B=1). Здесь только данные, которые читает и пишет
-     * CPU: арена голосов движков (.synth_arena) и куча malloc (.axi_heap, метаданные TinySoundFont и т.п.). DMA в эту
-     * область НЕ работает (см. D2 ниже), поэтому операции с кэшем не нужны, а доступ к линиям задержки физических
-     * моделей идёт через D-cache. Любой новый DMA-буфер обязан лежать в .dma_buffer (D2). */
+     * CPU: арена голосов движков (.synth_arena) и куча malloc (.axi_heap, метаданные TinySoundFont и т.п.). Кроме буферов SD (.sd_dma_buffer): IDMA SDMMC1 видит
+     * только AXI SRAM, поэтому sd_storage.c инвалидирует D-cache вокруг каждой передачи. Буферы DMA1/DMA2 лежат в
+     * .dma_buffer (D2 ниже), а не здесь. */
     set_region(MPU_REGION_NUMBER2, 0x24000000UL, MPU_REGION_SIZE_512KB, MPU_REGION_FULL_ACCESS,
                MPU_TEX_LEVEL1, MPU_ACCESS_CACHEABLE, MPU_ACCESS_BUFFERABLE,
                MPU_INSTRUCTION_ACCESS_ENABLE, MPU_REGION_ENABLE);
 
-    /* D2 SRAM (.dma_buffer: кольцо SAI1, bounce-буфер SD, буфер загрузчика): Normal NON-cacheable (TEX=001, C=0, B=0).
+    /* D2 SRAM (.dma_buffer: кольцо SAI1, холст дисплея; SD здесь НЕ работает): Normal NON-cacheable (TEX=001, C=0, B=0).
      * DMA и CPU видят одни и те же данные без чистки/инвалидации кэша. */
     set_region(MPU_REGION_NUMBER3, 0x30000000UL, MPU_REGION_SIZE_512KB, MPU_REGION_FULL_ACCESS,
                MPU_TEX_LEVEL1, MPU_ACCESS_NOT_CACHEABLE, MPU_ACCESS_NOT_BUFFERABLE,
