@@ -1,11 +1,30 @@
 #include "usb_port_recover.h"
 #include "usbh_conf.h"
 
-static uint32_t s_recover_cnt = 0U;
+/* Пауза между остановкой порта и повторной перечислением устройства. Раньше здесь был
+ * HAL_Delay(300), который блокировал главный цикл (приём MIDI, дисплей, кнопки) на 300 мс.
+ * Теперь пауза неблокирующая: главный цикл лишь не вызывает стек USB Host, пока она идёт. */
+#define USB_RECOVER_HOLD_MS 300U
+
+static uint32_t s_recover_cnt   = 0U;
+static uint32_t s_hold_start_ms = 0U;
+static uint8_t  s_hold_active   = 0U;
 
 uint32_t USB_PortLostRecoverCount(void)
 {
   return s_recover_cnt;
+}
+
+uint8_t USB_PortLostRecoverPending(void)
+{
+  if (s_hold_active != 0U)
+  {
+    if ((HAL_GetTick() - s_hold_start_ms) >= USB_RECOVER_HOLD_MS)
+    {
+      s_hold_active = 0U;   /* пауза закончилась: стек USB снова можно обслуживать */
+    }
+  }
+  return s_hold_active;
 }
 
 /*
@@ -56,6 +75,8 @@ void USB_PortLostRecover(USBH_HandleTypeDef *phost)
   phost->device.is_disconnected = 1U;
   (void)USBH_Stop(phost);   /* stop HCD, halt stuck channels, free control pipes */
 
-  /* give the device time to finish its own re-attach before the next port reset */
-  HAL_Delay(300U);
+  /* Даём устройству время завершить собственное переподключение перед следующим сбросом порта.
+   * Ждём без блокировки: см. USB_PortLostRecoverPending(). */
+  s_hold_start_ms = HAL_GetTick();
+  s_hold_active   = 1U;
 }

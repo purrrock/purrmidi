@@ -49,6 +49,9 @@
 #include "sf2_loader.h"
 #include "audio_halves.h"
 #include "watchdog.h"
+
+/* Статистика кучи malloc (Core/Src/sysmem.c) */
+void Sysmem_GetHeapStats(uint32_t *used_bytes, uint32_t *total_bytes);
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -274,6 +277,17 @@ int main(void)
     printf("[SF2] SoundFont NOT available - the soundfont engine will be skipped\r\n");
   }
   Watchdog_Kick();
+  {
+    /* Куча занята в основном метаданными SoundFont. Сообщаем только если запас мал (<20%):
+     * нормальная работа UART не засоряет. */
+    uint32_t heap_used = 0U, heap_total = 0U;
+    Sysmem_GetHeapStats(&heap_used, &heap_total);
+    if (heap_total != 0U && heap_used > heap_total - heap_total / 5U)
+    {
+      printf("[MEM] WARNING: heap %lu of %lu KB used (SoundFont metadata); raise _Axi_Heap_Size\r\n",
+             (unsigned long)(heap_used / 1024U), (unsigned long)(heap_total / 1024U));
+    }
+  }
   // Запуск круговой передачи DMA на ЦАП PCM5102A для SAI1_A
   memset(audio_buffer, 0, sizeof(audio_buffer));  /* silence from the very first DMA cycle (also after a soft reset) */
   AudioHalves_Init(&audio_halves);
@@ -300,7 +314,10 @@ int main(void)
     /* USER CODE END WHILE */
     watchdog_service();
     Diag_Flush();                       /* сообщения, отложенные из прерываний (см. diag.h) */
-    MX_USB_HOST_Process();
+    if (!USB_PortLostRecoverPending())  /* пока идёт пауза после сбоя порта, стек USB не трогаем */
+    {
+      MX_USB_HOST_Process();
+    }
 
     /* USER CODE BEGIN 3 */
     Button_K1_Process();
@@ -342,9 +359,7 @@ int main(void)
 
             if (pc_next_seen && (pc_now - pc_next_tick) < PC_NEXT_REPEAT_GUARD_MS)
             {
-                printf("[PC] ch=%u program 127 repeat ignored (+%lu ms)\r\n",
-                       event.status & 0x0FU, (unsigned long)(pc_now - pc_next_tick));
-                continue;
+                continue;   /* повтор игнорируем молча */
             }
             pc_next_seen = true;
             pc_next_tick = pc_now;

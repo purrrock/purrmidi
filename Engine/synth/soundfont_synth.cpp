@@ -480,6 +480,17 @@ void SoundFontSynth_ReportStats(uint32_t now_ms)
     const uint32_t blocks = g_diag.blocks;
     const uint32_t us = diag_cycles_per_us();
     const uint32_t dropped = g_input.Dropped();
+
+    /* Печатаем только при проблемах: превышен бюджет блока, не хватило голосов, перегрузка
+     * микса выше полной шкалы или потеряны события в FIFO. Иначе окно просто сбрасывается. */
+    const bool problem = g_diag.over_budget != 0U || g_diag.voice_shortfall != 0U ||
+                         g_diag.over_fs_samples != 0U || dropped != g_diag_fifo_dropped_seen;
+    if (!problem) {
+        const uint32_t keep = g_diag.regions_max;
+        SoundFontSynth_ResetStats();
+        g_diag.regions_max = keep;
+        return;
+    }
     const unsigned long avg_us = (unsigned long)((g_diag.cycles_sum / blocks) / us);
     const unsigned long max_us = (unsigned long)(g_diag.cycles_max / us);
 

@@ -32,6 +32,10 @@
 
 extern SPI_HandleTypeDef hspi4;
 
+/* 1 = поле canvas уходит на панель через DMA (SPI4_TX, DMA1_Stream0), процессор не ждёт ~5,5 мс на поле.
+ * 0 = прежний блокирующий вывод построчно (для отладки). */
+#define DISPLAY_USE_DMA 1
+
 static ST7735_Object_t st7735;
 static ST7735_Ctx_t st7735_ctx;
 static bool display_ready = false;   /* true только после успешной инициализации */
@@ -165,12 +169,56 @@ static int32_t Display_GetTick(void)
     return (int32_t)HAL_GetTick();
 }
 
+/* Признак «DMA-передача поля ещё идёт». Сбрасывается в HAL_SPI_TxCpltCallback()/HAL_SPI_ErrorCallback()
+ * (прерывание SPI4) - там же снимается CS. */
+static volatile bool lcd_dma_busy = false;
+
+/* Ждёт окончания DMA-передачи. Любое обращение к шине SPI4 (команды, блокирующая заливка) должно
+ * сначала вызвать эту функцию: пока DMA занимает SPI, HAL_SPI_Transmit() вернёт HAL_BUSY.
+ * Кадр занимает ~5,5 мс; при зависании (>50 мс) передача принудительно прерывается. */
+static void Display_WaitIdle(void)
+{
+    if (!lcd_dma_busy) { return; }
+
+    const uint32_t t0 = HAL_GetTick();
+    while (lcd_dma_busy)
+    {
+        if ((HAL_GetTick() - t0) > 50U)
+        {
+            (void)HAL_SPI_Abort(&hspi4);
+            HAL_GPIO_WritePin(LCD_CS_PORT, LCD_CS_PIN, GPIO_PIN_SET);
+            lcd_dma_busy = false;
+            break;
+        }
+    }
+}
+
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+    if (hspi->Instance == SPI4)
+    {
+        HAL_GPIO_WritePin(LCD_CS_PORT, LCD_CS_PIN, GPIO_PIN_SET);
+        lcd_dma_busy = false;
+    }
+}
+
+void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
+{
+    if (hspi->Instance == SPI4)
+    {
+        HAL_GPIO_WritePin(LCD_CS_PORT, LCD_CS_PIN, GPIO_PIN_SET);
+        lcd_dma_busy = false;
+    }
+}
+
 static int32_t Display_WriteReg(
     uint8_t reg,
     uint8_t *data,
     uint32_t length)
 {
     int32_t result;
+
+    Display_WaitIdle();
 
     HAL_GPIO_WritePin(LCD_CS_PORT, LCD_CS_PIN, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(LCD_DC_PORT, LCD_DC_PIN, GPIO_PIN_RESET);
@@ -194,6 +242,7 @@ static int32_t Display_SendData(
 {
     int32_t result;
 
+    Display_WaitIdle();
     HAL_GPIO_WritePin(LCD_CS_PORT, LCD_CS_PIN, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(LCD_DC_PORT, LCD_DC_PIN, GPIO_PIN_SET);
 
@@ -224,7 +273,9 @@ static ST7735_IO_t st7735_io =
 #define CANVAS_MAX_W   DISPLAY_WIDTH
 #define CANVAS_MAX_H   32U
 
-static uint16_t canvas[CANVAS_MAX_W * CANVAS_MAX_H];
+/* Буфер лежит в D2 SRAM (секция .dma_buffer, Non-cacheable по MPU): DMA1 не видит DTCM, а в D2 не нужна
+ * очистка/инвалидация D-cache. 160x32x2 = 10 240 байт. */
+static uint16_t canvas[CANVAS_MAX_W * CANVAS_MAX_H] __attribute__((section(".dma_buffer"), aligned(32)));
 static uint16_t canvas_w;
 static uint16_t canvas_h;
 
@@ -241,6 +292,7 @@ static inline uint16_t Swap16(uint16_t c)
 
 static void Canvas_Begin(uint16_t w, uint16_t h, uint16_t bg)
 {
+    Display_WaitIdle();   /* буфер ещё может уходить на панель по DMA */
     canvas_w = w;
     canvas_h = h;
 
@@ -315,6 +367,28 @@ static int Canvas_Text(int x, int y, const char *text, uint8_t size, uint8_t sca
 static void Canvas_Flush(uint16_t x, uint16_t y)
 {
     if (!display_ready) { return; }
+
+#if DISPLAY_USE_DMA
+    /* Окно панели при инициализации задано на весь экран, поэтому при ширине поля = ширине экрана достаточно
+     * один раз поставить курсор в начало поля: дальше строки заполняются подряд, и весь буфер уходит одним
+     * DMA-запросом. Остальные случаи (и сбой запуска DMA) - прежним блокирующим путём. */
+    if (x == 0U && canvas_w == DISPLAY_WIDTH)
+    {
+        Display_WaitIdle();
+        if (ST7735_SetCursor(&st7735, x, y) == ST7735_OK)
+        {
+            HAL_GPIO_WritePin(LCD_CS_PORT, LCD_CS_PIN, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(LCD_DC_PORT, LCD_DC_PIN, GPIO_PIN_SET);
+            lcd_dma_busy = true;
+            if (HAL_SPI_Transmit_DMA(&hspi4, (uint8_t *)canvas, (uint16_t)(canvas_w * canvas_h * 2U)) == HAL_OK)
+            {
+                return;   /* CS снимет HAL_SPI_TxCpltCallback() */
+            }
+            lcd_dma_busy = false;
+            HAL_GPIO_WritePin(LCD_CS_PORT, LCD_CS_PIN, GPIO_PIN_SET);
+        }
+    }
+#endif
 
     ST7735_FillRGBRect(&st7735, x, y, (uint8_t *)canvas, canvas_w, canvas_h);
 }
@@ -689,9 +763,9 @@ void Display_Task(void)
         Display_ShowError(DISPLAY_ERR_USB_ENUM);
     }
 
-    if (ui.dirty == 0U || (now - ui.last_draw_tick) < MIN_DRAW_INTERVAL_MS)
+    if (ui.dirty == 0U || (now - ui.last_draw_tick) < MIN_DRAW_INTERVAL_MS || lcd_dma_busy)
     {
-        return;
+        return;   /* нечего рисовать, рано или предыдущее поле ещё уходит по DMA */
     }
 
     /* Не больше одного поля за вызов, чтобы не задерживать USB/MIDI */

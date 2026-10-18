@@ -142,11 +142,13 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
 
 		MIDI_Handle->state = MIDI_IDLE_STATE;
 
-		printf("[USBEP] MIDI IN ep=0x%02X size=%u type=%u interval=%u\r\n",
-		       MIDI_Handle->InEp,
-		       MIDI_Handle->InEpSize,
-		       MIDI_Handle->InEpType,
-		       MIDI_Handle->InEpInterval);
+		/* Параметры конечной точки выводятся только в отладочном режиме стека USB (USBH_DbgLog):
+		 * в обычной работе UART молчит, пока нет ошибок. */
+		USBH_DbgLog("MIDI IN ep=0x%02X size=%u type=%u interval=%u",
+		            MIDI_Handle->InEp,
+		            MIDI_Handle->InEpSize,
+		            MIDI_Handle->InEpType,
+		            MIDI_Handle->InEpInterval);
 
 		status = USBH_OK;
 	}

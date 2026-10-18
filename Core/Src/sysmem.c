@@ -74,6 +74,27 @@ void *_sbrk(ptrdiff_t incr)
   return (void *)prev_heap_end;
 }
 
+/**
+ * @brief Статистика кучи malloc (.axi_heap): сколько реально выдал _sbrk() и сколько всего зарезервировано.
+ *        В отчёте компоновщика (Memory region) куча учитывается целиком (320 КБ) независимо от
+ *        использования, поэтому «% RAM» там - это резерв, а не реальная нагрузка. Реальное
+ *        потребление видно здесь (newlib не возвращает память системе, так что это и есть максимум).
+ */
+void Sysmem_GetHeapStats(uint32_t *used_bytes, uint32_t *total_bytes)
+{
+  extern uint8_t _axi_heap_start;
+  extern uint8_t _axi_heap_end;
+
+  if (used_bytes != NULL)
+  {
+    *used_bytes = (__sbrk_heap_end == NULL) ? 0U : (uint32_t)(__sbrk_heap_end - &_axi_heap_start);
+  }
+  if (total_bytes != NULL)
+  {
+    *total_bytes = (uint32_t)(&_axi_heap_end - &_axi_heap_start);
+  }
+}
+
 #if defined(__PICOLIBC__)
   // Picolibc expects syscalls without the leading underscore.
   // This creates a strong alias so that
