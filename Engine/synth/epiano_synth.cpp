@@ -1,4 +1,5 @@
 #include "epiano_synth.h"
+#include "synth_common.h"
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -11,6 +12,10 @@
 #define EPIANO_NUM_VOICES       8       /* полифония */
 #endif
 
+#ifndef EPIANO_PITCH_BEND_RANGE
+#define EPIANO_PITCH_BEND_RANGE 2.0f    /* диапазон колеса высоты тона, полутонов в каждую сторону */
+#endif
+
 #ifndef EPIANO_STEREO_SPREAD
 #define EPIANO_STEREO_SPREAD    0.30f   /* ширина панорамы по клавиатуре, 0 = моно */
 #endif
@@ -19,6 +24,7 @@
 #define EPIANO_TABLE_SIZE       2048                    /* степень двойки */
 #define EPIANO_TABLE_MASK       (EPIANO_TABLE_SIZE - 1)
 #define EPIANO_EVENT_FIFO_SIZE  64                      /* степень двойки */
+#define EPIANO_NOTE_ON_FIFO_LIMIT 56                    /* слоты для Note On и непрерывных CC; остальные - под Note Off/педаль */
 #define EPIANO_BLOCK            64                      /* размер внутреннего блока рендера */
 
 #define EPIANO_MASTER_GAIN      0.40f   /* общий уровень; запас под аккорды */
@@ -94,11 +100,16 @@ float          g_attack_inc   = 0.0f;
 float          g_bark_coeff   = 0.0f;
 float          g_tine_coeff   = 0.0f;
 
-/* Lock-free SPSC FIFO: производитель — main, потребитель — аудио */
-Event                  g_fifo[EPIANO_EVENT_FIFO_SIZE];
-std::atomic<uint32_t>  g_fifo_head{0};
-std::atomic<uint32_t>  g_fifo_tail{0};
-std::atomic<uint32_t>  g_dropped{0};
+/* Очередь событий, учёт нажатий и протокол аварийного восстановления (общий компонент, см. synth_common.h):
+ * производитель — main, потребитель — аудио. Note Off и педаль/All Notes Off критичны и могут использовать весь
+ * FIFO; Note On и непрерывные CC ограничены EPIANO_NOTE_ON_FIFO_LIMIT, чтобы не вытеснить Note Off. */
+synth::NoteInput<Event, EPIANO_EVENT_FIFO_SIZE, EPIANO_NOTE_ON_FIFO_LIMIT> g_input;
+
+/* Колесо высоты тона: «последнее значение» (-8192..8191), без очереди: потеря промежуточных значений безвредна,
+ * а возврат в центр не может потеряться. Пишет main, читает аудио. */
+std::atomic<int16_t>   g_bend{0};
+int16_t                g_bend_applied = 0;      /* значение, для которого посчитан g_bend_ratio (только аудио) */
+float                  g_bend_ratio   = 1.0f;   /* множитель частоты всех голосов */
 
 /* ------------------------------------------------------------------------- */
 /*  Вспомогательные функции                                                  */
@@ -141,33 +152,6 @@ inline float soft_limit(float x)
     float t = (ax - 0.6f) * 2.5f;           /* (ax - 0.6) / 0.4 */
     float y = 0.6f + 0.4f * (t / (1.0f + t));
     return x < 0.0f ? -y : y;
-}
-
-bool fifo_push(const Event& ev)
-{
-    uint32_t head = g_fifo_head.load(std::memory_order_relaxed);
-    uint32_t tail = g_fifo_tail.load(std::memory_order_acquire);
-
-    if (head - tail >= EPIANO_EVENT_FIFO_SIZE) {
-        g_dropped.fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
-    g_fifo[head & (EPIANO_EVENT_FIFO_SIZE - 1)] = ev;
-    g_fifo_head.store(head + 1, std::memory_order_release);
-    return true;
-}
-
-bool fifo_pop(Event& ev)
-{
-    uint32_t tail = g_fifo_tail.load(std::memory_order_relaxed);
-    uint32_t head = g_fifo_head.load(std::memory_order_acquire);
-
-    if (head == tail) {
-        return false;
-    }
-    ev = g_fifo[tail & (EPIANO_EVENT_FIFO_SIZE - 1)];
-    g_fifo_tail.store(tail + 1, std::memory_order_release);
-    return true;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -323,8 +307,11 @@ void apply_cc(uint8_t control, uint8_t value)
 
 void process_events()
 {
+    /* Критичное событие (Note Off, педаль) не поместилось в FIFO: могла остаться «залипшая» нота. Гасим всё. */
+    g_input.ServiceRecovery([]() { all_notes_off(true); });
+
     Event ev;
-    while (fifo_pop(ev)) {
+    while (g_input.Pop(ev)) {
         switch (ev.type) {
             case EV_NOTE_ON:  start_voice(ev.a, ev.b); break;
             case EV_NOTE_OFF: release_note(ev.a);      break;
@@ -335,7 +322,7 @@ void process_events()
 }
 
 /* Рендер одного голоса в аккумуляторы; при полном затухании голос освобождается */
-void render_voice(Voice& v, float* acc_l, float* acc_r, uint32_t n)
+void render_voice(Voice& v, float* acc_l, float* acc_r, uint32_t n, float bend)
 {
     const bool holding_base = v.gate || g_sustain;
     const float amp_coeff   = v.kill ? g_kill_coeff
@@ -343,8 +330,8 @@ void render_voice(Voice& v, float* acc_l, float* acc_r, uint32_t n)
 
     float phase    = v.phase;
     float phase_tm = v.phase_tine_mod;
-    const float inc      = v.inc;
-    const float inc_tm   = v.inc * EPIANO_TINE_RATIO;
+    const float inc      = v.inc * bend;
+    const float inc_tm   = inc * EPIANO_TINE_RATIO;
     float level  = v.level;
     float bark   = v.bark;
     float tine_e = v.tine_env;
@@ -427,9 +414,10 @@ void EPianoSynth_Init(void)
     g_bark_coeff    = t60_to_coeff(EPIANO_BARK_T60_SEC);
     g_tine_coeff    = t60_to_coeff(EPIANO_TINE_T60_SEC);
 
-    g_fifo_head.store(0, std::memory_order_relaxed);
-    g_fifo_tail.store(0, std::memory_order_relaxed);
-    g_dropped.store(0, std::memory_order_relaxed);
+    g_input.Reset();
+    g_bend.store(0, std::memory_order_relaxed);
+    g_bend_applied = 0;
+    g_bend_ratio   = 1.0f;
 }
 
 void EPianoSynth_NoteOn(uint8_t midi_note, uint8_t velocity)
@@ -442,7 +430,7 @@ void EPianoSynth_NoteOn(uint8_t midi_note, uint8_t velocity)
         return;
     }
     Event ev = { EV_NOTE_ON, midi_note, (uint8_t)(velocity > 127 ? 127 : velocity) };
-    fifo_push(ev);
+    g_input.NoteOn(midi_note, ev);
 }
 
 void EPianoSynth_NoteOff(uint8_t midi_note)
@@ -451,7 +439,7 @@ void EPianoSynth_NoteOff(uint8_t midi_note)
         return;
     }
     Event ev = { EV_NOTE_OFF, midi_note, 0 };
-    fifo_push(ev);
+    g_input.NoteOff(midi_note, ev);
 }
 
 void EPianoSynth_ControlChange(uint8_t control, uint8_t value)
@@ -464,12 +452,28 @@ void EPianoSynth_ControlChange(uint8_t control, uint8_t value)
             return;
     }
     Event ev = { EV_CC, control, (uint8_t)(value > 127 ? 127 : value) };
-    fifo_push(ev);
+    if (control == 64 || control == 120 || control == 123) {
+        g_input.Critical(ev);       /* педаль и All Notes/Sound Off: потеря = залипшие ноты */
+    } else {
+        g_input.Soft(ev);           /* яркость, громкость, релиз: при перегрузке можно потерять */
+    }
+}
+
+void EPianoSynth_PitchBend(int16_t bend)
+{
+    g_bend.store(bend < -8192 ? (int16_t)-8192 : (bend > 8191 ? (int16_t)8191 : bend), std::memory_order_relaxed);
 }
 
 void EPianoSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
 {
     process_events();
+
+    const int16_t bend = g_bend.load(std::memory_order_relaxed);
+    if (bend != g_bend_applied) {
+        g_bend_applied = bend;
+        g_bend_ratio   = (bend == 0) ? 1.0f
+                       : exp2f((float)bend * (EPIANO_PITCH_BEND_RANGE / (12.0f * 8192.0f)));
+    }
 
     float acc_l[EPIANO_BLOCK];
     float acc_r[EPIANO_BLOCK];
@@ -488,7 +492,7 @@ void EPianoSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
 
         for (int i = 0; i < EPIANO_NUM_VOICES; i++) {
             if (g_voices[i].active) {
-                render_voice(g_voices[i], acc_l, acc_r, n);
+                render_voice(g_voices[i], acc_l, acc_r, n, g_bend_ratio);
             }
         }
 
@@ -505,7 +509,7 @@ void EPianoSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
 
 uint32_t EPianoSynth_GetDroppedEventCount(void)
 {
-    return g_dropped.load(std::memory_order_relaxed);
+    return g_input.Dropped();
 }
 
 uint32_t EPianoSynth_GetActiveVoiceCount(void)

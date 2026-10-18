@@ -16,17 +16,7 @@
 #include "sf2_loader_host.h"
 #include "soundfont_synth.h"
 #include "synth_engine.h"
-
-static int g_failures = 0;
-
-#define CHECK(cond)                                                              \
-    do {                                                                         \
-        if (!(cond)) {                                                           \
-            std::cerr << "FAIL " << __FILE__ << ":" << __LINE__ << ": " #cond    \
-                      << std::endl;                                              \
-            ++g_failures;                                                        \
-        }                                                                        \
-    } while (0)
+#include "check.h"
 
 static int get_buffer_peak(const int16_t *buf, uint32_t num_frames) {
     int peak = 0;
@@ -259,6 +249,70 @@ static void test_events_while_rendering() {
     CHECK(get_buffer_peak(buf.data(), 256) > 0);
 }
 
+// Note Off не должен теряться при переполнении FIFO (раньше ноты оставались звучать без нажатых клавиш).
+static void test_note_off_survives_fifo_overflow() {
+    SF2LoaderHost_SetPath(nullptr);
+    if (!SoundFontSynth_InitSF2()) {
+        std::cout << "[INFO] SoundFont bank not found, skipping overflow test" << std::endl;
+        return;
+    }
+    std::vector<int16_t> buffer(256 * 2, 0);
+    for (int i = 0; i < 600; ++i) SoundFontSynth_NoteOn((uint8_t)(30 + (i % 60)), 100);
+    for (int i = 0; i < 600; ++i) SoundFontSynth_NoteOff((uint8_t)(30 + (i % 60)));   // без рендера между
+    for (int i = 0; i < 100; ++i) SoundFontSynth_FillStereoBuffer(buffer.data(), 256); // ~0.5 с
+    SoundFontSynth_FillStereoBuffer(buffer.data(), 256);
+    CHECK(get_buffer_peak(buffer.data(), 256) == 0);       // тишина: ничего не залипло
+
+    SoundFontSynth_NoteOn(60, 100);                        // после восстановления звук работает
+    SoundFontSynth_FillStereoBuffer(buffer.data(), 256);
+    CHECK(get_buffer_peak(buffer.data(), 256) > 0);
+}
+
+// Колесо высоты тона реально сдвигает частоту (на ±2 полутона), а возврат в центр возвращает исходную.
+static double sf_estimate_f0(int bend, double f_expected) {
+    SoundFontSynth_Init();                                 // чистые голоса и колесо в центре
+    SoundFontSynth_PitchBend((int16_t)bend);
+    SoundFontSynth_NoteOn(57, 100);                        // A3 = 220 Гц
+    std::vector<int16_t> buf(256 * 2, 0);
+    std::vector<double> x;
+    for (int blk = 0; blk < 40; ++blk) {
+        SoundFontSynth_FillStereoBuffer(buf.data(), 256);
+        if (blk < 20) continue;                            // пропускаем атаку и выравнивание
+        for (int i = 0; i < 256; ++i) x.push_back(buf[i * 2]);
+    }
+    const size_t win = 4096;
+    const int lo = (int)(48000.0 / (f_expected * 1.3));
+    const int hi = (int)(48000.0 / (f_expected * 0.7));
+    std::vector<double> r(hi + 2, 0.0);
+    for (int lag = lo - 1; lag <= hi + 1; ++lag) {
+        double acc = 0;
+        for (size_t i = 0; i < win; ++i) acc += x[i] * x[i + lag];
+        r[lag] = acc;
+    }
+    int best = lo;
+    for (int lag = lo; lag <= hi; ++lag) if (r[lag] > r[best]) best = lag;
+    const double d = r[best - 1] - 2 * r[best] + r[best + 1];
+    const double shift = d != 0 ? 0.5 * (r[best - 1] - r[best + 1]) / d : 0.0;
+    return 48000.0 / (best + shift);
+}
+
+static void test_pitch_bend_changes_sound() {
+    SF2LoaderHost_SetPath(nullptr);
+    if (!SoundFontSynth_InitSF2()) {
+        std::cout << "[INFO] SoundFont bank not found, skipping pitch bend test" << std::endl;
+        return;
+    }
+    const double center = sf_estimate_f0(0, 220.0);
+    const double up     = sf_estimate_f0(8191, 247.0);
+    const double down   = sf_estimate_f0(-8192, 196.0);
+    const double back   = sf_estimate_f0(0, 220.0);
+    std::cout << "sf pitch bend: centre=" << center << " up=" << up << " down=" << down << " back=" << back << std::endl;
+    CHECK(std::fabs(center - 220.0) < 4.0);
+    CHECK(std::fabs(up   - 220.0 * std::pow(2.0,  2.0 / 12.0)) < 5.0);
+    CHECK(std::fabs(down - 220.0 * std::pow(2.0, -2.0 / 12.0)) < 5.0);
+    CHECK(std::fabs(back - 220.0) < 4.0);
+}
+
 int main() {
     test_engine_registration_and_pc();
     test_bank_loading_and_rendering();
@@ -266,9 +320,11 @@ int main() {
     test_missing_or_corrupt_bank_handling();
     test_sustained_notes_have_no_holes();
     test_events_while_rendering();
+    test_note_off_survives_fifo_overflow();
+    test_pitch_bend_changes_sound();
 
-    if (g_failures != 0) {
-        std::cerr << g_failures << " check(s) failed" << std::endl;
+    if (purrmidi_test::Failures() != 0) {
+        std::cerr << purrmidi_test::Failures() << " check(s) failed" << std::endl;
         return 1;
     }
     std::cout << "test_soundfont_host passed successfully." << std::endl;

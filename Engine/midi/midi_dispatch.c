@@ -36,6 +36,21 @@ void MIDI_Dispatch(const MIDI_Event_t *e)
             }
             break;
 
+        case MIDI_STATUS_PITCH_BEND:
+            /* 14 бит: data1 = младшие 7 бит, data2 = старшие 7 бит; центр = 0x2000 (8192) -> -8192..+8191 */
+            SynthEngine_PitchBend((int16_t)((((int)(e->data2 & 0x7FU) << 7) | (int)(e->data1 & 0x7FU)) - 8192));
+            break;
+
+        case MIDI_STATUS_CHANNEL_PRESSURE:
+            /* data1 = давление (Channel Aftertouch) */
+            SynthEngine_ChannelPressure(e->data1);
+            break;
+
+        case MIDI_STATUS_POLY_KEY_PRESSURE:
+            /* data1 = нота, data2 = давление (Polyphonic Aftertouch) */
+            SynthEngine_PolyPressure(e->data1, e->data2);
+            break;
+
         default:
             break;
     }

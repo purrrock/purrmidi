@@ -27,7 +27,8 @@
  * Формат аудио: 48 кГц, signed 16 бит, стерео с чередованием (L, R, L, R...).
  *
  * Контекст вызовов (контракт одинаков для всех движков):
- *   SynthEngine_Init / NoteOn / NoteOff / ControlChange / ProgramChange / Select
+ *   SynthEngine_Init / NoteOn / NoteOff / ControlChange / PitchBend / ChannelPressure / PolyPressure /
+ *   ProgramChange / Select
  *       — из основного цикла (main / MIDI-поток), только из ОДНОГО контекста;
  *   SynthEngine_FillStereoBuffer
  *       — из PendSV (STM32; DMA-прерывание только запрашивает рендер, см. Engine/audio/audio_halves.h)
@@ -81,6 +82,26 @@ void SynthEngine_NoteOff(uint8_t midi_note);
 void SynthEngine_ControlChange(uint8_t control, uint8_t value);
 
 /**
+ * Колесо высоты тона (MIDI Pitch Bend): bend = -8192..+8191, 0 - центр (значения вне диапазона ограничиваются).
+ * Последнее значение запоминается и применяется к новому движку при переключении (колесо - физический орган, оно
+ * не сбрасывается сменой тембра); SynthEngine_Panic() возвращает его в центр. Движки без поддержки значение
+ * игнорируют. Сейчас Pitch Bend обрабатывают E-Piano (±2 полутона) и SoundFont (по RPN 0, по умолчанию ±2).
+ */
+void SynthEngine_PitchBend(int16_t bend);
+
+/**
+ * Channel Pressure (монофонический Aftertouch), 0..127. Вызывает обработчик активного движка; сейчас ни один движок
+ * его не использует, и сообщение безвредно игнорируется (маршрут готов для будущих движков).
+ */
+void SynthEngine_ChannelPressure(uint8_t pressure);
+
+/**
+ * Polyphonic Key Pressure (Aftertouch по нотам): note 0..127, pressure 0..127. Как и Channel Pressure, пока ни одним
+ * движком не используется.
+ */
+void SynthEngine_PolyPressure(uint8_t midi_note, uint8_t pressure);
+
+/**
  * MIDI Program Change: выбор синтезатора по номеру программы (program % SYNTH_ENGINE_COUNT).
  * Если нужный синтезатор уже активен — ничего не происходит (звучащие ноты не обрываются).
  */
@@ -108,7 +129,8 @@ int SynthEngine_IsAvailable(SynthEngineId id);
 /**
  * «Паника»: мгновенно гасит ВСЕ звучащие ноты активного синтезатора (его состояние сбрасывается
  * как при выборе). Нужна, когда Note Off уже не придут: USB-клавиатуру выдернули при зажатых клавишах.
- * Только из основного цикла (тот же контекст, что и NoteOn/Select). Активный движок не меняется.
+ * Только из основного цикла (тот же контекст, что и NoteOn/Select). Активный движок не меняется. Колесо высоты
+ * тона возвращается в центр (после отключения клавиатуры его положение неизвестно).
  */
 void SynthEngine_Panic(void);
 

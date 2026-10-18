@@ -14,7 +14,8 @@ extern "C" {
 #endif
 
 /**
- * Маршрутизирует новое MIDI-сообщение (Note On/Off, Control Change, Program Change).
+ * Маршрутизирует новое MIDI-сообщение (Note On/Off, Control Change, Program Change, Pitch Bend,
+ * Channel Pressure, Polyphonic Key Pressure). Канал не учитывается (omni).
  * @param e Указатель на декодированное MIDI-событие.
  */
 void MIDI_Dispatch(const MIDI_Event_t *e);

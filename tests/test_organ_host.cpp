@@ -3,17 +3,7 @@
 #include <vector>
 
 #include "organ_synth.h"
-
-static int g_failures = 0;
-
-#define CHECK(cond)                                                              \
-    do {                                                                         \
-        if (!(cond)) {                                                           \
-            std::cerr << "FAIL " << __FILE__ << ":" << __LINE__ << ": " #cond    \
-                      << std::endl;                                              \
-            ++g_failures;                                                        \
-        }                                                                        \
-    } while (0)
+#include "check.h"
 
 static int render_peak(uint32_t num_frames) {
     std::vector<int16_t> buf(static_cast<size_t>(num_frames) * 2, 0);
@@ -429,8 +419,8 @@ int main() {
     test_steal_oldest_voice();
     test_retrigger_in_release_has_no_dip();
 
-    if (g_failures != 0) {
-        std::cerr << "test_organ_host: " << g_failures << " check(s) failed" << std::endl;
+    if (purrmidi_test::Failures() != 0) {
+        std::cerr << "test_organ_host: " << purrmidi_test::Failures() << " check(s) failed" << std::endl;
         return 1;
     }
     std::cout << "test_organ_host passed successfully." << std::endl;

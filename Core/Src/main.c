@@ -132,14 +132,10 @@ static void watchdog_service(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-/* Перенаправление вывода printf в UART3 */
+/* Перенаправление вывода printf в UART3 (через Diag_Write: согласовано с выводом из прерываний) */
 int _write(int file, char *ptr, int len) {
     (void)file;
-    uint32_t timeout = (uint32_t)((len * 10U) / 115U) + 20U;
-    if (HAL_UART_Transmit(&huart3, (uint8_t*)ptr, len, timeout) == HAL_OK) {
-        return len;
-    }
-    return 0;
+    return Diag_Write(ptr, len);
 }
 
 /* Обработка кнопки K1 (PC13) с неблокирующим программным дребезгом (50 ms) */
@@ -303,6 +299,7 @@ int main(void)
   {
     /* USER CODE END WHILE */
     watchdog_service();
+    Diag_Flush();                       /* сообщения, отложенные из прерываний (см. diag.h) */
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
@@ -762,6 +759,7 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
+  Diag_EnterPanic();
   Diag_Puts("\n*** Error_Handler() called, LR=");
   Diag_PutHex((uint32_t)__builtin_return_address(0));
   Diag_Puts(" ***\n");

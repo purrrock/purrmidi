@@ -56,6 +56,12 @@ void SoundFontSynth_ControlChange(uint8_t control, uint8_t value);
 void SoundFontSynth_ProgramChange(uint8_t program);
 
 /**
+ * Колесо высоты тона: bend = -8192..+8191 (0 - центр). Диапазон задаётся RPN 0 (по умолчанию ±2 полутона).
+ * Хранится как «последнее значение» (без очереди), поэтому возврат в центр не теряется при перегрузке.
+ */
+void SoundFontSynth_PitchBend(int16_t bend);
+
+/**
  * Заполнение стереобуфера 48 кГц 16-бит PCM аудио.
  * Неблокирующий вызов для аудио-прерывания или аудио-потока.
  */

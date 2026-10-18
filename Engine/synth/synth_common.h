@@ -61,8 +61,9 @@ inline float MidiFreq(uint8_t note)
  *
  *  Event       - структура события движка (копируется в FIFO целиком).
  *  kSize       - ёмкость FIFO (степень двойки).
- *  kNoteOnLimit - сколько слотов доступно обычным Note On; остальные зарезервированы под критичные события
- *                 (Note Off, педаль CC64), чтобы лавина нот не вытеснила их и не оставила «залипших» нот.
+ *  kNoteOnLimit - сколько слотов доступно обычным событиям (Note On, Soft); остальные зарезервированы под критичные
+ *                 (Note Off, педаль CC64, All Notes Off), чтобы лавина нот не вытеснила их и не оставила «залипших»
+ *                 нот.
  *
  * Протокол восстановления (если критичное событие всё же не поместилось - FIFO заполнено на 100%):
  *   1. производитель выставляет состояние REQUESTED;
@@ -128,7 +129,25 @@ public:
         active_producer_ops_.fetch_sub(1, std::memory_order_seq_cst);
     }
 
-    /** Поставить иное критичное событие (педаль CC64) без учёта нажатий. */
+    /**
+     * Поставить некритичное событие (непрерывный контроллер, Program Change): оно занимает только «обычную» часть
+     * FIFO (kNoteOnLimit), как Note On, и при нехватке места просто отбрасывается (счётчик Dropped). Восстановление
+     * оно никогда не запускает и резерв под Note Off не расходует. Возвращает true, если событие принято.
+     */
+    bool Soft(const Event &ev)
+    {
+        active_producer_ops_.fetch_add(1, std::memory_order_seq_cst);
+        if (recovery_state_.load(std::memory_order_seq_cst) != kRecoveryNormal) {
+            active_producer_ops_.fetch_sub(1, std::memory_order_seq_cst);
+            dropped_note_on_.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        const bool queued = PushNoteOn(ev);
+        active_producer_ops_.fetch_sub(1, std::memory_order_seq_cst);
+        return queued;
+    }
+
+    /** Поставить иное критичное событие (педаль CC64, All Notes Off) без учёта нажатий. */
     void Critical(const Event &ev)
     {
         active_producer_ops_.fetch_add(1, std::memory_order_seq_cst);
@@ -203,7 +222,7 @@ public:
         dropped_note_on_.store(0, std::memory_order_relaxed);
     }
 
-    /** Сколько Note On отброшено (очередь переполнена или шло восстановление). */
+    /** Сколько некритичных событий (Note On, Soft) отброшено: очередь переполнена или шло восстановление. */
     uint32_t Dropped() const { return dropped_note_on_.load(std::memory_order_relaxed); }
 
     /** Для тестов: состояние протокола восстановления (0 - норма). */

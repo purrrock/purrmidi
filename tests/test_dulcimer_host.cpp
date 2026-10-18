@@ -5,15 +5,8 @@
 #include <atomic>
 #include <thread>
 #include "dulcimer_synth.h"
-
-// Custom assertion macro that remains active regardless of NDEBUG
-#define TEST_ASSERT(cond) \
-    do { \
-        if (!(cond)) { \
-            std::cerr << "TEST FAILURE: " << #cond << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
-            std::exit(1); \
-        } \
-    } while (0)
+#define PURRMIDI_CHECK_FAIL_FAST   // линейный тест: после первой ошибки продолжать бессмысленно
+#include "check.h"
 
 void test_case_1_note_on_signal() {
     DulcimerSynth_Init();
@@ -29,7 +22,7 @@ void test_case_1_note_on_signal() {
             break;
         }
     }
-    TEST_ASSERT(non_zero);
+    CHECK(non_zero);
     std::cout << "[PASS] Test 1: Note On produces non-zero signal.\n";
 }
 
@@ -57,7 +50,7 @@ void test_case_2_note_off_decay() {
     for (int16_t s : buf) {
         if (std::abs(s) > max_peak) max_peak = std::abs(s);
     }
-    TEST_ASSERT(max_peak < 100);
+    CHECK(max_peak < 100);
     std::cout << "[PASS] Test 2: Note Off leads to natural decay.\n";
 }
 
@@ -75,7 +68,7 @@ void test_case_3_repeated_note_on_off() {
         for (int16_t s : buf) {
             if (std::abs(s) > 100) active_signal = true;
         }
-        TEST_ASSERT(active_signal);
+        CHECK(active_signal);
 
         DulcimerSynth_NoteOff(60);
         for (int i = 0; i < 48000 / 128; ++i) {
@@ -113,7 +106,7 @@ void test_case_4_voice_stealing_isolation() {
             if (std::abs(s) > 100) note_64_still_active = true;
         }
     }
-    TEST_ASSERT(note_64_still_active);
+    CHECK(note_64_still_active);
 
     // 4. Send Note Off for note 64. NOW note 64 must decay cleanly!
     DulcimerSynth_NoteOff(64);
@@ -130,7 +123,7 @@ void test_case_4_voice_stealing_isolation() {
     for (int16_t s : buf) {
         if (std::abs(s) > max_peak) max_peak = std::abs(s);
     }
-    TEST_ASSERT(max_peak < 100);
+    CHECK(max_peak < 100);
     std::cout << "[PASS] Test 4: Voice stealing cleans up state and isolates Note Off events.\n";
 }
 
@@ -149,7 +142,7 @@ void test_case_5_polyphony_and_voice_reuse() {
     for (int16_t s : buf) {
         if (std::abs(s) > chord_peak) chord_peak = std::abs(s);
     }
-    TEST_ASSERT(chord_peak > 500);
+    CHECK(chord_peak > 500);
 
     // Release C4 (60)
     DulcimerSynth_NoteOff(60);
@@ -163,7 +156,7 @@ void test_case_5_polyphony_and_voice_reuse() {
     for (int16_t s : buf) {
         if (std::abs(s) > new_peak) new_peak = std::abs(s);
     }
-    TEST_ASSERT(new_peak > 500);
+    CHECK(new_peak > 500);
     std::cout << "[PASS] Test 5: Polyphony and voice reuse operating correctly.\n";
 }
 
@@ -186,7 +179,7 @@ void test_case_6_sustain_pedal() {
             if (std::abs(s) > 100) sustained_sound = true;
         }
     }
-    TEST_ASSERT(sustained_sound);
+    CHECK(sustained_sound);
 
     // Release sustain pedal (CC64 = 0) -> note must now decay!
     DulcimerSynth_ControlChange(64, 0);
@@ -199,7 +192,7 @@ void test_case_6_sustain_pedal() {
     for (int16_t s : buf) {
         if (std::abs(s) > max_peak) max_peak = std::abs(s);
     }
-    TEST_ASSERT(max_peak < 100);
+    CHECK(max_peak < 100);
     std::cout << "[PASS] Test 6: Sustain pedal holds and releases notes correctly.\n";
 }
 
@@ -228,7 +221,7 @@ void test_case_7_fifo_overflow_recovery() {
     for (int16_t s : buf) {
         if (std::abs(s) > max_peak) max_peak = std::abs(s);
     }
-    TEST_ASSERT(max_peak < 100);
+    CHECK(max_peak < 100);
 
     // Verify synth functions normally after recovery
     DulcimerSynth_NoteOn(72, 100);
@@ -237,7 +230,7 @@ void test_case_7_fifo_overflow_recovery() {
     for (int16_t s : buf) {
         if (std::abs(s) > 100) post_rec_sound = true;
     }
-    TEST_ASSERT(post_rec_sound);
+    CHECK(post_rec_sound);
     std::cout << "[PASS] Test 7: FIFO overflow recovery operates safely without stuck notes.\n";
 }
 
@@ -254,7 +247,7 @@ void test_case_8_reinitialization() {
     // Audio buffer must immediately render total silence after re-init
     DulcimerSynth_FillStereoBuffer(buf.data(), 128);
     for (int16_t s : buf) {
-        TEST_ASSERT(s == 0);
+        CHECK(s == 0);
     }
     std::cout << "[PASS] Test 8: DulcimerSynth_Init resets state and renders silence.\n";
 }
@@ -273,7 +266,7 @@ void test_case_9_invalid_inputs() {
 
     // Must not crash or play invalid note
     for (int16_t s : buf) {
-        TEST_ASSERT(s == 0);
+        CHECK(s == 0);
     }
     std::cout << "[PASS] Test 9: Invalid MIDI inputs handled safely.\n";
 }
@@ -313,7 +306,7 @@ void test_case_10_concurrent_producers() {
     for (int16_t s : buf) {
         if (std::abs(s) > max_peak) max_peak = std::abs(s);
     }
-    TEST_ASSERT(max_peak < 100);
+    CHECK(max_peak < 100);
     std::cout << "[PASS] Test 10: Multi-producer concurrent operation is thread-safe.\n";
 }
 

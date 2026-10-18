@@ -13,15 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <vector>
-
-static int g_failures = 0;
-#define CHECK(cond)                                                                      \
-    do {                                                                                 \
-        if (!(cond)) {                                                                   \
-            std::fprintf(stderr, "CHECK failed %s:%d: %s\n", __FILE__, __LINE__, #cond); \
-            ++g_failures;                                                                \
-        }                                                                                \
-    } while (0)
+#include "check.h"
 
 static uint64_t fnv(uint64_t h, const int16_t *p, size_t n)
 {
@@ -89,7 +81,7 @@ int main(int argc, char **argv)
     }
 
     if (hash_mode) std::printf("hash=%016llx peak=%d\n", (unsigned long long)h, peak);
-    if (g_failures) { std::fprintf(stderr, "%d check(s) FAILED\n", g_failures); return 1; }
+    if (purrmidi_test::Failures()) { std::fprintf(stderr, "%d check(s) FAILED\n", purrmidi_test::Failures()); return 1; }
     std::puts("test_sf2_xip_host: all checks passed");
     return 0;
 }

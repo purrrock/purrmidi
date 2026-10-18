@@ -5,17 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <algorithm>
-
-static int g_failures = 0;
-
-#define CHECK(cond)                                                              \
-    do {                                                                         \
-        if (!(cond)) {                                                           \
-            std::cerr << "FAIL " << __FILE__ << ":" << __LINE__ << ": " #cond    \
-                      << std::endl;                                              \
-            ++g_failures;                                                        \
-        }                                                                        \
-    } while (0)
+#include "check.h"
 
 static int calculate_peak(const std::vector<int16_t> &buf) {
     int max_val = 0;
@@ -269,8 +259,8 @@ int main() {
         std::cout << "[PASS] Test 9: SynthEngine integration and switching verified." << std::endl;
     }
 
-    if (g_failures != 0) {
-        std::cerr << "test_saxophone_host: " << g_failures << " check(s) failed" << std::endl;
+    if (purrmidi_test::Failures() != 0) {
+        std::cerr << "test_saxophone_host: " << purrmidi_test::Failures() << " check(s) failed" << std::endl;
         return 1;
     }
     std::cout << "All SaxophoneSynth host tests passed successfully." << std::endl;

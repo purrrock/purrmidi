@@ -16,17 +16,7 @@
 #include "saxophone_synth.h"
 #include "lead_synth.h"
 #include "pluck_synth.h"
-
-static int g_failures = 0;
-
-#define CHECK(cond)                                                              \
-    do {                                                                         \
-        if (!(cond)) {                                                           \
-            std::cerr << "FAIL " << __FILE__ << ":" << __LINE__ << ": " #cond    \
-                      << std::endl;                                              \
-            ++g_failures;                                                        \
-        }                                                                        \
-    } while (0)
+#include "check.h"
 
 static void send_pc(uint8_t program, uint8_t channel = 0) {
     MIDI_Event_t e = {static_cast<uint8_t>(MIDI_STATUS_PROGRAM_CHANGE | channel), program, 0};
@@ -417,8 +407,8 @@ int main() {
     test_switch_while_audio_running();
     test_master_volume_cc7();
 
-    if (g_failures != 0) {
-        std::cerr << "test_synth_switch: " << g_failures << " check(s) failed" << std::endl;
+    if (purrmidi_test::Failures() != 0) {
+        std::cerr << "test_synth_switch: " << purrmidi_test::Failures() << " check(s) failed" << std::endl;
         return 1;
     }
     std::cout << "test_synth_switch passed successfully." << std::endl;

@@ -78,7 +78,18 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "PURRMIDI_BUILD_APP": "OFF",
-                "PURRMIDI_BUILD_TESTS": "ON"
+                "PURRMIDI_BUILD_TESTS": "ON",
+                "PURRMIDI_WERROR": "ON"
+            }
+        },
+        {
+            "name": "host-tests-asan",
+            "inherits": "host-tests",
+            "description": "Host tests under AddressSanitizer + UndefinedBehaviorSanitizer",
+            "cacheVariables": {
+                "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer",
+                "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer",
+                "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
             }
         }
     ],
@@ -106,12 +117,23 @@
         {
             "name": "host-tests",
             "configurePreset": "host-tests"
+        },
+        {
+            "name": "host-tests-asan",
+            "configurePreset": "host-tests-asan"
         }
     ],
     "testPresets": [
         {
             "name": "host-tests",
             "configurePreset": "host-tests",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "host-tests-asan",
+            "configurePreset": "host-tests-asan",
             "output": {
                 "outputOnFailure": true
             }

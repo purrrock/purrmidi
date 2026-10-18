@@ -6,9 +6,8 @@
 #include <iostream>
 #include <vector>
 #include "epiano_synth.h"
-
-#define CHECK(cond) do { if (!(cond)) { \
-    std::fprintf(stderr, "CHECK failed: %s (%s:%d)\n", #cond, __FILE__, __LINE__); std::abort(); } } while (0)
+#define PURRMIDI_CHECK_FAIL_FAST   // линейный тест: после первой ошибки продолжать бессмысленно
+#include "check.h"
 
 static const uint32_t SR = 48000;
 
@@ -266,6 +265,53 @@ static void test_event_fifo_overflow() {
     render(256);
 }
 
+// Note Off не должен теряться при переполнении FIFO: раньше лавина Note On забивала очередь, последующие Note Off
+// отбрасывались, и ноты звучали (до 18 с) без нажатых клавиш.
+static void test_note_off_survives_fifo_overflow() {
+    EPianoSynth_Init();
+    for (int i = 0; i < 300; ++i) EPianoSynth_NoteOn((uint8_t)(30 + (i % 60)), 100);
+    for (int i = 0; i < 300; ++i) EPianoSynth_NoteOff((uint8_t)(30 + (i % 60)));   // отпускаем всё, без рендера между
+    CHECK(EPianoSynth_GetDroppedEventCount() > 0);                                 // перегрузка действительно была
+
+    render(SR / 2);                                  // аварийное восстановление гасит голоса быстро (~20 мс)
+    CHECK(all_zero(render(SR / 10), 0, SR / 10));    // тишина: ничего не залипло
+    CHECK(EPianoSynth_GetActiveVoiceCount() == 0);
+
+    // После восстановления движок работает как обычно.
+    EPianoSynth_NoteOn(60, 100);
+    CHECK(peak_of(render(SR / 10), 0, SR / 10) > 0);
+}
+
+// Колесо высоты тона сдвигает частоту; возврат в центр возвращает её.
+static void test_pitch_bend() {
+    EPianoSynth_Init();
+    EPianoSynth_NoteOn(69, 100);                     // A4 = 440 Гц
+    render(SR / 10);
+    const double f_center = estimate_f0(render(SR / 4), 0, 4096, 440.0);
+
+    EPianoSynth_PitchBend(8191);                     // максимум: +2 полутона
+    render(SR / 100);
+    const double f_up = estimate_f0(render(SR / 4), 0, 4096, 494.0);
+
+    EPianoSynth_PitchBend(-8192);                    // минимум: -2 полутона
+    render(SR / 100);
+    const double f_down = estimate_f0(render(SR / 4), 0, 4096, 392.0);
+
+    EPianoSynth_PitchBend(0);
+    render(SR / 100);
+    const double f_back = estimate_f0(render(SR / 4), 0, 4096, 440.0);
+
+    std::cout << "pitch bend: centre=" << f_center << " up=" << f_up << " down=" << f_down << " back=" << f_back << "\n";
+    CHECK(std::fabs(f_center - 440.0) < 5.0);
+    CHECK(std::fabs(f_up   - 440.0 * std::pow(2.0,  2.0 / 12.0)) < 8.0);
+    CHECK(std::fabs(f_down - 440.0 * std::pow(2.0, -2.0 / 12.0)) < 8.0);
+    CHECK(std::fabs(f_back - 440.0) < 5.0);
+
+    EPianoSynth_PitchBend(30000);                    // вне диапазона: ограничивается, не ломает звук
+    EPianoSynth_PitchBend(-30000);
+    CHECK(peak_of(render(SR / 20), 0, SR / 20) > 0);
+}
+
 int main() {
     test_pitch_accuracy();
     test_dynamics_and_headroom();
@@ -274,6 +320,8 @@ int main() {
     test_block_size_independence();
     test_stereo_spread_and_brightness();
     test_event_fifo_overflow();
+    test_note_off_survives_fifo_overflow();
+    test_pitch_bend();
     std::cout << "test_epiano_host passed successfully." << std::endl;
     return 0;
 }

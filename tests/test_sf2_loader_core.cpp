@@ -10,15 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <vector>
-
-static int g_failures = 0;
-#define CHECK(cond)                                                                      \
-    do {                                                                                 \
-        if (!(cond)) {                                                                   \
-            std::fprintf(stderr, "CHECK failed %s:%d: %s\n", __FILE__, __LINE__, #cond); \
-            ++g_failures;                                                                \
-        }                                                                                \
-    } while (0)
+#include "check.h"
 
 namespace {
 
@@ -370,8 +362,8 @@ int main()
     test_read_error_keeps_old_bank();
     test_params();
 
-    if (g_failures) {
-        std::fprintf(stderr, "%d check(s) FAILED\n", g_failures);
+    if (purrmidi_test::Failures()) {
+        std::fprintf(stderr, "%d check(s) FAILED\n", purrmidi_test::Failures());
         return 1;
     }
     std::puts("test_sf2_loader_core: all checks passed");

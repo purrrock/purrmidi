@@ -28,6 +28,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
+# Предупреждения компилятора в коде проекта считаются ошибками (в CI включено). Сторонние каталоги
+# (bfreeOrgan2, TinySoundFont, eurorack) подключаются как SYSTEM, их предупреждения не учитываются.
+option(PURRMIDI_WERROR "Treat compiler warnings in project code as errors" OFF)
+
 # Main firmware executable
 add_executable(${CMAKE_PROJECT_NAME})
 
@@ -231,12 +235,17 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Engine/synth
     Platform/midi_usb
     Platform/qspi_xip
+    Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735
+)
+target_include_directories(${CMAKE_PROJECT_NAME} SYSTEM PRIVATE
     Middlewares/Third_Party/bfreeOrgan2
     Middlewares/Third_Party/bfreeOrgan2/components
     Middlewares/Third_Party/TinySoundFont
     Middlewares/Third_Party/eurorack
-    Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735
 )
+if(PURRMIDI_WERROR)
+    target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE -Werror)
+endif()
 
 # Remove an incorrect legacy library dependency when linking C++.
 list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)

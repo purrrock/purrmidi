@@ -32,6 +32,12 @@
  *     CC 64             : Педаль сустейна
  *     CC 72             : Время затухания релиза (демпфера)
  *     CC 120, CC 123    : All Sound Off / All Notes Off
+ *
+ * Pitch Bend поддерживается (±2 полутона, EPIANO_PITCH_BEND_RANGE). Aftertouch движком не используется.
+ *
+ * Надёжность очереди: Note Off, CC 64/120/123 «критичны» и используют весь FIFO; Note On и остальные CC ограничены
+ * частью FIFO. Если критичное событие всё же не поместилось, звук аварийно гасится (протокол восстановления из
+ * synth_common.h), так что нота не может «залипнуть».
  */
 
 #ifdef __cplusplus
@@ -49,6 +55,12 @@ void EPianoSynth_NoteOff(uint8_t midi_note);
 
 /** Обработка событий MIDI Control Change. */
 void EPianoSynth_ControlChange(uint8_t control, uint8_t value);
+
+/**
+ * Колесо высоты тона: bend = -8192..+8191 (0 - центр), диапазон EPIANO_PITCH_BEND_RANGE (по умолчанию ±2 полутона).
+ * Хранится как «последнее значение» (без очереди), поэтому возврат колеса в центр никогда не теряется.
+ */
+void EPianoSynth_PitchBend(int16_t bend);
 
 /**
  * Блочное заполнение стереобуфера (L, R, L, R...), 48 кГц, signed 16-bit PCM.

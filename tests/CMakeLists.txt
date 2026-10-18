@@ -5,7 +5,10 @@ cmake_minimum_required(VERSION 3.22)
 if(MSVC)
     add_compile_options(/UNDEBUG)
 else()
-    add_compile_options(-UNDEBUG)
+    add_compile_options(-UNDEBUG -Wall -Wextra)
+    if(PURRMIDI_WERROR)
+        add_compile_options(-Werror)
+    endif()
 endif()
 
 add_executable(test_audio_halves
@@ -83,9 +86,11 @@ add_executable(test_soundfont_host
 )
 target_include_directories(test_soundfont_host PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../Core/Inc"
-    "${CMAKE_CURRENT_LIST_DIR}/../Middlewares/Third_Party/TinySoundFont"
     "${CMAKE_CURRENT_LIST_DIR}/../Platform/host"
     "${CMAKE_CURRENT_LIST_DIR}/../Platform/qspi_xip"
+)
+target_include_directories(test_soundfont_host SYSTEM PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../Middlewares/Third_Party/TinySoundFont"
 )
 target_link_libraries(test_soundfont_host PRIVATE purrmidi_synth_soundfont purrmidi_core)
 target_compile_features(test_soundfont_host PRIVATE cxx_std_17)
@@ -129,6 +134,14 @@ find_package(Threads REQUIRED)
 target_link_libraries(test_synth_switch PRIVATE purrmidi_core Threads::Threads)
 target_compile_features(test_synth_switch PRIVATE cxx_std_17)
 add_test(NAME test_synth_switch COMMAND test_synth_switch)
+
+add_executable(test_midi_expressive
+    test_midi_expressive.cpp
+)
+find_package(Threads REQUIRED)
+target_link_libraries(test_midi_expressive PRIVATE purrmidi_core Threads::Threads)
+target_compile_features(test_midi_expressive PRIVATE cxx_std_17)
+add_test(NAME test_midi_expressive COMMAND test_midi_expressive)
 
 add_executable(test_synth_common
     test_synth_common.cpp
@@ -191,6 +204,8 @@ target_include_directories(test_sf2_xip_host PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../Engine/synth"
     "${CMAKE_CURRENT_LIST_DIR}/../Platform/qspi_xip"
     "${CMAKE_CURRENT_LIST_DIR}/../Platform/host"
+)
+target_include_directories(test_sf2_xip_host SYSTEM PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../Middlewares/Third_Party/TinySoundFont"
 )
 target_compile_features(test_sf2_xip_host PRIVATE cxx_std_17)

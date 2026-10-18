@@ -29,6 +29,32 @@ jobs:
       - name: Run host tests
         run: ctest --test-dir build/host-tests --output-on-failure
 
+  host-tests-sanitizers:
+    name: Host tests (ASan + UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libasound2-dev libjack-jackd2-dev
+
+      - name: Configure (AddressSanitizer + UndefinedBehaviorSanitizer)
+        run: cmake --preset host-tests-asan
+
+      - name: Build
+        run: cmake --build --preset host-tests-asan
+
+      - name: Run tests under sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: ctest --preset host-tests-asan
+
   host-build-windows:
     runs-on: windows-latest
     steps:
@@ -38,7 +64,9 @@ jobs:
           submodules: recursive
 
       - name: Setup Ninja
-        uses: llvm/actions/install-ninja@main
+        # Закреплено на конкретном коммите (а не на плавающей ветке main): сборка воспроизводима, и изменение
+        # стороннего action не попадёт в CI незаметно. Обновлять осознанно.
+        uses: llvm/actions/install-ninja@89a8cf80982d830faab019237860b344a6390c30
 
       - name: Configure MSVC Release build
         run: cmake --preset win-msvc-release
@@ -70,14 +98,26 @@ jobs:
           cmake --version
           ninja --version
 
-      - name: Configure STM32 firmware
-        run: cmake --preset Debug
+      # Предупреждения в коде проекта = ошибки (сторонние каталоги подключены как SYSTEM).
+      - name: Configure STM32 firmware (Debug)
+        run: cmake --preset Debug -DPURRMIDI_WERROR=ON
 
-      - name: Build STM32 firmware
+      - name: Build STM32 firmware (Debug)
         run: cmake --build --preset Debug
 
       - name: Verify firmware ELF
         run: test -s build/Debug/purrmidi.elf
+
+      # Release - это то, что реально работает на приборе (-O2 для аудио-кода): собираем и его, чтобы
+      # ошибки, видимые только при оптимизации, не доезжали до релиза.
+      - name: Configure STM32 firmware (Release)
+        run: cmake --preset Release -DPURRMIDI_WERROR=ON
+
+      - name: Build STM32 firmware (Release)
+        run: cmake --build --preset Release
+
+      - name: Check Release firmware size budget
+        run: tools/check_firmware_size.sh build/Release/purrmidi.elf
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4

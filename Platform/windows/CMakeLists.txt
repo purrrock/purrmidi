@@ -7,6 +7,9 @@ else()
 endif()
 
 option(PURRMIDI_BUILD_TESTS "Build host unit tests" ON)
+# Предупреждения GCC/Clang в коде проекта считаются ошибками (в CI включено). Сторонние каталоги
+# (DaisySP, bfreeOrgan2, TinySoundFont, eurorack) подключаются как SYSTEM.
+option(PURRMIDI_WERROR "Treat compiler warnings in project code as errors (GCC/Clang)" OFF)
 
 # Все синтезаторы (epiano / pluck / lead / organ / soundfont) входят в сборку; активный
 # выбирается во время работы сообщением MIDI Program Change (см. Core/Inc/synth_engine.h).
@@ -66,6 +69,8 @@ add_library(purrmidi_synth_organ STATIC
 target_include_directories(purrmidi_synth_organ PUBLIC
     "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
+)
+target_include_directories(purrmidi_synth_organ SYSTEM PUBLIC
     "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/bfreeOrgan2"
     "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/bfreeOrgan2/components"
 )
@@ -79,6 +84,8 @@ add_library(purrmidi_synth_pluck STATIC
 target_include_directories(purrmidi_synth_pluck PUBLIC
     "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
+)
+target_include_directories(purrmidi_synth_pluck SYSTEM PUBLIC
     "${DAISYSP_DIR}/Source"
     "${DAISYSP_DIR}/Source/Utility"
     "${DAISYSP_DIR}/Source/Synthesis"
@@ -100,6 +107,8 @@ add_library(purrmidi_synth_lead STATIC
 target_include_directories(purrmidi_synth_lead PUBLIC
     "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
+)
+target_include_directories(purrmidi_synth_lead SYSTEM PUBLIC
     "${DAISYSP_DIR}/Source"
     "${DAISYSP_DIR}/Source/Utility"
     "${DAISYSP_DIR}/Source/Synthesis"
@@ -122,6 +131,8 @@ target_include_directories(purrmidi_synth_soundfont PUBLIC
     "${CMAKE_SOURCE_DIR}/Engine/synth"
     "${CMAKE_SOURCE_DIR}/Platform/host"
     "${CMAKE_SOURCE_DIR}/Platform/qspi_xip"
+)
+target_include_directories(purrmidi_synth_soundfont SYSTEM PUBLIC
     "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/TinySoundFont"
 )
 target_compile_features(purrmidi_synth_soundfont PUBLIC cxx_std_17)
@@ -138,6 +149,8 @@ add_library(purrmidi_synth_dulcimer STATIC
 target_include_directories(purrmidi_synth_dulcimer PUBLIC
     "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
+)
+target_include_directories(purrmidi_synth_dulcimer SYSTEM PUBLIC
     "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack"
 )
 target_compile_definitions(purrmidi_synth_dulcimer PUBLIC TEST)
@@ -171,6 +184,16 @@ foreach(_synth sine pluck lead epiano organ soundfont dulcimer flute saxophone)
         target_compile_options(purrmidi_synth_${_synth} PRIVATE /utf-8 /W4)
     else()
         target_compile_options(purrmidi_synth_${_synth} PRIVATE -Wall -Wextra)
+        if(PURRMIDI_WERROR)
+            target_compile_options(purrmidi_synth_${_synth} PRIVATE -Werror)
+            # Исходники сторонних библиотек (Middlewares/) собираются в наших целях: их предупреждения не ошибки.
+            get_target_property(_synth_sources purrmidi_synth_${_synth} SOURCES)
+            foreach(_src IN LISTS _synth_sources)
+                if(_src MATCHES "/Middlewares/")
+                    set_source_files_properties("${_src}" PROPERTIES COMPILE_OPTIONS "-Wno-error")
+                endif()
+            endforeach()
+        endif()
     endif()
     if(UNIX)
         target_link_libraries(purrmidi_synth_${_synth} PUBLIC m)
@@ -210,6 +233,9 @@ if(MSVC)
     target_compile_options(purrmidi_core PRIVATE /utf-8 /W4)
 else()
     target_compile_options(purrmidi_core PRIVATE -Wall -Wextra)
+    if(PURRMIDI_WERROR)
+        target_compile_options(purrmidi_core PRIVATE -Werror)
+    endif()
 endif()
 
 if(PURRMIDI_BUILD_APP)

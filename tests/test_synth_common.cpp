@@ -6,15 +6,7 @@
 
 #include "synth_arena.h"
 #include "synth_common.h"
-
-static int g_failures = 0;
-#define CHECK(cond)                                                              \
-    do {                                                                         \
-        if (!(cond)) {                                                           \
-            std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
-            ++g_failures;                                                        \
-        }                                                                        \
-    } while (0)
+#include "check.h"
 
 struct Ev { uint8_t type; uint8_t note; uint8_t aux; };
 constexpr uint32_t kSize = 32, kLimit = 28;
@@ -147,8 +139,8 @@ int main() {
     test_midi_freq();
     test_arena();
 
-    if (g_failures != 0) {
-        std::fprintf(stderr, "test_synth_common: %d check(s) failed\n", g_failures);
+    if (purrmidi_test::Failures() != 0) {
+        std::fprintf(stderr, "test_synth_common: %d check(s) failed\n", purrmidi_test::Failures());
         return 1;
     }
     std::puts("test_synth_common: OK");

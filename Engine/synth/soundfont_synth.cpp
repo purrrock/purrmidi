@@ -21,6 +21,7 @@
  */
 #include "soundfont_synth.h"
 #include "sf2_loader.h"
+#include "synth_common.h"
 #include "tsf.h"
 
 /* Host build (unit tests, Windows app) or the STM32 target. */
@@ -47,6 +48,7 @@
 #endif
 
 #define SF_EVENT_FIFO_SIZE 256U   /* power of two */
+#define SF_NOTE_ON_FIFO_LIMIT 224U /* slots for Note On / Program / continuous CC; the rest is reserved for Note Off and pedal */
 #define SF_MAX_NOTE_REGIONS 8
 
 namespace {
@@ -63,44 +65,16 @@ struct Event {
     uint8_t b;
 };
 
-/* Lock-free SPSC FIFO: producer - main, consumer - audio. */
-Event                 g_fifo[SF_EVENT_FIFO_SIZE];
-std::atomic<uint32_t> g_fifo_head{0};
-std::atomic<uint32_t> g_fifo_tail{0};
-std::atomic<uint32_t> g_dropped{0};
+/* Event queue, press accounting and emergency-recovery protocol (shared component, see synth_common.h):
+ * producer - main, consumer - audio. Note Off, the sustain pedal and All Notes/Sound Off are "critical" and may use
+ * the whole FIFO; Note On, Program Change and other CCs are limited to SF_NOTE_ON_FIFO_LIMIT slots so that a flood of
+ * notes can never push out a Note Off (which would leave a stuck note). */
+synth::NoteInput<Event, SF_EVENT_FIFO_SIZE, SF_NOTE_ON_FIFO_LIMIT> g_input;
 
-bool fifo_push(const Event &ev)
-{
-    uint32_t head = g_fifo_head.load(std::memory_order_relaxed);
-    uint32_t tail = g_fifo_tail.load(std::memory_order_acquire);
-
-    if (head - tail >= SF_EVENT_FIFO_SIZE) {
-        g_dropped.fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
-    g_fifo[head & (SF_EVENT_FIFO_SIZE - 1U)] = ev;
-    g_fifo_head.store(head + 1U, std::memory_order_release);
-    return true;
-}
-
-bool fifo_pop(Event &ev)
-{
-    uint32_t tail = g_fifo_tail.load(std::memory_order_relaxed);
-    uint32_t head = g_fifo_head.load(std::memory_order_acquire);
-
-    if (head == tail) {
-        return false;
-    }
-    ev = g_fifo[tail & (SF_EVENT_FIFO_SIZE - 1U)];
-    g_fifo_tail.store(tail + 1U, std::memory_order_release);
-    return true;
-}
-
-void fifo_reset()
-{
-    g_fifo_head.store(0, std::memory_order_relaxed);
-    g_fifo_tail.store(0, std::memory_order_relaxed);
-}
+/* Pitch wheel: "last value" (0..16383, centre 8192), no queue - losing intermediate values is harmless and the return
+ * to centre can never be lost. Written by main, read by the audio context. */
+std::atomic<int> g_pitch_wheel{8192};
+int              g_pitch_applied = 8192;   /* audio context only */
 
 float velocity_to_float(uint8_t velocity)
 {
@@ -279,7 +253,9 @@ bool SoundFontSynth_InitSF2(void)
     }
     g_loaded = false;
     g_init_attempted = true;
-    fifo_reset();
+    g_input.Reset();
+    g_pitch_wheel.store(8192, std::memory_order_relaxed);
+    g_pitch_applied = 8192;
 
     /* One-time boot scenario: QSPI init, optional SD -> flash update, XIP. */
     const uint8_t *bank = nullptr;
@@ -342,8 +318,11 @@ void SoundFontSynth_Init(void)
     if (g_tsf) {
         tsf_reset(g_tsf);
         tsf_channel_set_presetnumber(g_tsf, 0, 0, 0);
+        tsf_channel_set_pitchwheel(g_tsf, 0, 8192);
     }
-    fifo_reset();
+    g_input.Reset();
+    g_pitch_wheel.store(8192, std::memory_order_relaxed);
+    g_pitch_applied = 8192;
 }
 
 void SoundFontSynth_NoteOn(uint8_t note, uint8_t velocity)
@@ -358,7 +337,7 @@ void SoundFontSynth_NoteOn(uint8_t note, uint8_t velocity)
     if (velocity > 127) velocity = 127;
 
     Event ev = { EV_NOTE_ON, note, velocity };
-    fifo_push(ev);
+    g_input.NoteOn(note, ev);
 }
 
 void SoundFontSynth_NoteOff(uint8_t note)
@@ -367,7 +346,7 @@ void SoundFontSynth_NoteOff(uint8_t note)
     if (note > 127) return;
 
     Event ev = { EV_NOTE_OFF, note, 0 };
-    fifo_push(ev);
+    g_input.NoteOff(note, ev);
 }
 
 void SoundFontSynth_ControlChange(uint8_t control, uint8_t value)
@@ -376,7 +355,21 @@ void SoundFontSynth_ControlChange(uint8_t control, uint8_t value)
     if (control > 127) return;
 
     Event ev = { EV_CC, control, (uint8_t)(value > 127 ? 127 : value) };
-    fifo_push(ev);
+    if (control == 64 || control == 120 || control == 123) {
+        g_input.Critical(ev);       /* pedal, All Sound Off, All Notes Off: losing one means stuck notes */
+    } else {
+        g_input.Soft(ev);           /* volume, expression, reverb...: may be dropped under overload */
+    }
+}
+
+void SoundFontSynth_PitchBend(int16_t bend)
+{
+    if (!g_loaded || !g_tsf) return;
+
+    int wheel = (int)bend + 8192;
+    if (wheel < 0) wheel = 0;
+    if (wheel > 16383) wheel = 16383;
+    g_pitch_wheel.store(wheel, std::memory_order_relaxed);
 }
 
 void SoundFontSynth_ProgramChange(uint8_t program)
@@ -384,7 +377,7 @@ void SoundFontSynth_ProgramChange(uint8_t program)
     if (!g_loaded || !g_tsf) return;
 
     Event ev = { EV_PROGRAM, program, 0 };
-    fifo_push(ev);
+    g_input.Soft(ev);
 }
 
 void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
@@ -394,8 +387,21 @@ void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
         return;
     }
 
+    /* A critical event did not fit into the FIFO: a Note Off may have been lost. Silence everything quickly and
+     * release the pedal instead of leaving a stuck note. */
+    g_input.ServiceRecovery([]() {
+        tsf_channel_sounds_off_all(g_tsf, 0);
+        tsf_channel_midi_control(g_tsf, 0, 64, 0);
+    });
+
+    const int wheel = g_pitch_wheel.load(std::memory_order_relaxed);
+    if (wheel != g_pitch_applied) {
+        g_pitch_applied = wheel;
+        tsf_channel_set_pitchwheel(g_tsf, 0, wheel);
+    }
+
     Event ev;
-    while (fifo_pop(ev)) {
+    while (g_input.Pop(ev)) {
         apply_event(ev);
     }
 
@@ -473,7 +479,7 @@ void SoundFontSynth_ReportStats(uint32_t now_ms)
 
     const uint32_t blocks = g_diag.blocks;
     const uint32_t us = diag_cycles_per_us();
-    const uint32_t dropped = g_dropped.load(std::memory_order_relaxed);
+    const uint32_t dropped = g_input.Dropped();
     const unsigned long avg_us = (unsigned long)((g_diag.cycles_sum / blocks) / us);
     const unsigned long max_us = (unsigned long)(g_diag.cycles_max / us);
 

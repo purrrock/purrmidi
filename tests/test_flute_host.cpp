@@ -5,14 +5,8 @@
 #include <cstdint>
 #include <cassert>
 #include <algorithm>
-
-#define CHECK(cond) \
-    do { \
-        if (!(cond)) { \
-            std::cerr << "FAIL: " << #cond << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
-            return 1; \
-        } \
-    } while (0)
+#define PURRMIDI_CHECK_FAIL_FAST   // линейный тест: после первой ошибки продолжать бессмысленно
+#include "check.h"
 
 static int calculate_peak(const std::vector<int16_t> &buf) {
     int max_val = 0;

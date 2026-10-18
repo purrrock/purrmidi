@@ -6,9 +6,8 @@
 #include <iostream>
 #include <vector>
 #include "sine_synth.h"
-
-#define CHECK(cond) do { if (!(cond)) { \
-    std::fprintf(stderr, "CHECK failed: %s (%s:%d)\n", #cond, __FILE__, __LINE__); std::abort(); } } while (0)
+#define PURRMIDI_CHECK_FAIL_FAST   // линейный тест: после первой ошибки продолжать бессмысленно
+#include "check.h"
 
 static std::vector<int16_t> render(uint32_t frames) {
     std::vector<int16_t> buf(frames * 2, 0);

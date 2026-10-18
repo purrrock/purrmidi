@@ -6,16 +6,7 @@
 #include <thread>
 
 #include "audio_halves.h"
-
-static int g_failures = 0;
-
-#define CHECK(cond)                                                              \
-    do {                                                                         \
-        if (!(cond)) {                                                           \
-            std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
-            ++g_failures;                                                        \
-        }                                                                        \
-    } while (0)
+#include "check.h"
 
 // Нормальная работа: рендер успевает между запросами.
 static void test_normal_alternation() {
@@ -152,8 +143,8 @@ int main() {
     test_same_half_requested_twice();
     test_threads();
 
-    if (g_failures != 0) {
-        std::fprintf(stderr, "test_audio_halves: %d check(s) failed\n", g_failures);
+    if (purrmidi_test::Failures() != 0) {
+        std::fprintf(stderr, "test_audio_halves: %d check(s) failed\n", purrmidi_test::Failures());
         return 1;
     }
     std::puts("test_audio_halves: OK");

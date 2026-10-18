@@ -16,15 +16,7 @@
 
 #include "midi_dispatch.h"
 #include "synth_engine.h"
-
-static int g_failures = 0;
-#define CHECK(cond)                                                              \
-    do {                                                                         \
-        if (!(cond)) {                                                           \
-            std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
-            ++g_failures;                                                        \
-        }                                                                        \
-    } while (0)
+#include "check.h"
 
 namespace {
 
@@ -121,8 +113,8 @@ int main(int argc, char **argv) {
         CHECK(first[k].peak == second[k].peak);
     }
 
-    if (g_failures != 0) {
-        std::fprintf(stderr, "test_engine_golden: %d check(s) failed\n", g_failures);
+    if (purrmidi_test::Failures() != 0) {
+        std::fprintf(stderr, "test_engine_golden: %d check(s) failed\n", purrmidi_test::Failures());
         return 1;
     }
     if (!print_hash) std::puts("test_engine_golden: OK");

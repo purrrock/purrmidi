@@ -41,34 +41,38 @@ struct Engine {
     void (*note_off)(uint8_t);
     void (*control_change)(uint8_t, uint8_t);
     void (*fill)(int16_t *, uint32_t);
+    /* Необязательные обработчики (nullptr = движок не поддерживает, сообщение игнорируется). */
+    void (*pitch_bend)(int16_t);
+    void (*channel_pressure)(uint8_t);
+    void (*poly_pressure)(uint8_t, uint8_t);
 };
 
 /* Индекс в таблице == SynthEngineId == номер MIDI-программы. */
 const Engine kEngines[SYNTH_ENGINE_COUNT] = {
     /* SYNTH_ENGINE_EPIANO */
     { "epiano", EPianoSynth_Init, EPianoSynth_NoteOn, EPianoSynth_NoteOff,
-      EPianoSynth_ControlChange, EPianoSynth_FillStereoBuffer },
+      EPianoSynth_ControlChange, EPianoSynth_FillStereoBuffer, EPianoSynth_PitchBend, nullptr, nullptr },
     /* SYNTH_ENGINE_PLUCK */
     { "pluck", PluckSynth_Init, PluckSynth_NoteOn, PluckSynth_NoteOff,
-      PluckSynth_ControlChange, PluckSynth_FillStereoBuffer },
+      PluckSynth_ControlChange, PluckSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
     /* SYNTH_ENGINE_LEAD */
     { "lead", LeadSynth_Init, LeadSynth_NoteOn, LeadSynth_NoteOff,
-      LeadSynth_ControlChange, LeadSynth_FillStereoBuffer },
+      LeadSynth_ControlChange, LeadSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
     /* SYNTH_ENGINE_ORGAN */
     { "organ", OrganSynth_Init, OrganSynth_NoteOn, OrganSynth_NoteOff,
-      OrganSynth_ControlChange, OrganSynth_FillStereoBuffer },
+      OrganSynth_ControlChange, OrganSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
     /* SYNTH_ENGINE_SOUNDFONT */
     { "soundfont", SoundFontSynth_Init, SoundFontSynth_NoteOn, SoundFontSynth_NoteOff,
-      SoundFontSynth_ControlChange, SoundFontSynth_FillStereoBuffer },
+      SoundFontSynth_ControlChange, SoundFontSynth_FillStereoBuffer, SoundFontSynth_PitchBend, nullptr, nullptr },
     /* SYNTH_ENGINE_DULCIMER */
     { "dulcimer", DulcimerSynth_Init, DulcimerSynth_NoteOn, DulcimerSynth_NoteOff,
-      DulcimerSynth_ControlChange, DulcimerSynth_FillStereoBuffer },
+      DulcimerSynth_ControlChange, DulcimerSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
     /* SYNTH_ENGINE_FLUTE */
     { "flute", FluteSynth_Init, FluteSynth_NoteOn, FluteSynth_NoteOff,
-      FluteSynth_ControlChange, FluteSynth_FillStereoBuffer },
+      FluteSynth_ControlChange, FluteSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
     /* SYNTH_ENGINE_SAXOPHONE */
     { "saxophone", SaxophoneSynth_Init, SaxophoneSynth_NoteOn, SaxophoneSynth_NoteOff,
-      SaxophoneSynth_ControlChange, SaxophoneSynth_FillStereoBuffer },
+      SaxophoneSynth_ControlChange, SaxophoneSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
 };
 
 std::atomic<const Engine *> g_active{nullptr};   /* nullptr до первого SynthEngine_Init() */
@@ -82,6 +86,10 @@ std::atomic_flag            g_busy = ATOMIC_FLAG_INIT;
  */
 std::atomic<uint8_t> g_master_vol{SYNTH_MASTER_VOLUME_DEFAULT};
 float                g_master_gain_applied = 1.0f;   /* коэффициент в конце прошлого блока (только аудио-контекст) */
+
+/* Положение колеса высоты тона (-8192..8191). Запоминается здесь, чтобы смена движка (его Init() сбрасывает колесо)
+ * не «отпускала» удерживаемое колесо. Пишется и читается только из main-контекста. */
+int16_t              g_pitch_bend = 0;
 
 /* Уровень 0..127 -> линейный коэффициент. Квадратичная кривая ≈ естественная для слуха; 127 -> 1.0, 0 -> 0. */
 float volume_to_gain(uint8_t v)
@@ -121,6 +129,9 @@ void activate(SynthEngineId id)
         /* ждём, пока аудио-поток (ПК) закончит текущий блок */
     }
     next->init();
+    if (next->pitch_bend) {
+        next->pitch_bend(g_pitch_bend);   /* колесо - физический орган: переносим его положение в новый движок */
+    }
     g_active.store(next, std::memory_order_relaxed);
     g_busy.clear(std::memory_order_release);
 }
@@ -133,11 +144,13 @@ void SynthEngine_Init(void)
 {
     g_master_vol.store(SYNTH_MASTER_VOLUME_DEFAULT, std::memory_order_relaxed);
     g_master_gain_applied = volume_to_gain(SYNTH_MASTER_VOLUME_DEFAULT);
+    g_pitch_bend = 0;
     activate(SYNTH_ENGINE_DEFAULT);
 }
 
 void SynthEngine_Panic(void)
 {
+    g_pitch_bend = 0;   /* после отключения клавиатуры положение колеса неизвестно */
     const Engine *cur = g_active.load(std::memory_order_relaxed);
     if (cur) {
         activate((SynthEngineId)(cur - kEngines));
@@ -238,6 +251,32 @@ void SynthEngine_ControlChange(uint8_t control, uint8_t value)
     const Engine *e = g_active.load(std::memory_order_relaxed);
     if (e) {
         e->control_change(control, value);
+    }
+}
+
+void SynthEngine_PitchBend(int16_t bend)
+{
+    g_pitch_bend = bend < -8192 ? (int16_t)-8192 : (bend > 8191 ? (int16_t)8191 : bend);
+
+    const Engine *e = g_active.load(std::memory_order_relaxed);
+    if (e && e->pitch_bend) {
+        e->pitch_bend(g_pitch_bend);
+    }
+}
+
+void SynthEngine_ChannelPressure(uint8_t pressure)
+{
+    const Engine *e = g_active.load(std::memory_order_relaxed);
+    if (e && e->channel_pressure) {
+        e->channel_pressure(pressure > 127U ? (uint8_t)127U : pressure);
+    }
+}
+
+void SynthEngine_PolyPressure(uint8_t midi_note, uint8_t pressure)
+{
+    const Engine *e = g_active.load(std::memory_order_relaxed);
+    if (e && e->poly_pressure && midi_note < 128U) {
+        e->poly_pressure(midi_note, pressure > 127U ? (uint8_t)127U : pressure);
     }
 }
 
