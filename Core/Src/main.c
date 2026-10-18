@@ -97,7 +97,7 @@ static uint16_t active_note_count = 0;
  * (render longer than its budget) is still reported once via "[AUDIO] RENDER OVERRUN" below.
  * A render that takes longer than its budget (one DMA half-buffer) starves the main loop
  * (USB, MIDI, display): the render runs in PendSV, which preempts the main loop. */
-#define AUDIO_DIAG_UART 0
+#define AUDIO_DIAG_UART 1
 
 static volatile uint32_t audio_cyc_max = 0;      /* longest fill so far (CPU cycles) */
 static volatile uint32_t audio_cyc_last = 0;
