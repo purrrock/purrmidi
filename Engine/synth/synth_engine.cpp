@@ -1,5 +1,5 @@
 /*
- * Рантайм-диспетчер звуковых движков: epiano / pluck / lead / organ / dulcimer / flute / saxophone / soundfont
+ * Рантайм-диспетчер звуковых движков: epiano / pluck / lead / organ / violin / soundfont
  * (пресеты SF2 — отдельные программы в конце списка).
  * Выбор движка делается MIDI-сообщением Program Change (см. synth_engine.h).
  *
@@ -26,9 +26,7 @@
 #include "organ_synth.h"
 #include "pluck_synth.h"
 #include "soundfont_synth.h"
-#include "dulcimer_synth.h"
-#include "flute_synth.h"
-#include "saxophone_synth.h"
+#include "violin_synth.h"
 
 #include <atomic>
 #include <cstdio>
@@ -64,15 +62,9 @@ const Engine kEngines[SYNTH_ENGINE_COUNT] = {
     /* SYNTH_ENGINE_ORGAN */
     { "organ", OrganSynth_Init, OrganSynth_NoteOn, OrganSynth_NoteOff,
       OrganSynth_ControlChange, OrganSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
-    /* SYNTH_ENGINE_DULCIMER */
-    { "dulcimer", DulcimerSynth_Init, DulcimerSynth_NoteOn, DulcimerSynth_NoteOff,
-      DulcimerSynth_ControlChange, DulcimerSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
-    /* SYNTH_ENGINE_FLUTE */
-    { "flute", FluteSynth_Init, FluteSynth_NoteOn, FluteSynth_NoteOff,
-      FluteSynth_ControlChange, FluteSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
-    /* SYNTH_ENGINE_SAXOPHONE */
-    { "saxophone", SaxophoneSynth_Init, SaxophoneSynth_NoteOn, SaxophoneSynth_NoteOff,
-      SaxophoneSynth_ControlChange, SaxophoneSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
+    /* SYNTH_ENGINE_VIOLIN */
+    { "violin", ViolinSynth_Init, ViolinSynth_NoteOn, ViolinSynth_NoteOff,
+      ViolinSynth_ControlChange, ViolinSynth_FillStereoBuffer, ViolinSynth_PitchBend, ViolinSynth_ChannelPressure, nullptr },
     /* SYNTH_ENGINE_SOUNDFONT */
     { "soundfont", SoundFontSynth_Init, SoundFontSynth_NoteOn, SoundFontSynth_NoteOff,
       SoundFontSynth_ControlChange, SoundFontSynth_FillStereoBuffer, SoundFontSynth_PitchBend, nullptr, nullptr },
@@ -96,7 +88,7 @@ uint32_t             g_sf_preset = 0;
 
 /* Короткие имена встроенных движков для дисплея (до 17 символов, ASCII). Порядок = SynthEngineId. */
 const char * const kDisplayNames[SYNTH_ENGINE_SOUNDFONT] = {
-    "E-Piano", "Pluck", "Lead", "Organ", "Dulcimer", "Flute", "Saxophone"
+    "E-Piano", "Pluck", "Lead", "Organ", "Violin"
 };
 
 /* Число пресетов SF2, видимых в списке программ (минимум 1: «SoundFont» как место для ошибки при отсутствии банка). */

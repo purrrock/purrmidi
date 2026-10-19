@@ -145,8 +145,7 @@ uint64_t run_scenario(uint8_t engine, bool with_messages)
 void test_unsupported_engines_ignore_messages()
 {
     SynthEngine_Init();
-    const SynthEngineId engines[] = { SYNTH_ENGINE_PLUCK, SYNTH_ENGINE_LEAD, SYNTH_ENGINE_ORGAN,
-                                          SYNTH_ENGINE_DULCIMER, SYNTH_ENGINE_FLUTE, SYNTH_ENGINE_SAXOPHONE };
+    const SynthEngineId engines[] = { SYNTH_ENGINE_PLUCK, SYNTH_ENGINE_LEAD, SYNTH_ENGINE_ORGAN };
     for (SynthEngineId e : engines) {
         const uint64_t a = run_scenario(e, false);
         const uint64_t b = run_scenario(e, true);

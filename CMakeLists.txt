@@ -29,7 +29,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
 # Предупреждения компилятора в коде проекта считаются ошибками (в CI включено). Сторонние каталоги
-# (bfreeOrgan2, TinySoundFont, eurorack) подключаются как SYSTEM, их предупреждения не учитываются.
+# (bfreeOrgan2, TinySoundFont) подключаются как SYSTEM, их предупреждения не учитываются.
 option(PURRMIDI_WERROR "Treat compiler warnings in project code as errors" OFF)
 
 # Main firmware executable
@@ -122,15 +122,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Engine/synth/soundfont_synth.cpp
     Engine/synth/tinysoundfont_impl.cpp
     Engine/synth/synth.c
-    Engine/synth/dulcimer_synth.cpp
-    Engine/synth/flute_synth.cpp
-    Engine/synth/saxophone_synth.cpp
-
-    Middlewares/Third_Party/eurorack/elements/dsp/resonator.cc
-    Middlewares/Third_Party/eurorack/elements/dsp/exciter.cc
-    Middlewares/Third_Party/eurorack/elements/resources.cc
-    Middlewares/Third_Party/eurorack/stmlib/utils/random.cc
-    Middlewares/Third_Party/eurorack/stmlib/dsp/units.cc
+    Engine/synth/violin_synth.cpp
 
     Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp
     Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp
@@ -175,15 +167,7 @@ set(PURRMIDI_AUDIO_HOT_SOURCES
     Engine/synth/soundfont_synth.cpp
     Engine/synth/tinysoundfont_impl.cpp
     Engine/synth/synth.c
-    Engine/synth/dulcimer_synth.cpp
-    Engine/synth/flute_synth.cpp
-    Engine/synth/saxophone_synth.cpp
-
-    Middlewares/Third_Party/eurorack/elements/dsp/resonator.cc
-    Middlewares/Third_Party/eurorack/elements/dsp/exciter.cc
-    Middlewares/Third_Party/eurorack/elements/resources.cc
-    Middlewares/Third_Party/eurorack/stmlib/utils/random.cc
-    Middlewares/Third_Party/eurorack/stmlib/dsp/units.cc
+    Engine/synth/violin_synth.cpp
 
     Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp
     Middlewares/Third_Party/bfreeOrgan2/components/voice_organ.cpp
@@ -203,15 +187,6 @@ endif()
 set_source_files_properties(${PURRMIDI_AUDIO_HOT_SOURCES}
     Platform/qspi_xip/pm_crc32.c
     PROPERTIES COMPILE_OPTIONS "${PURRMIDI_HOT_OPT}")
-
-set_source_files_properties(
-    Middlewares/Third_Party/eurorack/elements/dsp/resonator.cc
-    Middlewares/Third_Party/eurorack/elements/dsp/exciter.cc
-    Middlewares/Third_Party/eurorack/elements/resources.cc
-    Middlewares/Third_Party/eurorack/stmlib/utils/random.cc
-    Middlewares/Third_Party/eurorack/stmlib/dsp/units.cc
-    PROPERTIES COMPILE_DEFINITIONS "TEST"
-)
 
 # ---------------------------------------------------------------------------
 # SoundFont: банк хранится ТОЛЬКО в QSPI Flash и читается на месте (XIP, 0x90000000)
@@ -244,7 +219,6 @@ target_include_directories(${CMAKE_PROJECT_NAME} SYSTEM PRIVATE
     Middlewares/Third_Party/bfreeOrgan2
     Middlewares/Third_Party/bfreeOrgan2/components
     Middlewares/Third_Party/TinySoundFont
-    Middlewares/Third_Party/eurorack
 )
 if(PURRMIDI_WERROR)
     target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE -Werror)

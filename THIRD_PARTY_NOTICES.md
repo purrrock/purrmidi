@@ -19,8 +19,6 @@
 | **TinySoundFont** (Bernhard Schelling) — с доработками PurrMidi (чтение PCM «на месте», `tsf_set_smpl_pcm16`) | `Middlewares/Third_Party/TinySoundFont/tsf.h` (лицензия — в заголовке файла) | MIT | прошивка, Windows |
 | **DaisySP** (Electrosmith) — в прошивку линкуются `Oscillator`, `Svf`, `Adsr` | `Middlewares/Third_Party/DaisySP/` (`LICENSE`) | MIT | прошивка, Windows |
 | **DaisySP-LGPL** (Electrosmith) — вложенный подмодуль DaisySP; в прошивку линкуется только `Pluck` (`PhysicalModeling/pluck.cpp`, движок Pluck) | `Middlewares/Third_Party/DaisySP/DaisySP-LGPL/` (`LICENSE`) | **LGPL-2.1** | прошивка (статически), Windows — см. примечание ниже |
-| **Mutable Instruments eurorack** (Émilie Gillet): `elements/dsp/resonator.cc`, `exciter.cc`, `elements/resources.cc` | `Middlewares/Third_Party/eurorack/` (условия — в заголовках файлов) | MIT | прошивка (движок Dulcimer), Windows |
-| **stmlib** (Émilie Gillet) — вложенный подмодуль eurorack | `Middlewares/Third_Party/eurorack/stmlib/` (`LICENSE`) | MIT | прошивка, Windows |
 | **bfreeOrgan2 / flexynth** (Franco Caspe) | `Middlewares/Third_Party/bfreeOrgan2/` (`LICENSE.txt`, `NOTICE`) | Apache-2.0 | прошивка (движок Organ), Windows |
 | **RtMidi** (Gary Scavone) — скачивается CMake при сборке Windows-приложения | `FetchContent`, см. `Platform/windows/CMakeLists.txt` | MIT-подобная (лицензия RtMidi) | только Windows |
 
@@ -47,7 +45,8 @@ If no LICENSE file comes with this software, it is provided AS-IS»). Сгене
 
 | Компонент | Путь | Лицензия | Статус |
 |---|---|---|---|
-| **STK** (Synthesis ToolKit) | `Middlewares/Third_Party/stk/` (`LICENSE`) | MIT-подобная (STK License) | не компилируется ни в прошивке, ни в тестах, ни в Windows-версии — подмодуль сохранён как справочный пример кода |
+| **STK** (Synthesis ToolKit) | `Middlewares/Third_Party/stk/` (`LICENSE`) | MIT-подобная (STK License) | не компилируется ни в прошивке, ни в тестах, ни в Windows-версии — подмодуль сохранён как справочный пример кода. Модель скрипки (`Engine/synth/violin_synth.cpp`) написана заново по описанию волноводной модели смычковой струны (J. O. Smith, 1992; та же схема в STK `Bowed`), код STK не копировался |
+| **Mutable Instruments eurorack** (Émilie Gillet) и вложенный **stmlib** | `Middlewares/Third_Party/eurorack/` | MIT | не компилируется (раньше — движок Dulcimer, удалён); подмодуль сохранён как справочный пример кода |
 | **MiniSTM32H7xx** — всё, кроме 4 файлов драйвера ST7735 (см. выше) | `Middlewares/Third_Party/MiniSTM32H7xx/` | **GPL-3.0** | в сборку не входит; подмодуль сохранён как справочный пример кода |
 
 ## SoundFont-банки и тестовые данные

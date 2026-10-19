@@ -8,10 +8,10 @@ endif()
 
 option(PURRMIDI_BUILD_TESTS "Build host unit tests" ON)
 # Предупреждения GCC/Clang в коде проекта считаются ошибками (в CI включено). Сторонние каталоги
-# (DaisySP, bfreeOrgan2, TinySoundFont, eurorack) подключаются как SYSTEM.
+# (DaisySP, bfreeOrgan2, TinySoundFont) подключаются как SYSTEM.
 option(PURRMIDI_WERROR "Treat compiler warnings in project code as errors (GCC/Clang)" OFF)
 
-# Все синтезаторы (epiano / pluck / lead / organ / soundfont) входят в сборку; активный
+# Все синтезаторы (epiano / pluck / lead / organ / violin / soundfont) входят в сборку; активный
 # выбирается во время работы сообщением MIDI Program Change (см. Engine/synth/synth_engine.h).
 set(DAISYSP_DIR "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/DaisySP")
 if(NOT EXISTS "${DAISYSP_DIR}/Source")
@@ -131,46 +131,17 @@ target_include_directories(purrmidi_synth_soundfont SYSTEM PUBLIC
 )
 target_compile_features(purrmidi_synth_soundfont PUBLIC cxx_std_17)
 
-# dulcimer: цимбалы / модальный резонатор (Mutable Instruments Elements)
-add_library(purrmidi_synth_dulcimer STATIC
-    "${CMAKE_SOURCE_DIR}/Engine/synth/dulcimer_synth.cpp"
-    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack/elements/dsp/resonator.cc"
-    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack/elements/dsp/exciter.cc"
-    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack/elements/resources.cc"
-    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack/stmlib/utils/random.cc"
-    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack/stmlib/dsp/units.cc"
+# violin: полифоническая скрипка - волновод смычковой струны и резонансы деки (без внешних зависимостей)
+add_library(purrmidi_synth_violin STATIC
+    "${CMAKE_SOURCE_DIR}/Engine/synth/violin_synth.cpp"
 )
-target_include_directories(purrmidi_synth_dulcimer PUBLIC
+target_include_directories(purrmidi_synth_violin PUBLIC
     "${CMAKE_SOURCE_DIR}/Engine/synth"
 )
-target_include_directories(purrmidi_synth_dulcimer SYSTEM PUBLIC
-    "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack"
-)
-target_compile_definitions(purrmidi_synth_dulcimer PUBLIC TEST)
-target_compile_features(purrmidi_synth_dulcimer PUBLIC cxx_std_17)
-target_link_libraries(purrmidi_synth_dulcimer PUBLIC purrmidi_synth_common)
+target_compile_features(purrmidi_synth_violin PUBLIC cxx_std_17)
+target_link_libraries(purrmidi_synth_violin PUBLIC purrmidi_synth_common)
 
-# flute: полифонический физический модулятор флейты (STK Flute)
-add_library(purrmidi_synth_flute STATIC
-    "${CMAKE_SOURCE_DIR}/Engine/synth/flute_synth.cpp"
-)
-target_include_directories(purrmidi_synth_flute PUBLIC
-    "${CMAKE_SOURCE_DIR}/Engine/synth"
-)
-target_compile_features(purrmidi_synth_flute PUBLIC cxx_std_17)
-target_link_libraries(purrmidi_synth_flute PUBLIC purrmidi_synth_common)
-
-# saxophone: полифонический физический модулятор саксофона (STK Single Reed)
-add_library(purrmidi_synth_saxophone STATIC
-    "${CMAKE_SOURCE_DIR}/Engine/synth/saxophone_synth.cpp"
-)
-target_include_directories(purrmidi_synth_saxophone PUBLIC
-    "${CMAKE_SOURCE_DIR}/Engine/synth"
-)
-target_compile_features(purrmidi_synth_saxophone PUBLIC cxx_std_17)
-target_link_libraries(purrmidi_synth_saxophone PUBLIC purrmidi_synth_common)
-
-foreach(_synth sine pluck lead epiano organ soundfont dulcimer flute saxophone)
+foreach(_synth sine pluck lead epiano organ soundfont violin)
     if(MSVC)
         target_compile_options(purrmidi_synth_${_synth} PRIVATE /utf-8 /W4)
     else()
@@ -213,9 +184,7 @@ target_link_libraries(purrmidi_core PUBLIC
     purrmidi_synth_pluck
     purrmidi_synth_sine
     purrmidi_synth_soundfont
-    purrmidi_synth_dulcimer
-    purrmidi_synth_flute
-    purrmidi_synth_saxophone
+    purrmidi_synth_violin
 )
 target_compile_features(purrmidi_core PUBLIC c_std_11 cxx_std_17)
 

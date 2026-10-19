@@ -15,11 +15,9 @@
  *        1    | Pluck     — Карплус-Стронг, DaisySP Pluck
  *        2    | Lead      — полифонический субтрактивный аналоговый лид
  *        3    | Organ     — орган Хаммонда (bfreeOrgan2)
- *        4    | Dulcimer  — цимбалы (модальный резонатор Elements)
- *        5    | Flute     — флейта (физическая модель STK)
- *        6    | Saxophone — саксофон (физическая модель STK Saxofony)
- *        7... | SoundFont — по одной программе на КАЖДЫЙ пресет загруженного SF2 (7 = первый пресет банка,
- *             |             8 = второй и т.д.); на дисплее «SF:<имя пресета>»
+ *        4    | Violin    — скрипка (волновод смычковой струны + резонансы деки)
+ *        5... | SoundFont — по одной программе на КАЖДЫЙ пресет загруженного SF2 (5 = первый пресет банка,
+ *             |             6 = второй и т.д.); на дисплее «SF:<имя пресета>»
  *
  * SoundFont стоит в конце списка: число его программ зависит от банка. Если банк не загружен, под номером 7
  * остаётся одна программа «SoundFont» (выбор покажет ошибку, а цикл Program Change 127 её пропускает).
@@ -55,10 +53,8 @@ typedef enum {
     SYNTH_ENGINE_PLUCK     = 1,
     SYNTH_ENGINE_LEAD      = 2,
     SYNTH_ENGINE_ORGAN     = 3,
-    SYNTH_ENGINE_DULCIMER  = 4,
-    SYNTH_ENGINE_FLUTE     = 5,
-    SYNTH_ENGINE_SAXOPHONE = 6,
-    SYNTH_ENGINE_SOUNDFONT = 7,   /* последним: за ним идут пресеты SF2 (см. SynthEngine_GetProgramCount) */
+    SYNTH_ENGINE_VIOLIN    = 4,
+    SYNTH_ENGINE_SOUNDFONT = 5,   /* последним: за ним идут пресеты SF2 (см. SynthEngine_GetProgramCount) */
     SYNTH_ENGINE_COUNT
 } SynthEngineId;
 
@@ -92,13 +88,13 @@ void SynthEngine_ControlChange(uint8_t control, uint8_t value);
  * Колесо высоты тона (MIDI Pitch Bend): bend = -8192..+8191, 0 - центр (значения вне диапазона ограничиваются).
  * Последнее значение запоминается и применяется к новому движку при переключении (колесо - физический орган, оно
  * не сбрасывается сменой тембра); SynthEngine_Panic() возвращает его в центр. Движки без поддержки значение
- * игнорируют. Сейчас Pitch Bend обрабатывают E-Piano (±2 полутона) и SoundFont (по RPN 0, по умолчанию ±2).
+ * игнорируют. Сейчас Pitch Bend обрабатывают E-Piano и Violin (±2 полутона) и SoundFont (по RPN 0, по умолчанию ±2).
  */
 void SynthEngine_PitchBend(int16_t bend);
 
 /**
- * Channel Pressure (монофонический Aftertouch), 0..127. Вызывает обработчик активного движка; сейчас ни один движок
- * его не использует, и сообщение безвредно игнорируется (маршрут готов для будущих движков).
+ * Channel Pressure (монофонический Aftertouch), 0..127. Вызывает обработчик активного движка; сейчас только Violin использует
+ * его (усиление смычка); остальные движки сообщение безвредно игнорируют.
  */
 void SynthEngine_ChannelPressure(uint8_t pressure);
 
@@ -129,7 +125,7 @@ uint32_t SynthEngine_GetProgram(void);
 /** Выбор программы по номеру (без заворачивания). @return 0, если номер вне диапазона. */
 int SynthEngine_SelectProgram(uint32_t program);
 
-/** Короткое имя программы для дисплея (ASCII, не длиннее out_size-1 символов): «Flute», «SF:Piano». */
+/** Короткое имя программы для дисплея (ASCII, не длиннее out_size-1 символов): «Violin», «SF:Piano». */
 void SynthEngine_GetProgramName(uint32_t program, char *out, uint32_t out_size);
 
 /**

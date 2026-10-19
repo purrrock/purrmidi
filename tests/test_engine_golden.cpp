@@ -87,21 +87,21 @@ int main(int argc, char **argv) {
     // Все движки без SoundFont (ему нужен банк; он проверяется отдельными тестами).
     struct Entry { uint8_t program; const char *name; };
     const Entry engines[] = {
-        {0, "epiano"}, {1, "pluck"}, {2, "lead"}, {3, "organ"}, {4, "dulcimer"}, {5, "flute"}, {6, "saxophone"},
+        {0, "epiano"}, {1, "pluck"}, {2, "lead"}, {3, "organ"}, {4, "violin"},
     };
 
     SynthEngine_Init();
 
     // Проход 1: в «неудобном» порядке, чтобы соседние движки были с разными размерами памяти.
-    const int order1[] = {4, 2, 5, 0, 6, 1, 3};
+    const int order1[] = {4, 2, 0, 1, 3};
     // Проход 2: другой порядок, те же сценарии.
-    const int order2[] = {1, 3, 6, 4, 0, 2, 5};
+    const int order2[] = {1, 3, 4, 0, 2};
 
-    Result first[7], second[7];
+    Result first[5], second[5];
     for (int k : order1) { first[k]  = run_script(engines[k].program); }
     for (int k : order2) { second[k] = run_script(engines[k].program); }
 
-    for (int k = 0; k < 7; ++k) {
+    for (int k = 0; k < 5; ++k) {
         if (print_hash) std::printf("engine=%-9s hash=%016llx peak=%d\n", engines[k].name,
                                     (unsigned long long)first[k].hash, first[k].peak);
         if (first[k].hash != second[k].hash)

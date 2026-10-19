@@ -33,20 +33,14 @@ static void test_engine_registration_and_pc() {
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
 
     SynthEngine_ProgramChange(4);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_DULCIMER);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_VIOLIN);
 
-    SynthEngine_ProgramChange(5);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_FLUTE);
-
-    SynthEngine_ProgramChange(6);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SAXOPHONE);
-
-    SynthEngine_ProgramChange(7);   // SoundFont - в конце списка
+    SynthEngine_ProgramChange(5);   // SoundFont - в конце списка
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
     CHECK(std::strcmp(SynthEngine_GetName(), "soundfont") == 0);
 
-    const uint32_t total = SynthEngine_GetProgramCount();   // 7 встроенных + пресеты загруженного банка
-    CHECK(total >= 8U);
+    const uint32_t total = SynthEngine_GetProgramCount();   // 5 встроенных + пресеты загруженного банка
+    CHECK(total >= 6U);
     SynthEngine_ProgramChange((uint8_t)(total % 128U == 0U ? 0U : total));   // total % total == 0 -> epiano
     if (total <= 126U) CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
 
@@ -70,8 +64,8 @@ static void test_presets_are_programs() {
     char name[18];
     SynthEngine_GetProgramName(0, name, sizeof(name));
     CHECK(std::strcmp(name, "E-Piano") == 0);
-    SynthEngine_GetProgramName(SYNTH_ENGINE_SAXOPHONE, name, sizeof(name));
-    CHECK(std::strcmp(name, "Saxophone") == 0);
+    SynthEngine_GetProgramName(SYNTH_ENGINE_VIOLIN, name, sizeof(name));
+    CHECK(std::strcmp(name, "Violin") == 0);
     for (uint32_t k = 0; k < presets && k < 5U; ++k) {
         SynthEngine_GetProgramName((uint32_t)SYNTH_ENGINE_SOUNDFONT + k, name, sizeof(name));
         CHECK(std::strncmp(name, "SF:", 3) == 0);
@@ -99,7 +93,7 @@ static void test_presets_are_programs() {
     CHECK(SynthEngine_GetProgram() == last);
 
     // Program Change 127 обходит список по кругу и доходит до пресетов банка.
-    SynthEngine_SelectProgram(SYNTH_ENGINE_SAXOPHONE);
+    SynthEngine_SelectProgram(SYNTH_ENGINE_VIOLIN);
     SynthEngine_SelectNext();
     CHECK(SynthEngine_GetProgram() == (uint32_t)SYNTH_ENGINE_SOUNDFONT);
     if (presets > 1U) {

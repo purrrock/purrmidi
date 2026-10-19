@@ -31,10 +31,8 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
-#include "synth_engine.h" /* Синтезаторы epiano / pluck / lead / organ / soundfont */
-#include "dulcimer_synth.h"
-#include "flute_synth.h"
-#include "saxophone_synth.h"
+#include "synth_engine.h" /* Синтезаторы epiano / pluck / lead / organ / violin / soundfont */
+#include "violin_synth.h"
 #include "display.h"
 #include "midi_event.h"
 #include "midi_queue.h"

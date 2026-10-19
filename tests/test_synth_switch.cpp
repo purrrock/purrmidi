@@ -12,8 +12,7 @@
 #include "midi_dispatch.h"
 #include "synth_engine.h"
 #include "synth_arena.h"
-#include "flute_synth.h"
-#include "saxophone_synth.h"
+#include "violin_synth.h"
 #include "lead_synth.h"
 #include "pluck_synth.h"
 #include "check.h"
@@ -74,18 +73,10 @@ static void test_program_change_selects_engine() {
     CHECK(std::strcmp(SynthEngine_GetName(), "organ") == 0);
 
     send_pc(4);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_DULCIMER);
-    CHECK(std::strcmp(SynthEngine_GetName(), "dulcimer") == 0);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_VIOLIN);
+    CHECK(std::strcmp(SynthEngine_GetName(), "violin") == 0);
 
-    send_pc(5);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_FLUTE);
-    CHECK(std::strcmp(SynthEngine_GetName(), "flute") == 0);
-
-    send_pc(6);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SAXOPHONE);
-    CHECK(std::strcmp(SynthEngine_GetName(), "saxophone") == 0);
-
-    send_pc(7);                                   // SoundFont - в конце списка (первый пресет банка)
+    send_pc(5);                                   // SoundFont - в конце списка (первый пресет банка)
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
     CHECK(std::strcmp(SynthEngine_GetName(), "soundfont") == 0);
 
@@ -96,12 +87,8 @@ static void test_program_change_selects_engine() {
     send_pc(3, 9);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
     send_pc(4, 12);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_DULCIMER);
-    send_pc(5, 14);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_FLUTE);
-    send_pc(6, 15);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SAXOPHONE);
-    send_pc(7, 15);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_VIOLIN);
+    send_pc(5, 15);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
     send_pc(1, 15);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
@@ -143,7 +130,7 @@ static void test_program_change_127_cycles_engines() {
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
 
     // Program Change 127 переключает на следующий инструмент по циклу:
-    // E-Piano -> Pluck -> Lead -> Organ -> Dulcimer -> Flute -> Saxophone -> пресеты SoundFont -> E-Piano.
+    // E-Piano -> Pluck -> Lead -> Organ -> Violin -> пресеты SoundFont -> E-Piano.
     // Если SoundFont недоступен (нет SD/файла SNDFNT.SF2), он пропускается.
     send_pc(127);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
@@ -351,31 +338,31 @@ static void test_panic_silences_every_engine() {
 
 // Общая арена: движок, у которого арену забрал другой, обязан молчать (а не читать чужую память), а IsNoteActive - не падать.
 static void test_stale_engine_is_safe_after_arena_switch() {
-    send_pc(4);                                       // Dulcimer занимает арену
+    send_pc(4);                                       // Violin занимает арену
     send_note_on(60, 100);
     render_peak(2400);
     CHECK(SynthArena_Owner() != nullptr);
+    CHECK(ViolinSynth_IsNoteActive(60));
 
     std::vector<int16_t> buf(256 * 2, 0x5555);
-    FluteSynth_FillStereoBuffer(buf.data(), 256);     // Flute арену не владеет -> тишина, без обращения к voices
-    for (int16_t v : buf) CHECK(v == 0);
-    std::fill(buf.begin(), buf.end(), (int16_t)0x5555);
-    SaxophoneSynth_FillStereoBuffer(buf.data(), 256);
-    for (int16_t v : buf) CHECK(v == 0);
-    std::fill(buf.begin(), buf.end(), (int16_t)0x5555);
-    LeadSynth_FillStereoBuffer(buf.data(), 256);
+    LeadSynth_FillStereoBuffer(buf.data(), 256);      // Lead арену не владеет -> тишина, без обращения к voices
     for (int16_t v : buf) CHECK(v == 0);
     for (int i = 0; i < 256; ++i) CHECK(PluckSynth_NextSample() == 0);
-    CHECK(!FluteSynth_IsNoteActive(60));
-    CHECK(!SaxophoneSynth_IsNoteActive(60));
     CHECK(!LeadSynth_IsNoteActive(60));
     CHECK(!PluckSynth_IsNoteActive(60));
 
     // Действующий движок продолжает работать.
     CHECK(render_peak(2400) > 0);
 
+    // Арену забрал Lead: Violin обязан молчать и не падать.
+    send_pc(2);
+    std::fill(buf.begin(), buf.end(), (int16_t)0x5555);
+    ViolinSynth_FillStereoBuffer(buf.data(), 256);
+    for (int16_t v : buf) CHECK(v == 0);
+    CHECK(!ViolinSynth_IsNoteActive(60));
+
     // Обход всех движков с общей арены по кругу: каждый после выбора звучит.
-    const uint8_t order[] = {5, 6, 1, 2, 4, 5};
+    const uint8_t order[] = {4, 1, 2, 4, 1, 4};
     for (uint8_t prog : order) {
         send_pc(prog);
         send_note_on(64, 110);
