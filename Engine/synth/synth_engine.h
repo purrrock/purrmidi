@@ -15,11 +15,18 @@
  *        1    | Pluck     — Карплус-Стронг, DaisySP Pluck
  *        2    | Lead      — полифонический субтрактивный аналоговый лид
  *        3    | Organ     — орган Хаммонда (bfreeOrgan2)
- *        4    | SoundFont — синтезатор SF2 на базе TinySoundFont
+ *        4    | Dulcimer  — цимбалы (модальный резонатор Elements)
+ *        5    | Flute     — флейта (физическая модель STK)
+ *        6    | Saxophone — саксофон (физическая модель STK Saxofony)
+ *        7... | SoundFont — по одной программе на КАЖДЫЙ пресет загруженного SF2 (7 = первый пресет банка,
+ *             |             8 = второй и т.д.); на дисплее «SF:<имя пресета>»
  *
- * Номера программ вне диапазона заворачиваются по модулю SYNTH_ENGINE_COUNT
- * (program % SYNTH_ENGINE_COUNT), поэтому кнопки «+/−» на любой клавиатуре всегда выбирают
- * какой-нибудь инструмент, а не «молчат». Канал сообщения не учитывается (omni).
+ * SoundFont стоит в конце списка: число его программ зависит от банка. Если банк не загружен, под номером 7
+ * остаётся одна программа «SoundFont» (выбор покажет ошибку, а цикл Program Change 127 её пропускает).
+ *
+ * Номера программ вне диапазона заворачиваются по модулю SynthEngine_GetProgramCount()
+ * (program % число программ), поэтому кнопки «+/−» на любой клавиатуре всегда выбирают
+ * какой-нибудь инструмент, а не «молчат». Program Change 127 — «следующий инструмент» по кругу. Канал сообщения не учитывается (omni).
  *
  * Состояние выбора в энергонезависимой памяти НЕ сохраняется: после включения
  * питания всегда звучит E-Piano.
@@ -48,10 +55,10 @@ typedef enum {
     SYNTH_ENGINE_PLUCK     = 1,
     SYNTH_ENGINE_LEAD      = 2,
     SYNTH_ENGINE_ORGAN     = 3,
-    SYNTH_ENGINE_SOUNDFONT = 4,
-    SYNTH_ENGINE_DULCIMER  = 5,
-    SYNTH_ENGINE_FLUTE     = 6,
-    SYNTH_ENGINE_SAXOPHONE = 7,
+    SYNTH_ENGINE_DULCIMER  = 4,
+    SYNTH_ENGINE_FLUTE     = 5,
+    SYNTH_ENGINE_SAXOPHONE = 6,
+    SYNTH_ENGINE_SOUNDFONT = 7,   /* последним: за ним идут пресеты SF2 (см. SynthEngine_GetProgramCount) */
     SYNTH_ENGINE_COUNT
 } SynthEngineId;
 
@@ -102,7 +109,7 @@ void SynthEngine_ChannelPressure(uint8_t pressure);
 void SynthEngine_PolyPressure(uint8_t midi_note, uint8_t pressure);
 
 /**
- * MIDI Program Change: выбор синтезатора по номеру программы (program % SYNTH_ENGINE_COUNT).
+ * MIDI Program Change: выбор синтезатора по номеру программы (program % SynthEngine_GetProgramCount()).
  * Если нужный синтезатор уже активен — ничего не происходит (звучащие ноты не обрываются).
  */
 void SynthEngine_ProgramChange(uint8_t program);
@@ -112,6 +119,18 @@ void SynthEngine_ProgramChange(uint8_t program);
  * @return 0, если id вне диапазона; иначе 1.
  */
 int SynthEngine_Select(SynthEngineId id);
+
+/** Число программ: SYNTH_ENGINE_SOUNDFONT программ встроенных движков + число пресетов SF2 (не меньше 1). */
+uint32_t SynthEngine_GetProgramCount(void);
+
+/** Номер текущей программы 0..GetProgramCount()-1 (для SoundFont — SYNTH_ENGINE_SOUNDFONT + индекс пресета). */
+uint32_t SynthEngine_GetProgram(void);
+
+/** Выбор программы по номеру (без заворачивания). @return 0, если номер вне диапазона. */
+int SynthEngine_SelectProgram(uint32_t program);
+
+/** Короткое имя программы для дисплея (ASCII, не длиннее out_size-1 символов): «Flute», «SF:Piano». */
+void SynthEngine_GetProgramName(uint32_t program, char *out, uint32_t out_size);
 
 /**
  * Переключение на следующий доступный синтезатор по циклу (как Program Change 127).

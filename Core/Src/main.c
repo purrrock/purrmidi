@@ -178,17 +178,14 @@ static void Button_K1_Process(void)
     }
 }
 
-/* Названия инструментов для дисплея (только ASCII, до 17 символов). Порядок = SynthEngineId. */
-static const char * const display_patch_names[SYNTH_ENGINE_COUNT] =
-{
-    "E-Piano", "Pluck", "Lead", "Organ", "SoundFont", "Dulcimer", "Flute", "Saxophone"
-};
-
-/* Номер на дисплее 1-based (как на большинстве клавиатур): Program Change 0 -> "01" */
+/* Номер на дисплее 1-based (как на большинстве клавиатур): Program Change 0 -> "01".
+ * Имя берётся у диспетчера: для пресетов загруженного SF2 это "SF:<имя пресета>". */
 static void Display_SyncPatch(void)
 {
-    const SynthEngineId id = SynthEngine_GetCurrent();
-    Display_SetPatch((uint8_t)(id + 1U), display_patch_names[id]);
+    char name[18];   /* до 17 символов + '\0' (ширина поля дисплея) */
+    const uint32_t program = SynthEngine_GetProgram();
+    SynthEngine_GetProgramName(program, name, sizeof(name));
+    Display_SetPatch((uint8_t)((program + 1U) > 255U ? 255U : (program + 1U)), name);
 }
 
 /* Уровень CC 0..127 -> проценты для полосы громкости */

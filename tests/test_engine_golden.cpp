@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
     // Все движки без SoundFont (ему нужен банк; он проверяется отдельными тестами).
     struct Entry { uint8_t program; const char *name; };
     const Entry engines[] = {
-        {0, "epiano"}, {1, "pluck"}, {2, "lead"}, {3, "organ"}, {5, "dulcimer"}, {6, "flute"}, {7, "saxophone"},
+        {0, "epiano"}, {1, "pluck"}, {2, "lead"}, {3, "organ"}, {4, "dulcimer"}, {5, "flute"}, {6, "saxophone"},
     };
 
     SynthEngine_Init();

@@ -12,7 +12,7 @@ option(PURRMIDI_BUILD_TESTS "Build host unit tests" ON)
 option(PURRMIDI_WERROR "Treat compiler warnings in project code as errors (GCC/Clang)" OFF)
 
 # Все синтезаторы (epiano / pluck / lead / organ / soundfont) входят в сборку; активный
-# выбирается во время работы сообщением MIDI Program Change (см. Core/Inc/synth_engine.h).
+# выбирается во время работы сообщением MIDI Program Change (см. Engine/synth/synth_engine.h).
 set(DAISYSP_DIR "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/DaisySP")
 if(NOT EXISTS "${DAISYSP_DIR}/Source")
     message(FATAL_ERROR
@@ -42,7 +42,6 @@ add_library(purrmidi_synth_sine STATIC
     "${CMAKE_SOURCE_DIR}/Engine/synth/sine_synth.c"
 )
 target_include_directories(purrmidi_synth_sine PUBLIC
-    "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
 )
 target_compile_features(purrmidi_synth_sine PUBLIC c_std_11)
@@ -52,7 +51,6 @@ add_library(purrmidi_synth_epiano STATIC
     "${CMAKE_SOURCE_DIR}/Engine/synth/epiano_synth.cpp"
 )
 target_include_directories(purrmidi_synth_epiano PUBLIC
-    "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
 )
 target_compile_features(purrmidi_synth_epiano PUBLIC cxx_std_17)
@@ -67,7 +65,6 @@ add_library(purrmidi_synth_organ STATIC
     "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/bfreeOrgan2/components/env_click.cpp"
 )
 target_include_directories(purrmidi_synth_organ PUBLIC
-    "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
 )
 target_include_directories(purrmidi_synth_organ SYSTEM PUBLIC
@@ -82,7 +79,6 @@ add_library(purrmidi_synth_pluck STATIC
     "${DAISYSP_DIR}/DaisySP-LGPL/Source/PhysicalModeling/pluck.cpp"
 )
 target_include_directories(purrmidi_synth_pluck PUBLIC
-    "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
 )
 target_include_directories(purrmidi_synth_pluck SYSTEM PUBLIC
@@ -105,7 +101,6 @@ add_library(purrmidi_synth_lead STATIC
     "${DAISYSP_DIR}/Source/Control/adsr.cpp"
 )
 target_include_directories(purrmidi_synth_lead PUBLIC
-    "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
 )
 target_include_directories(purrmidi_synth_lead SYSTEM PUBLIC
@@ -127,7 +122,6 @@ add_library(purrmidi_synth_soundfont STATIC
     "${CMAKE_SOURCE_DIR}/Engine/synth/tinysoundfont_impl.cpp"
 )
 target_include_directories(purrmidi_synth_soundfont PUBLIC
-    "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
     "${CMAKE_SOURCE_DIR}/Platform/host"
     "${CMAKE_SOURCE_DIR}/Platform/qspi_xip"
@@ -147,7 +141,6 @@ add_library(purrmidi_synth_dulcimer STATIC
     "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/eurorack/stmlib/dsp/units.cc"
 )
 target_include_directories(purrmidi_synth_dulcimer PUBLIC
-    "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
 )
 target_include_directories(purrmidi_synth_dulcimer SYSTEM PUBLIC
@@ -162,7 +155,6 @@ add_library(purrmidi_synth_flute STATIC
     "${CMAKE_SOURCE_DIR}/Engine/synth/flute_synth.cpp"
 )
 target_include_directories(purrmidi_synth_flute PUBLIC
-    "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
 )
 target_compile_features(purrmidi_synth_flute PUBLIC cxx_std_17)
@@ -173,7 +165,6 @@ add_library(purrmidi_synth_saxophone STATIC
     "${CMAKE_SOURCE_DIR}/Engine/synth/saxophone_synth.cpp"
 )
 target_include_directories(purrmidi_synth_saxophone PUBLIC
-    "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
 )
 target_compile_features(purrmidi_synth_saxophone PUBLIC cxx_std_17)
@@ -205,13 +196,12 @@ endforeach()
 # ---------------------------------------------------------------------------
 add_library(purrmidi_core STATIC
     "${CMAKE_SOURCE_DIR}/Engine/synth/synth_engine.cpp"
-    "${CMAKE_SOURCE_DIR}/Core/Src/chord_detector.c"
+    "${CMAKE_SOURCE_DIR}/Engine/midi/chord_detector.c"
     "${CMAKE_SOURCE_DIR}/Engine/midi/midi_queue.c"
     "${CMAKE_SOURCE_DIR}/Engine/midi/midi_dispatch.c"
 )
 
 target_include_directories(purrmidi_core PUBLIC
-    "${CMAKE_SOURCE_DIR}/Core/Inc"
     "${CMAKE_SOURCE_DIR}/Engine/midi"
     "${CMAKE_SOURCE_DIR}/Engine/synth"
 )

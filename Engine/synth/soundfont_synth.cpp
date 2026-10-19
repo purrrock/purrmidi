@@ -47,6 +47,14 @@
 #define SF2_DIAG_STATS 1
 #endif
 
+/* Порог (в % бюджета блока), после которого гасятся отпущенные голоса, и сколько голосов гасить за блок. */
+#ifndef SF2_SHED_THRESHOLD_PCT
+#define SF2_SHED_THRESHOLD_PCT 75U
+#endif
+#ifndef SF2_SHED_VOICES_PER_BLOCK
+#define SF2_SHED_VOICES_PER_BLOCK 4
+#endif
+
 #define SF_EVENT_FIFO_SIZE 256U   /* power of two */
 #define SF_NOTE_ON_FIFO_LIMIT 224U /* slots for Note On / Program / continuous CC; the rest is reserved for Note Off and pedal */
 #define SF_MAX_NOTE_REGIONS 8
@@ -57,6 +65,7 @@ tsf  *g_tsf = nullptr;
 bool  g_loaded = false;
 bool  g_init_attempted = false;   /* SoundFontSynth_InitSF2() has been run at least once */
 
+/* EV_PROGRAM: смена пресета; индекс пресета (0..65535) передаётся парой байт a (младший) и b (старший). */
 enum EventType : uint8_t { EV_NOTE_ON = 1, EV_NOTE_OFF, EV_CC, EV_PROGRAM };
 
 struct Event {
@@ -75,6 +84,8 @@ synth::NoteInput<Event, SF_EVENT_FIFO_SIZE, SF_NOTE_ON_FIFO_LIMIT> g_input;
  * to centre can never be lost. Written by main, read by the audio context. */
 std::atomic<int> g_pitch_wheel{8192};
 int              g_pitch_applied = 8192;   /* audio context only */
+std::atomic<uint32_t> g_preset_requested{0};   /* последний запрошенный из main индекс пресета */
+uint32_t         g_preset_applied = 0;     /* пресет, применённый в аудиоконтексте */
 
 float velocity_to_float(uint8_t velocity)
 {
@@ -97,6 +108,7 @@ struct DiagStats {
     volatile uint32_t voices_started;  /* growth of the active voice count after NoteOn                */
     volatile uint32_t voice_shortfall; /* wanted - started: voices stolen from releasing notes or lost */
     volatile uint32_t regions_max;     /* most regions of one note seen (session)                      */
+    volatile uint32_t voices_shed;     /* отпущенные голоса, ускоренно погашенные защитой от перегрузки */
 };
 DiagStats g_diag;
 uint32_t  g_diag_fifo_dropped_seen = 0;
@@ -201,8 +213,16 @@ void apply_event(const Event &ev)
             tsf_channel_midi_control(g_tsf, 0, (int)ev.a, (int)ev.b);
             break;
         case EV_PROGRAM:
-            tsf_channel_set_presetnumber(g_tsf, 0, (int)ev.a, 0);
+        {
+            /* Индекс пресета в банке (а не номер MIDI-программы): в банке могут быть пресеты с одинаковым номером
+             * в разных банках, а выбираем мы их по порядку списка. */
+            const int idx = (int)ev.a | ((int)ev.b << 8);
+            if (idx < tsf_get_presetcount(g_tsf)) {
+                tsf_channel_set_presetindex(g_tsf, 0, idx);
+                g_preset_applied = (uint32_t)idx;
+            }
             break;
+        }
         default:
             break;
     }
@@ -300,7 +320,9 @@ bool SoundFontSynth_InitSF2(void)
 
     /* MIDI channel 0 must exist before the first note: tsf_channel_note_on() ignores notes
      * for channels that have not been created. */
-    tsf_channel_set_presetnumber(g_tsf, 0, 0, 0);
+    tsf_channel_set_presetindex(g_tsf, 0, 0);
+    g_preset_requested.store(0, std::memory_order_relaxed);
+    g_preset_applied = 0;
 
     g_loaded = true;
     return true;
@@ -317,7 +339,9 @@ void SoundFontSynth_Init(void)
 
     if (g_tsf) {
         tsf_reset(g_tsf);
-        tsf_channel_set_presetnumber(g_tsf, 0, 0, 0);
+        tsf_channel_set_presetindex(g_tsf, 0, 0);
+        g_preset_requested.store(0, std::memory_order_relaxed);
+        g_preset_applied = 0;
         tsf_channel_set_pitchwheel(g_tsf, 0, 8192);
     }
     g_input.Reset();
@@ -376,8 +400,33 @@ void SoundFontSynth_ProgramChange(uint8_t program)
 {
     if (!g_loaded || !g_tsf) return;
 
-    Event ev = { EV_PROGRAM, program, 0 };
+    SoundFontSynth_SelectPreset(program);
+}
+
+uint32_t SoundFontSynth_GetPresetCount(void)
+{
+    return (g_loaded && g_tsf) ? (uint32_t)tsf_get_presetcount(g_tsf) : 0U;
+}
+
+const char *SoundFontSynth_GetPresetName(uint32_t preset_index)
+{
+    if (!g_loaded || !g_tsf || preset_index >= (uint32_t)tsf_get_presetcount(g_tsf)) return nullptr;
+    return tsf_get_presetname(g_tsf, (int)preset_index);
+}
+
+void SoundFontSynth_SelectPreset(uint32_t preset_index)
+{
+    if (!g_loaded || !g_tsf) return;
+    if (preset_index >= (uint32_t)tsf_get_presetcount(g_tsf)) return;
+
+    g_preset_requested.store(preset_index, std::memory_order_relaxed);
+    Event ev = { EV_PROGRAM, (uint8_t)(preset_index & 0xFFU), (uint8_t)((preset_index >> 8) & 0xFFU) };
     g_input.Soft(ev);
+}
+
+uint32_t SoundFontSynth_GetPreset(void)
+{
+    return g_preset_requested.load(std::memory_order_relaxed);
 }
 
 void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
@@ -413,22 +462,39 @@ void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
         return;
     }
 
-#if SF2_DIAG_STATS
+    /* Обнуление денормалей: затухающие хвосты голосов (огибающие, ФНЧ) иначе резко замедляют FPU. */
+    synth::EnableFlushToZero();
+
     const uint32_t t0 = diag_cycles();
     render_block(buffer, num_frames);
     const uint32_t dt = diag_cycles() - t0;
+
+#if !SF2_HOST_MODE
+    /* Защита от перегрузки: сложный аккорд с педалью даёт десятки голосов, и блок перестаёт укладываться в бюджет
+     * (хрипы и пропуски). Если блок занял больше SF2_SHED_THRESHOLD_PCT % бюджета, ускоренно гасим до
+     * SF2_SHED_VOICES_PER_BLOCK уже отпущенных голосов с самыми тихими хвостами; звучащие ноты не трогаем. */
+    const uint32_t budget_cycles = (SystemCoreClock / 48000U) * num_frames;
+    if (dt > (budget_cycles / 100U) * SF2_SHED_THRESHOLD_PCT) {
+        const int shed = tsf_shed_releasing_voices(g_tsf, SF2_SHED_VOICES_PER_BLOCK);
+#if SF2_DIAG_STATS
+        g_diag.voices_shed += (uint32_t)shed;
+#else
+        (void)shed;
+#endif
+    }
+#endif
+
+#if SF2_DIAG_STATS
     const uint32_t voices = (uint32_t)tsf_active_voice_count(g_tsf);
 
     g_diag.blocks++;
     g_diag.cycles_sum += dt;
     if (dt > g_diag.cycles_max) g_diag.cycles_max = dt;
 #if !SF2_HOST_MODE
-    if (dt > (SystemCoreClock / 48000U) * num_frames) g_diag.over_budget++;
+    if (dt > budget_cycles) g_diag.over_budget++;
 #endif
     g_diag.voices_last = voices;
     if (voices > g_diag.voices_max) g_diag.voices_max = voices;
-#else
-    render_block(buffer, num_frames);
 #endif
 }
 
@@ -496,12 +562,12 @@ void SoundFontSynth_ReportStats(uint32_t now_ms)
 
     std::fprintf(stderr,
         "[SF2] 1s: render avg=%lu max=%lu us (over budget=%lu of %lu blocks) | voices max=%lu now=%lu"
-        " | notes=%lu regions want=%lu started=%lu short=%lu (max/note=%lu)"
+        " | notes=%lu regions want=%lu started=%lu short=%lu (max/note=%lu) shed_voices=%lu"
         " | mix peak=%lu.%02lu FS, over 1.0 FS: %lu samples in %lu blocks%s | fifo dropped=%lu\n",
         avg_us, max_us, (unsigned long)g_diag.over_budget, (unsigned long)blocks,
         (unsigned long)g_diag.voices_max, (unsigned long)g_diag.voices_last,
         (unsigned long)g_diag.notes_on, (unsigned long)g_diag.regions_wanted, (unsigned long)g_diag.voices_started,
-        (unsigned long)g_diag.voice_shortfall, (unsigned long)g_diag.regions_max,
+        (unsigned long)g_diag.voice_shortfall, (unsigned long)g_diag.regions_max, (unsigned long)g_diag.voices_shed,
         (unsigned long)(g_diag.peak_permille / 1000U), (unsigned long)((g_diag.peak_permille / 10U) % 100U),
         (unsigned long)g_diag.over_fs_samples, (unsigned long)g_diag.over_fs_blocks,
         SF2_SOFT_LIMITER ? " (soft limiter ON)" : " (HARD CLIP)",

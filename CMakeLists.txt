@@ -138,12 +138,12 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Middlewares/Third_Party/bfreeOrgan2/components/env_ar.cpp
     Middlewares/Third_Party/bfreeOrgan2/components/env_click.cpp
 
-    Core/Src/usbh_midi.c
-    Core/Src/display.c
-    Core/Src/diag.c
-    Core/Src/watchdog.c
-    Core/Src/ram_init.c
-    Core/Src/chord_detector.c
+    Platform/midi_usb/usbh_midi.c
+    Platform/display/display.c
+    Platform/system/diag.c
+    Platform/system/watchdog.c
+    Platform/system/ram_init.c
+    Engine/midi/chord_detector.c
     Engine/midi/midi_queue.c
     Engine/midi/midi_dispatch.c
     Engine/midi/usb_midi_packet.c
@@ -220,7 +220,7 @@ set_source_files_properties(
 # перезаписывает им банк во флеше (Platform/qspi_xip/sf2_loader.c), после чего SD отключается.
 # Подробности: docs/SOUNDFONT_QSPI_SYNTH.md.
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    Core/Src/sd_storage.c
+    Platform/sd/sd_storage.c
     Platform/qspi_xip/pm_crc32.c
     Platform/qspi_xip/sf2_loader_core.c
     Platform/qspi_xip/sf2_loader.c
@@ -230,6 +230,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Inc
+    Platform/display
+    Platform/system
+    Platform/sd
     Engine/midi
     Engine/audio
     Engine/synth

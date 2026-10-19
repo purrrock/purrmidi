@@ -74,20 +74,20 @@ static void test_program_change_selects_engine() {
     CHECK(std::strcmp(SynthEngine_GetName(), "organ") == 0);
 
     send_pc(4);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
-    CHECK(std::strcmp(SynthEngine_GetName(), "soundfont") == 0);
-
-    send_pc(5);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_DULCIMER);
     CHECK(std::strcmp(SynthEngine_GetName(), "dulcimer") == 0);
 
-    send_pc(6);
+    send_pc(5);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_FLUTE);
     CHECK(std::strcmp(SynthEngine_GetName(), "flute") == 0);
 
-    send_pc(7);
+    send_pc(6);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SAXOPHONE);
     CHECK(std::strcmp(SynthEngine_GetName(), "saxophone") == 0);
+
+    send_pc(7);                                   // SoundFont - в конце списка (первый пресет банка)
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
+    CHECK(std::strcmp(SynthEngine_GetName(), "soundfont") == 0);
 
     send_pc(0);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
@@ -96,51 +96,45 @@ static void test_program_change_selects_engine() {
     send_pc(3, 9);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
     send_pc(4, 12);
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
-    send_pc(5, 14);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_DULCIMER);
-    send_pc(6, 15);
+    send_pc(5, 14);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_FLUTE);
-    send_pc(7, 15);
+    send_pc(6, 15);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SAXOPHONE);
+    send_pc(7, 15);
+    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
     send_pc(1, 15);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
 }
 
+// Номера программ вне списка заворачиваются по модулю числа программ (встроенные движки + пресеты SF2).
 static void test_program_wraps_modulo() {
     SynthEngine_Init();
-    send_pc(8);     // 8 % 8 == 0 -> E-Piano
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
-    send_pc(9);     // 9 % 8 == 1 -> Pluck
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
-    send_pc(10);    // 10 % 8 == 2 -> Lead
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_LEAD);
-    send_pc(11);    // 11 % 8 == 3 -> Organ
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
-    send_pc(12);    // 12 % 8 == 4 -> SoundFont
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SOUNDFONT);
-    send_pc(13);    // 13 % 8 == 5 -> Dulcimer
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_DULCIMER);
-    send_pc(14);    // 14 % 8 == 6 -> Flute
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_FLUTE);
-    send_pc(15);    // 15 % 8 == 7 -> Saxophone
-    CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_SAXOPHONE);
+    const uint32_t total = SynthEngine_GetProgramCount();
+    CHECK(total >= (uint32_t)SYNTH_ENGINE_SOUNDFONT + 1U);
+    for (uint32_t base = 0; base < (uint32_t)SYNTH_ENGINE_SOUNDFONT; ++base) {
+        const uint32_t pc = total + base;         // total % total == 0 -> тот же инструмент, что и base
+        if (pc > 126U) break;                     // 127 - служебное «следующий инструмент»
+        send_pc((uint8_t)pc);
+        CHECK(SynthEngine_GetProgram() == base);
+        CHECK(static_cast<uint32_t>(SynthEngine_GetCurrent()) == base);
+    }
 }
 
-// Следующий по циклу инструмент, который можно выбрать (SoundFont без SF2 пропускается).
-static SynthEngineId expected_next(SynthEngineId cur) {
-    SynthEngineId next = cur;
-    for (int i = 0; i < SYNTH_ENGINE_COUNT; ++i) {
-        next = static_cast<SynthEngineId>((static_cast<int>(next) + 1) % SYNTH_ENGINE_COUNT);
-        if (SynthEngine_IsAvailable(next)) break;
+// Следующая по циклу программа, которую можно выбрать (SoundFont и все его пресеты без SF2 пропускаются).
+static uint32_t expected_next_program(uint32_t cur) {
+    const uint32_t total = SynthEngine_GetProgramCount();
+    for (uint32_t i = 0; i < total; ++i) {
+        cur = (cur + 1U) % total;
+        if (cur < (uint32_t)SYNTH_ENGINE_SOUNDFONT || SynthEngine_IsAvailable(SYNTH_ENGINE_SOUNDFONT)) break;
     }
-    return next;
+    return cur;
 }
 
 static void send_next_and_check() {
-    SynthEngineId want = expected_next(SynthEngine_GetCurrent());
+    const uint32_t want = expected_next_program(SynthEngine_GetProgram());
     send_pc(127);
-    CHECK(SynthEngine_GetCurrent() == want);
+    CHECK(SynthEngine_GetProgram() == want);
     CHECK(SynthEngine_IsAvailable(SynthEngine_GetCurrent()) == 1);
 }
 
@@ -149,9 +143,8 @@ static void test_program_change_127_cycles_engines() {
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_EPIANO);
 
     // Program Change 127 переключает на следующий инструмент по циклу:
-    // E-Piano -> Pluck -> Lead -> Organ -> SoundFont -> E-Piano.
-    // Если SoundFont недоступен (нет SD/файла SNDFNT.SF2), он пропускается:
-    // ... -> Organ -> E-Piano.
+    // E-Piano -> Pluck -> Lead -> Organ -> Dulcimer -> Flute -> Saxophone -> пресеты SoundFont -> E-Piano.
+    // Если SoundFont недоступен (нет SD/файла SNDFNT.SF2), он пропускается.
     send_pc(127);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_PLUCK);
 
@@ -162,7 +155,7 @@ static void test_program_change_127_cycles_engines() {
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
 
     // Дальше — проверяем цикл независимо от того, нашёлся ли SF2.
-    for (int i = 0; i < 3 * SYNTH_ENGINE_COUNT; ++i) {
+    for (uint32_t i = 0; i < 3U * SynthEngine_GetProgramCount(); ++i) {
         send_next_and_check();
     }
 
@@ -249,11 +242,11 @@ static void test_select_next_api() {
     CHECK(next3 == SYNTH_ENGINE_ORGAN);
     CHECK(SynthEngine_GetCurrent() == SYNTH_ENGINE_ORGAN);
 
-    for (int i = 0; i < 3 * SYNTH_ENGINE_COUNT; ++i) {
-        SynthEngineId want = expected_next(SynthEngine_GetCurrent());
-        SynthEngineId actual = SynthEngine_SelectNext();
-        CHECK(actual == want);
-        CHECK(SynthEngine_GetCurrent() == want);
+    for (uint32_t i = 0; i < 3U * SynthEngine_GetProgramCount(); ++i) {
+        const uint32_t want = expected_next_program(SynthEngine_GetProgram());
+        const SynthEngineId actual = SynthEngine_SelectNext();
+        CHECK(SynthEngine_GetProgram() == want);
+        CHECK(actual == SynthEngine_GetCurrent());
     }
 }
 
@@ -358,7 +351,7 @@ static void test_panic_silences_every_engine() {
 
 // Общая арена: движок, у которого арену забрал другой, обязан молчать (а не читать чужую память), а IsNoteActive - не падать.
 static void test_stale_engine_is_safe_after_arena_switch() {
-    send_pc(5);                                       // Dulcimer занимает арену
+    send_pc(4);                                       // Dulcimer занимает арену
     send_note_on(60, 100);
     render_peak(2400);
     CHECK(SynthArena_Owner() != nullptr);
@@ -382,7 +375,7 @@ static void test_stale_engine_is_safe_after_arena_switch() {
     CHECK(render_peak(2400) > 0);
 
     // Обход всех движков с общей арены по кругу: каждый после выбора звучит.
-    const uint8_t order[] = {6, 7, 1, 2, 5, 6};
+    const uint8_t order[] = {5, 6, 1, 2, 4, 5};
     for (uint8_t prog : order) {
         send_pc(prog);
         send_note_on(64, 110);

@@ -125,6 +125,9 @@ int tsf_channel_get_note_start_samples(const struct tsf* f, int channel, int key
    in place. 'count' is the number of samples; reads beyond it return silence. The memory must stay valid and
    unchanged while the tsf object is in use. */
 void tsf_set_smpl_pcm16(struct tsf* f, const short* pcm, unsigned int count);
+// PurrMidi: защита от перегрузки CPU. Ускоренно гасит до max_count голосов, которые уже в фазе release
+// (начиная с самых затихших). Звучащие (не отпущенные) ноты не трогает. Возвращает число затронутых голосов.
+int tsf_shed_releasing_voices(struct tsf* f, int max_count);
 #ifdef __cplusplus
 }
 #endif
@@ -1320,11 +1323,11 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 				{
 					unsigned int pos = (unsigned int)tmpSourceSamplePosition, nextPos = (pos >= tmpLoopEnd && isLooping ? tmpLoopStart : pos + 1);
 
-					// PurrMidi modification: linear interpolation straight from the in-place 16-bit PCM
+					// PurrMidi modification: linear interpolation straight from the in-place 16-bit PCM (деление на 32767 заменено умножением: VDIV.F32 на Cortex-M7 ~14 тактов)
 					float alpha = (float)(tmpSourceSamplePosition - pos);
 					short s1_short = (pos < smplCount ? smplPcm[pos] : (short)0);
 					short s2_short = (nextPos < smplCount ? smplPcm[nextPos] : (short)0);
-					float val = ((float)s1_short / 32767.0f) * (1.0f - alpha) + ((float)s2_short / 32767.0f) * alpha;
+					float val = ((float)s1_short * (1.0f / 32767.0f)) * (1.0f - alpha) + ((float)s2_short * (1.0f / 32767.0f)) * alpha;
 
 					// Low-pass filter.
 					if (tmpLowpass.active) val = tsf_voice_lowpass_process(&tmpLowpass, val);
@@ -1344,11 +1347,11 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 				{
 					unsigned int pos = (unsigned int)tmpSourceSamplePosition, nextPos = (pos >= tmpLoopEnd && isLooping ? tmpLoopStart : pos + 1);
 
-					// PurrMidi modification: linear interpolation straight from the in-place 16-bit PCM
+					// PurrMidi modification: linear interpolation straight from the in-place 16-bit PCM (деление на 32767 заменено умножением: VDIV.F32 на Cortex-M7 ~14 тактов)
 					float alpha = (float)(tmpSourceSamplePosition - pos);
 					short s1_short = (pos < smplCount ? smplPcm[pos] : (short)0);
 					short s2_short = (nextPos < smplCount ? smplPcm[nextPos] : (short)0);
-					float val = ((float)s1_short / 32767.0f) * (1.0f - alpha) + ((float)s2_short / 32767.0f) * alpha;
+					float val = ((float)s1_short * (1.0f / 32767.0f)) * (1.0f - alpha) + ((float)s2_short * (1.0f / 32767.0f)) * alpha;
 
 					// Low-pass filter.
 					if (tmpLowpass.active) val = tsf_voice_lowpass_process(&tmpLowpass, val);
@@ -1367,11 +1370,11 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 				{
 					unsigned int pos = (unsigned int)tmpSourceSamplePosition, nextPos = (pos >= tmpLoopEnd && isLooping ? tmpLoopStart : pos + 1);
 
-					// PurrMidi modification: linear interpolation straight from the in-place 16-bit PCM
+					// PurrMidi modification: linear interpolation straight from the in-place 16-bit PCM (деление на 32767 заменено умножением: VDIV.F32 на Cortex-M7 ~14 тактов)
 					float alpha = (float)(tmpSourceSamplePosition - pos);
 					short s1_short = (pos < smplCount ? smplPcm[pos] : (short)0);
 					short s2_short = (nextPos < smplCount ? smplPcm[nextPos] : (short)0);
-					float val = ((float)s1_short / 32767.0f) * (1.0f - alpha) + ((float)s2_short / 32767.0f) * alpha;
+					float val = ((float)s1_short * (1.0f / 32767.0f)) * (1.0f - alpha) + ((float)s2_short * (1.0f / 32767.0f)) * alpha;
 
 					// Low-pass filter.
 					if (tmpLowpass.active) val = tsf_voice_lowpass_process(&tmpLowpass, val);
@@ -1402,6 +1405,33 @@ extern "C" {
 #endif
 unsigned int tsf_get_smpl_file_offset(const struct tsf* f) { return f ? f->smpl_file_offset : 0; }
 unsigned int tsf_get_smpl_sample_count(const struct tsf* f) { return f ? f->smpl_sample_count : 0; }
+int tsf_shed_releasing_voices(struct tsf* f, int max_count)
+{
+	int done = 0;
+	if (!f) return 0;
+	while (done < max_count)
+	{
+		// Ищем голос, который дальше всех продвинулся по release и ещё не ускорен.
+		struct tsf_voice *v, *vEnd, *best = TSF_NULL;
+		int bestPos = -999999999;
+		for (v = f->voices, vEnd = v + f->voiceNum; v != vEnd; v++)
+		{
+			if (v->playingPreset != -1 && v->ampenv.segment == TSF_SEGMENT_RELEASE && v->ampenv.parameters.release > 0.02f)
+			{
+				int pos = tsf_voice_envelope_release_samples(&v->ampenv, f->outSampleRate) - v->ampenv.samplesUntilNextSegment;
+				if (pos > bestPos) { bestPos = pos; best = v; }
+			}
+		}
+		if (!best) break;
+		// Быстрое затухание (~10 мс) вместо обрыва: без щелчка.
+		best->ampenv.parameters.release = 0.01f;
+		best->modenv.parameters.release = 0.01f;
+		tsf_voice_envelope_nextsegment(&best->ampenv, TSF_SEGMENT_SUSTAIN, f->outSampleRate);
+		tsf_voice_envelope_nextsegment(&best->modenv, TSF_SEGMENT_SUSTAIN, f->outSampleRate);
+		done++;
+	}
+	return done;
+}
 void tsf_set_smpl_pcm16(struct tsf* f, const short* pcm, unsigned int count)
 {
 	if (!f) return;

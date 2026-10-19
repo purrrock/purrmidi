@@ -85,7 +85,6 @@ add_executable(test_soundfont_host
     test_soundfont_host.cpp
 )
 target_include_directories(test_soundfont_host PRIVATE
-    "${CMAKE_CURRENT_LIST_DIR}/../Core/Inc"
     "${CMAKE_CURRENT_LIST_DIR}/../Platform/host"
     "${CMAKE_CURRENT_LIST_DIR}/../Platform/qspi_xip"
 )
@@ -170,7 +169,6 @@ add_executable(test_virtual_keyboard
     "${CMAKE_CURRENT_LIST_DIR}/../Platform/windows/virtual_keyboard.cpp"
 )
 target_include_directories(test_virtual_keyboard PRIVATE
-    "${CMAKE_CURRENT_LIST_DIR}/../Core/Inc"
     "${CMAKE_CURRENT_LIST_DIR}/../Engine/midi"
     "${CMAKE_CURRENT_LIST_DIR}/../Platform/windows"
 )
@@ -200,7 +198,6 @@ add_executable(test_sf2_xip_host
     "${CMAKE_CURRENT_LIST_DIR}/../Engine/synth/tinysoundfont_impl.cpp"
 )
 target_include_directories(test_sf2_xip_host PRIVATE
-    "${CMAKE_CURRENT_LIST_DIR}/../Core/Inc"
     "${CMAKE_CURRENT_LIST_DIR}/../Engine/synth"
     "${CMAKE_CURRENT_LIST_DIR}/../Platform/qspi_xip"
     "${CMAKE_CURRENT_LIST_DIR}/../Platform/host"

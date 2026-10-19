@@ -1,5 +1,6 @@
 /*
- * Рантайм-диспетчер звуковых движков: epiano / pluck / lead / organ / soundfont.
+ * Рантайм-диспетчер звуковых движков: epiano / pluck / lead / organ / dulcimer / flute / saxophone / soundfont
+ * (пресеты SF2 — отдельные программы в конце списка).
  * Выбор движка делается MIDI-сообщением Program Change (см. synth_engine.h).
  *
  * Потоковая модель
@@ -19,6 +20,7 @@
  */
 
 #include "synth_engine.h"
+#include "synth_common.h"
 #include "epiano_synth.h"
 #include "lead_synth.h"
 #include "organ_synth.h"
@@ -29,6 +31,7 @@
 #include "saxophone_synth.h"
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <cstdint>
 
@@ -61,9 +64,6 @@ const Engine kEngines[SYNTH_ENGINE_COUNT] = {
     /* SYNTH_ENGINE_ORGAN */
     { "organ", OrganSynth_Init, OrganSynth_NoteOn, OrganSynth_NoteOff,
       OrganSynth_ControlChange, OrganSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
-    /* SYNTH_ENGINE_SOUNDFONT */
-    { "soundfont", SoundFontSynth_Init, SoundFontSynth_NoteOn, SoundFontSynth_NoteOff,
-      SoundFontSynth_ControlChange, SoundFontSynth_FillStereoBuffer, SoundFontSynth_PitchBend, nullptr, nullptr },
     /* SYNTH_ENGINE_DULCIMER */
     { "dulcimer", DulcimerSynth_Init, DulcimerSynth_NoteOn, DulcimerSynth_NoteOff,
       DulcimerSynth_ControlChange, DulcimerSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
@@ -73,6 +73,9 @@ const Engine kEngines[SYNTH_ENGINE_COUNT] = {
     /* SYNTH_ENGINE_SAXOPHONE */
     { "saxophone", SaxophoneSynth_Init, SaxophoneSynth_NoteOn, SaxophoneSynth_NoteOff,
       SaxophoneSynth_ControlChange, SaxophoneSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
+    /* SYNTH_ENGINE_SOUNDFONT */
+    { "soundfont", SoundFontSynth_Init, SoundFontSynth_NoteOn, SoundFontSynth_NoteOff,
+      SoundFontSynth_ControlChange, SoundFontSynth_FillStereoBuffer, SoundFontSynth_PitchBend, nullptr, nullptr },
 };
 
 std::atomic<const Engine *> g_active{nullptr};   /* nullptr до первого SynthEngine_Init() */
@@ -86,6 +89,22 @@ std::atomic_flag            g_busy = ATOMIC_FLAG_INIT;
  */
 std::atomic<uint8_t> g_master_vol{SYNTH_MASTER_VOLUME_DEFAULT};
 float                g_master_gain_applied = 1.0f;   /* коэффициент в конце прошлого блока (только аудио-контекст) */
+
+/* Индекс пресета SF2, выбранный пользователем (имеет смысл, пока активен SoundFont; хранится в main-контексте).
+ * Переживает Panic() и повторную активацию движка. */
+uint32_t             g_sf_preset = 0;
+
+/* Короткие имена встроенных движков для дисплея (до 17 символов, ASCII). Порядок = SynthEngineId. */
+const char * const kDisplayNames[SYNTH_ENGINE_SOUNDFONT] = {
+    "E-Piano", "Pluck", "Lead", "Organ", "Dulcimer", "Flute", "Saxophone"
+};
+
+/* Число пресетов SF2, видимых в списке программ (минимум 1: «SoundFont» как место для ошибки при отсутствии банка). */
+uint32_t sf_slot_count()
+{
+    const uint32_t n = SoundFontSynth_GetPresetCount();
+    return n ? n : 1U;
+}
 
 /* Положение колеса высоты тона (-8192..8191). Запоминается здесь, чтобы смена движка (его Init() сбрасывает колесо)
  * не «отпускала» удерживаемое колесо. Пишется и читается только из main-контекста. */
@@ -129,6 +148,9 @@ void activate(SynthEngineId id)
         /* ждём, пока аудио-поток (ПК) закончит текущий блок */
     }
     next->init();
+    if (id == SYNTH_ENGINE_SOUNDFONT) {
+        SoundFontSynth_SelectPreset(g_sf_preset);   /* Init() ставит пресет 0: возвращаем выбранный */
+    }
     if (next->pitch_bend) {
         next->pitch_bend(g_pitch_bend);   /* колесо - физический орган: переносим его положение в новый движок */
     }
@@ -178,23 +200,85 @@ int SynthEngine_Select(SynthEngineId id)
     return 1;
 }
 
+uint32_t SynthEngine_GetProgramCount(void)
+{
+    return (uint32_t)SYNTH_ENGINE_SOUNDFONT + sf_slot_count();
+}
+
+uint32_t SynthEngine_GetProgram(void)
+{
+    const SynthEngineId id = SynthEngine_GetCurrent();
+    return (id == SYNTH_ENGINE_SOUNDFONT) ? (uint32_t)SYNTH_ENGINE_SOUNDFONT + g_sf_preset : (uint32_t)id;
+}
+
+int SynthEngine_SelectProgram(uint32_t program)
+{
+    if (program >= SynthEngine_GetProgramCount()) {
+        return 0;
+    }
+    if (program < (uint32_t)SYNTH_ENGINE_SOUNDFONT) {
+        return SynthEngine_Select((SynthEngineId)program);
+    }
+
+    g_sf_preset = program - (uint32_t)SYNTH_ENGINE_SOUNDFONT;
+    if (g_active.load(std::memory_order_relaxed) != &kEngines[SYNTH_ENGINE_SOUNDFONT]) {
+        activate(SYNTH_ENGINE_SOUNDFONT);            /* внутри activate() применяется g_sf_preset */
+    } else {
+        SoundFontSynth_SelectPreset(g_sf_preset);    /* смена тембра без сброса звучащих нот */
+    }
+    return 1;
+}
+
+void SynthEngine_GetProgramName(uint32_t program, char *out, uint32_t out_size)
+{
+    if (!out || out_size == 0U) {
+        return;
+    }
+    out[0] = '\0';
+
+    if (program < (uint32_t)SYNTH_ENGINE_SOUNDFONT) {
+        std::snprintf(out, out_size, "%s", kDisplayNames[program]);
+        return;
+    }
+
+    const char *name = SoundFontSynth_GetPresetName(program - (uint32_t)SYNTH_ENGINE_SOUNDFONT);
+    if (!name || !name[0]) {
+        std::snprintf(out, out_size, "SoundFont");
+        return;
+    }
+    std::snprintf(out, out_size, "SF:%s", name);
+
+    /* Имя пресета в банке дополнено пробелами и может содержать не-ASCII: оставляем печатные символы ASCII. */
+    for (uint32_t k = 0; out[k]; ++k) {
+        if ((unsigned char)out[k] < 0x20U || (unsigned char)out[k] > 0x7EU) {
+            out[k] = '?';
+        }
+    }
+    uint32_t len = (uint32_t)std::strlen(out);
+    while (len > 3U && out[len - 1U] == ' ') {
+        out[--len] = '\0';
+    }
+}
+
 SynthEngineId SynthEngine_SelectNext(void)
 {
-    SynthEngineId cur = SynthEngine_GetCurrent();
-    SynthEngineId next = cur;
-    for (uint32_t i = 0; i < (uint32_t)SYNTH_ENGINE_COUNT; i++) {
-        next = (SynthEngineId)(((uint32_t)next + 1U) % SYNTH_ENGINE_COUNT);
-        if (SynthEngine_IsAvailable(next)) {
+    const uint32_t total = SynthEngine_GetProgramCount();
+    uint32_t       prog  = SynthEngine_GetProgram();
+
+    for (uint32_t i = 0; i < total; i++) {
+        prog = (prog + 1U) % total;
+        const bool is_sf = prog >= (uint32_t)SYNTH_ENGINE_SOUNDFONT;
+        if (!is_sf || SynthEngine_IsAvailable(SYNTH_ENGINE_SOUNDFONT)) {
             break;
         }
     }
-    SynthEngine_Select(next);
-    return next;
+    SynthEngine_SelectProgram(prog);
+    return SynthEngine_GetCurrent();
 }
 
 void SynthEngine_ProgramChange(uint8_t program)
 {
-    SynthEngine_Select((SynthEngineId)(program % SYNTH_ENGINE_COUNT));
+    SynthEngine_SelectProgram((uint32_t)program % SynthEngine_GetProgramCount());
 }
 
 int SynthEngine_IsAvailable(SynthEngineId id)
@@ -287,6 +371,8 @@ void SynthEngine_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
         std::memset(buffer, 0, (size_t)num_frames * 2U * sizeof(int16_t));
         return;
     }
+
+    synth::EnableFlushToZero();   /* денормали сильно замедляют затухающие хвосты (см. synth_common.h) */
 
     const Engine *e = g_active.load(std::memory_order_relaxed);
     if (e) {

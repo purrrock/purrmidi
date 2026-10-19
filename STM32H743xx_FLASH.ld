@@ -278,7 +278,7 @@ SECTIONS
 
      Все три секции ниже NOLOAD: startup-код их не инициализирует и не копирует в них начальные значения. Поэтому
      в них НЕЛЬЗЯ класть объекты с инициализаторами (значения будут потеряны); память целиком обнуляется 64-битными
-     записями до конструкторов C++ (Core/Src/ram_init.c, защита от ECC-ошибок), а объекты создаются явно в коде.
+     записями до конструкторов C++ (Platform/system/ram_init.c, защита от ECC-ошибок), а объекты создаются явно в коде.
      --------------------------------------------------------------------------------------------------------- */
 
   /* DMA buffers: DMA1/DMA2 and SDMMC1 IDMA cannot access DTCM (.data/.bss live there). D2 SRAM is the natural home
@@ -315,7 +315,7 @@ SECTIONS
     _esynth_arena = .;
   } >RAM
 
-  /* Куча malloc() (см. Core/Src/sysmem.c). Обнуляется до конструкторов C++ (Core/Src/ram_init.c). */
+  /* Куча malloc() (см. Core/Src/sysmem.c). Обнуляется до конструкторов C++ (Platform/system/ram_init.c). */
   .axi_heap (NOLOAD) : ALIGN(8)
   {
     _axi_heap_start = .;
@@ -324,7 +324,7 @@ SECTIONS
     _axi_heap_end = .;
   } >RAM
 
-  /* Границы целых областей для обнуления при старте (Core/Src/ram_init.c). */
+  /* Границы целых областей для обнуления при старте (Platform/system/ram_init.c). */
   _sram_axi = ORIGIN(RAM);
   _eram_axi = ORIGIN(RAM) + LENGTH(RAM);
   _sram_d2  = ORIGIN(RAM_D2);

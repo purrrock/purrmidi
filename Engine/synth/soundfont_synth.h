@@ -52,7 +52,7 @@ void SoundFontSynth_NoteOff(uint8_t note);
 /** Обработка события MIDI Control Change. */
 void SoundFontSynth_ControlChange(uint8_t control, uint8_t value);
 
-/** Обработка события MIDI Program Change. */
+/** Обработка MIDI Program Change: выбор пресета по индексу в списке банка (см. SoundFontSynth_SelectPreset). */
 void SoundFontSynth_ProgramChange(uint8_t program);
 
 /**
@@ -66,6 +66,21 @@ void SoundFontSynth_PitchBend(int16_t bend);
  * Неблокирующий вызов для аудио-прерывания или аудио-потока.
  */
 void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames);
+
+/** Число пресетов (инструментов) в загруженном банке SF2; 0, если банк не загружен. */
+uint32_t SoundFontSynth_GetPresetCount(void);
+
+/** Имя пресета по индексу 0..GetPresetCount()-1 (строка внутри банка, до 19 символов; NULL для неверного индекса). */
+const char *SoundFontSynth_GetPresetName(uint32_t preset_index);
+
+/**
+ * Выбор пресета по индексу (порядок банка: по номеру банка и программы). Применяется в начале следующего аудиоблока;
+ * уже звучащие ноты доигрывают прежним тембром, новые берут новый пресет.
+ */
+void SoundFontSynth_SelectPreset(uint32_t preset_index);
+
+/** Индекс выбранного пресета. */
+uint32_t SoundFontSynth_GetPreset(void);
 
 /** Возвращает true, если банк SoundFont2 успешно загружен. */
 bool SoundFontSynth_IsLoaded(void);
