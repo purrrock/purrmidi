@@ -1,0 +1,2 @@
+# Shell-скрипты всегда с LF: CRLF ломает shebang и `bash script.sh` на Linux (CI)
+*.sh text eol=lf
