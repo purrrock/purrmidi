@@ -23,8 +23,10 @@
 #include <cstddef>
 #include <new>
 
-/** Размер арены. Должен быть не меньше самого большого набора голосов; проверяется static_assert'ом в SynthArena_NewArray. */
-constexpr std::size_t SYNTH_ARENA_BYTES = 144U * 1024U;
+/** Размер арены. Должен быть не меньше самого большого набора голосов; проверяется static_assert'ом в SynthArena_NewArray.
+ *  Сейчас: Pluck 66 080 Б, Violin 41 696 Б, Lead 1 952 Б; 72 КБ (73 728 Б) дают самому большому запас 7 648 Б.
+ *  При изменении синхронно поправьте ASSERT на .synth_arena в STM32H743xx_FLASH.ld. */
+constexpr std::size_t SYNTH_ARENA_BYTES = 72U * 1024U;
 
 /**
  * Отдать арену движку `owner` (адрес любого его статического объекта - уникальный идентификатор владельца).

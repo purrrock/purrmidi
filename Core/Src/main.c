@@ -781,9 +781,14 @@ void Error_Handler(void)
   Diag_Puts("\n*** Error_Handler() called, LR=");
   Diag_PutHex((uint32_t)__builtin_return_address(0));
   Diag_Puts(" ***\n");
-  /* There is no explicit reset here: the restart is done by the IWDG started in SysInit (Watchdog_Start): ~8 s
-   * during boot, ~1.5 s after Watchdog_EnterRuntime(). Note: an Error_Handler() call before Watchdog_Start()
-   * (MPU_Config, HAL_Init, SystemClock_Config) is NOT followed by a reset - see TODO.md. */
+#ifndef PURRMIDI_FAULT_HALT
+  /* Same scheme as the fault handler (Platform/system/diag.c): let the report leave the UART (~1 s; IRQs are off and
+   * SysTick is not running, hence a counting loop), then restart. This works at any point of the start-up, also
+   * before Watchdog_Start() (MPU_Config, HAL_Init, SystemClock_Config), where the IWDG could not do it. For SWD
+   * debugging build with -DPURRMIDI_FAULT_HALT=1: the infinite loop below is kept. */
+  for (volatile uint32_t i = 0; i < (SystemCoreClock / 4U); ++i) { __NOP(); }
+  NVIC_SystemReset();
+#endif
   while (1)
   {
   }
