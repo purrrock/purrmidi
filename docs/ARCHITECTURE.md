@@ -2,6 +2,17 @@
 
 Документ описывает, как устроен PurrMidi внутри: путь MIDI-событий, аудиотракт, память STM32H743 и общие компоненты звуковых движков. Краткое описание прибора и основы работы — в [README](../README.md); звуковые движки — в [ENGINES.md](ENGINES.md).
 
+## Аппаратное обеспечение
+
+* **Микроконтроллер:** WeAct STM32H743VIT6 Mini (Cortex-M7).
+* **Тактирование:** HSE 25 МГц; CPU 480 МГц, USB 48 МГц, аудио 48 кГц.
+* **Аудио ЦАП:** PCM5102A, стереовыход через SAI1 Block A, 16 бит, два слота, кадр 32 бита.
+* **MIDI-вход:** USB MIDI-клавиатура через USB OTG FS Host.
+* **Кнопка управления:** User Key K1 (PC13) на плате микроконтроллера для переключения инструмента.
+* **Дисплей:** TFT ST7735 160×80, SPI4 — статус MIDI, активные ноты, название аккорда и выбранный инструмент.
+* **Внешняя флеш-память:** Winbond W25Q64 (8 МБ), QUADSPI Bank1. Используется в режиме прямого адресации Memory-Mapped (XIP) для хранения и мгновенного исполнения/чтения сэмплов SoundFont.
+* **Карта памяти:** microSD через SDMMC1, 4-битный режим (FAT32). Используется **только при запуске** и **только для чтения**: для автоматической записи/обновления SoundFont-банка `0:/SNDFNT.SF2` во внешнюю QSPI Flash. Во время игры SD-карта не нужна и не используется.
+
 ## Общая схема
 
 Проект разделяет обработку MIDI, звуковые движки и аппаратный аудиовывод. Общий интерфейс движков находится в `Engine/synth/synth_engine.h`, реализация диспетчера — в `Engine/synth/synth_engine.cpp`.
@@ -57,3 +68,39 @@ MIDI-диспетчер обрабатывает Note On, Note Off, Control Chan
 * Буферы DMA1/DMA2 лежат в D2 SRAM (Normal Non-cacheable), а AXI SRAM кэшируется write-back: линии задержки физических моделей (Violin, Pluck) читаются последовательно и хорошо ложатся в 16-КБ D-cache. Буферы SD (bounce-буфер и буфер загрузчика SF2) лежат в секции `.sd_dma_buffer` (AXI SRAM, выровнены по 32 байта), драйвер SD инвалидирует D-cache до и после каждой передачи; прямая DMA-передача разрешена в любой выровненный буфер AXI SRAM, остальное идёт через bounce-буфер. **Любой новый DMA-буфер DMA1/DMA2 обязан лежать в `.dma_buffer`, любой буфер SDMMC1 — в `.sd_dma_buffer`.**
 * Секции `.dma_buffer`, `.synth_arena` и `.axi_heap` (NOLOAD) не обнуляются startup-кодом и не получают начальных значений (объекты с инициализаторами в них терялись бы), а AXI SRAM защищена ECC (слово 64 бита): неполная запись в неинициализированное слово может вызвать ECC-ошибку. Поэтому `Platform/system/ram_init.c` до запуска C++-конструкторов (через `.preinit_array`) записывает нули 64-битными словами (`STRD`) во всю AXI SRAM и всю D2 SRAM (границы — символы линкер-скрипта), а объекты в арене создаются явно. Startup-файл CubeMX менять не нужно.
 * **Контракт XIP.** Любая индексная операция QSPI (чтение, стирание, запись) выключает Memory-Mapped режим и закрывает MPU-окно `0x90000000`; чтение банка в этот момент вызвало бы MemManage. Поэтому драйвер сбрасывает признак `QSPIFlash_IsMapped()` до закрытия окна и устанавливает его после открытия, а синтезатор SoundFont перед каждым блоком проверяет `SF2Loader_BankReadable()` и при закрытом окне отдаёт тишину. Загрузчик/обновление банка выполняется только при старте.
+
+## Структура репозитория
+
+```text
+Core/                 Только код, сгенерированный CubeMX, и main.c (пользовательский код — в USER CODE блоках)
+Engine/midi/          MIDI-очередь, диспетчер, разбор USB-MIDI пакетов, детектор аккордов (общий код прошивки, тестов и Windows)
+Engine/synth/         Звуковые движки и диспетчер SynthEngine
+Platform/midi_usb/    USB-MIDI приём, класс usbh_midi и восстановление порта (STM32)
+Platform/display/     Интерфейс TFT ST7735 (STM32) и скопированный драйвер ST7735 (st7735/)
+Platform/system/      Watchdog, диагностика, инициализация ОЗУ (STM32)
+Platform/sd/          Работа с microSD (sd_storage, STM32)
+Platform/qspi_xip/    QSPI Flash, XIP, MPU, загрузчик SoundFont с SD (STM32)
+Platform/host/        Хост-реализация загрузчика SoundFont (банк из файла в ОЗУ) для тестов и Windows-приложения
+Platform/windows/     Windows-приложение для проверки движков на ПК
+USB_HOST/, FATFS/     Настройки USB Host и FatFs (CubeMX)
+Drivers/, Middlewares/  HAL/CMSIS, USB Host Library, FatFs и сторонние библиотеки (подмодулей git нет)
+SoundFonts/           Примеры SoundFont-банков и скрипт sf2_shrink.py
+tests/                Хостовые тесты (CMake preset host-tests)
+docs/                 Документация по подсистемам
+tools/                Вспомогательные скрипты (openocd-run.cmd)
+```
+
+## Документация
+
+| Документ | О чём |
+| -------- | ----- |
+| [docs/ENGINES.md](docs/ENGINES.md) | Звуковые движки, правила Program Change, общая громкость, программный интерфейс |
+| [docs/PLUCK_SYNTH.md](docs/PLUCK_SYNTH.md) | Как устроена нейлоновая струна, параметры, измерения |
+| [docs/EPIANO_SYNTH.md](docs/EPIANO_SYNTH.md) | FM-электропиано |
+| [docs/SOUNDFONT_QSPI_SYNTH.md](docs/SOUNDFONT_QSPI_SYNTH.md) | Синтезатор SoundFont и QSPI Flash (XIP) |
+| [docs/SD_CARD_AND_QSPI.md](docs/SD_CARD_AND_QSPI.md) | Обновление банка с SD-карты, настройка SDMMC1, диагностика |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Путь MIDI-событий, DMA, D-Cache, карта памяти, арена голосов, общие компоненты |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Что реализовано, тесты и CI, этапы и статус разработки |
+| [docs/WINDOWS_BUILD.md](docs/WINDOWS_BUILD.md) | Сборка и запуск Windows-приложения |
+| [docs/USB_Enumeration_fix.md](docs/USB_Enumeration_fix.md) | Исправление зависания энумерации USB |
+| [docs/PCM5102A_PINOUT.md](docs/PCM5102A_PINOUT.md) | Подключение ЦАП PCM5102A |

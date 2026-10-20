@@ -83,10 +83,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Engine/synth/lead_synth.cpp
     Engine/synth/organ_synth.cpp
     Engine/synth/pluck_synth.cpp
-    Engine/synth/sine_synth.c
     Engine/synth/soundfont_synth.cpp
     Engine/synth/tinysoundfont_impl.cpp
-    Engine/synth/synth.c
     Engine/synth/violin_synth.cpp
 
     Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp
@@ -128,10 +126,8 @@ set(PURRMIDI_AUDIO_HOT_SOURCES
     Engine/synth/lead_synth.cpp
     Engine/synth/organ_synth.cpp
     Engine/synth/pluck_synth.cpp
-    Engine/synth/sine_synth.c
     Engine/synth/soundfont_synth.cpp
     Engine/synth/tinysoundfont_impl.cpp
-    Engine/synth/synth.c
     Engine/synth/violin_synth.cpp
 
     Middlewares/Third_Party/bfreeOrgan2/synth_organ.cpp

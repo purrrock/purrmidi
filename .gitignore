@@ -7,7 +7,6 @@ cmake-build-*/
 # IDE/editor
 .idea/
 *.user
-*.userossc
 *.suo
 
 # STM32CubeIDE / Eclipse
@@ -39,10 +38,10 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
- 
- *.exe
- ai_project_dump.txt
- 
+
+*.exe
+ai_project_dump.txt
+
 build/
 CMakeCache.txt
 CMakeFiles/

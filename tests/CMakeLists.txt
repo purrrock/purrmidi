@@ -60,13 +60,6 @@ target_link_libraries(test_lead_host PRIVATE purrmidi_synth_lead)
 target_compile_features(test_lead_host PRIVATE cxx_std_17)
 add_test(NAME test_lead_host COMMAND test_lead_host)
 
-add_executable(test_sine_host
-    test_sine_host.cpp
-)
-target_link_libraries(test_sine_host PRIVATE purrmidi_synth_sine)
-target_compile_features(test_sine_host PRIVATE cxx_std_17)
-add_test(NAME test_sine_host COMMAND test_sine_host)
-
 add_executable(test_epiano_host
     test_epiano_host.cpp
 )

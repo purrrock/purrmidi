@@ -1,6 +1,6 @@
 # FM-электропиано (Program Change 0, по умолчанию)
 
-Полифонический FM-синтезатор в духе Rhodes / Yamaha DX7 «E.PIANO 1». Файлы: `Engine/synth/epiano_synth.h`, `Engine/synth/epiano_synth.cpp`. Внешних зависимостей (DaisySP и т.п.) нет.
+Полифонический FM-синтезатор в духе Rhodes / Yamaha DX7 «E.PIANO 1». Файлы: `Engine/synth/epiano_synth.h`, `Engine/synth/epiano_synth.cpp`.
 
 ## Выбор инструмента
 

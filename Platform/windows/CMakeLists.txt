@@ -35,16 +35,6 @@ target_include_directories(purrmidi_synth_common PUBLIC
 )
 target_compile_features(purrmidi_synth_common PUBLIC cxx_std_17)
 
-# sine: одноголосая синусоида
-add_library(purrmidi_synth_sine STATIC
-    "${CMAKE_SOURCE_DIR}/Engine/synth/synth.c"
-    "${CMAKE_SOURCE_DIR}/Engine/synth/sine_synth.c"
-)
-target_include_directories(purrmidi_synth_sine PUBLIC
-    "${CMAKE_SOURCE_DIR}/Engine/synth"
-)
-target_compile_features(purrmidi_synth_sine PUBLIC c_std_11)
-
 # epiano: полифоническое FM-электропиано (без внешних зависимостей)
 add_library(purrmidi_synth_epiano STATIC
     "${CMAKE_SOURCE_DIR}/Engine/synth/epiano_synth.cpp"
@@ -128,7 +118,7 @@ target_include_directories(purrmidi_synth_violin PUBLIC
 target_compile_features(purrmidi_synth_violin PUBLIC cxx_std_17)
 target_link_libraries(purrmidi_synth_violin PUBLIC purrmidi_synth_common)
 
-foreach(_synth sine pluck lead epiano organ soundfont violin)
+foreach(_synth pluck lead epiano organ soundfont violin)
     if(MSVC)
         target_compile_options(purrmidi_synth_${_synth} PRIVATE /utf-8 /W4)
     else()
@@ -169,7 +159,6 @@ target_link_libraries(purrmidi_core PUBLIC
     purrmidi_synth_lead
     purrmidi_synth_organ
     purrmidi_synth_pluck
-    purrmidi_synth_sine
     purrmidi_synth_soundfont
     purrmidi_synth_violin
 )
