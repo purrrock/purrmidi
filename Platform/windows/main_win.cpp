@@ -292,7 +292,7 @@ int main(int argc, char* argv[]) {
 
     if (config.verbose) {
         std::cout << "[SF2] Host bank lookup: PURRMIDI_TEST_SF2, tests/SNDFNT.SF2, SNDFNT.SF2, "
-                     "SoundFonts/Yamaha S90ES lite.SF2 (relative to the current working directory).\n"
+                     "SoundFonts/Florestan/000_Florestan_Piano.sf2 (relative to the current working directory).\n"
                   << "[SF2] Startup engine: " << SynthEngine_GetName()
                   << "; SoundFont loaded: "
                   << (SoundFontSynth_IsLoaded() ? "yes" : "no (loaded on engine selection)")

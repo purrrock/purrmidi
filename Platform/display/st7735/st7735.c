@@ -154,13 +154,14 @@ int32_t ST7735_Init(ST7735_Object_t *pObj, uint32_t ColorCoding, ST7735_Ctx_t *p
   }
   else
   {
-		/* Out of sleep mode, 0 args, delay 120ms */
+		/* Software reset, 0 args, delay 120ms. The reset is sent twice (kept from the tested init sequence); the status
+		 * of both writes is accumulated into ret, so a failed first write is no longer silently lost. */
     tmp = 0x00U;
     ret = st7735_write_reg(&pObj->Ctx, ST7735_SW_RESET, &tmp, 0);
 		(void)ST7735_IO_Delay(pObj, 120);
 		
 		tmp = 0x00U;
-    ret = st7735_write_reg(&pObj->Ctx, ST7735_SW_RESET, &tmp, 0);
+    ret += st7735_write_reg(&pObj->Ctx, ST7735_SW_RESET, &tmp, 0);
 		(void)ST7735_IO_Delay(pObj, 120);
 		
     /* Out of sleep mode, 0 args, no delay */

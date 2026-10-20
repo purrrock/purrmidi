@@ -21,7 +21,7 @@ extern "C" {
  * завершается ошибкой (поиск по умолчанию в этом случае не выполняется).
  *
  * Поиск по умолчанию: переменная окружения PURRMIDI_TEST_SF2, затем tests/SNDFNT.SF2, SNDFNT.SF2 и
- * SoundFonts/Yamaha S90ES lite.SF2 относительно текущего каталога.
+ * SoundFonts/Florestan/000_Florestan_Piano.sf2 относительно текущего каталога.
  */
 void SF2LoaderHost_SetPath(const char *path);
 

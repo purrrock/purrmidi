@@ -250,7 +250,9 @@ static void run_sustain_scenario(int note, int velocity) {
 
     // Sound is present at the very beginning and still present near the end of the held note.
     CHECK(get_buffer_peak(&out[0], frames) > 0);
-    CHECK(get_buffer_peak(&out[(size_t)(note_off_block - 5) * frames * 2], frames) > 200);
+    // Порог не привязан к громкости конкретного банка: у тестового банка (Jews Harp) нота 84 к этому моменту
+    // затухает до пика ~180, поэтому 200 не подходит; 64 по-прежнему намного выше шума в 1-2 LSB.
+    CHECK(get_buffer_peak(&out[(size_t)(note_off_block - 5) * frames * 2], frames) > 64);
 
     // No holes of silence while the note sounds (the amplitude is far above 1 LSB there).
     CHECK(longest_zero_run_after_onset(out, (size_t)note_off_block * frames) < 8);

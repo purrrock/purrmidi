@@ -837,7 +837,7 @@ void Display_SetLastNote(uint8_t note)
 void Display_SetNoteState(
     const uint8_t *active_notes,
     uint16_t active_note_count,
-    uint8_t note_val)
+    uint8_t last_note)
 {
     if (active_note_count == 0)
     {
@@ -864,7 +864,7 @@ void Display_SetNoteState(
         }
     }
 
-    if (ui.kind == kind && ui.note_live && ui.note == note_val &&
+    if (ui.kind == kind && ui.note_live && ui.note == last_note &&
         ui.key_count == active_note_count && strcmp(ui.chord, chord) == 0)
     {
         return;   /* ничего не изменилось */
@@ -872,7 +872,7 @@ void Display_SetNoteState(
 
     ui.kind      = kind;
     ui.note_live = true;
-    ui.note      = note_val;
+    ui.note      = last_note;
     ui.key_count = active_note_count;
     memcpy(ui.chord, chord, sizeof(ui.chord));
     MarkDirty(F_NOTE);

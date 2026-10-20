@@ -69,7 +69,7 @@ bool SF2Loader_Ensure(void)
     } else {
         const char *env = std::getenv("PURRMIDI_TEST_SF2");
         const char *candidates[] = {
-            env, "tests/SNDFNT.SF2", "SNDFNT.SF2", "SoundFonts/Yamaha S90ES lite.SF2"
+            env, "tests/SNDFNT.SF2", "SNDFNT.SF2", "SoundFonts/Florestan/000_Florestan_Piano.sf2"
         };
         for (const char *c : candidates) {
             if (c && *c && read_file(c)) { loaded = true; break; }

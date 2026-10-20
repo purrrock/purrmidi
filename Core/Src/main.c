@@ -91,11 +91,18 @@ static uint16_t active_note_count = 0;
 
 /* 1 = periodically print render-time statistics on the UART:
  *   [AUDIO] soundfont: fill max=NNN us (NN% of 2666 us budget) ...
- * Off by default: the log stays quiet. The timing itself is always measured, and a real overrun
+ * Default: ON in Debug builds only (CubeMX defines DEBUG for the Debug configuration), OFF in Release, so the log
+ * stays quiet on the device. Force with -DAUDIO_DIAG_UART=1. The timing itself is always measured, and a real overrun
  * (render longer than its budget) is still reported once via "[AUDIO] RENDER OVERRUN" below.
  * A render that takes longer than its budget (one DMA half-buffer) starves the main loop
  * (USB, MIDI, display): the render runs in PendSV, which preempts the main loop. */
+#ifndef AUDIO_DIAG_UART
+#ifdef DEBUG
 #define AUDIO_DIAG_UART 1
+#else
+#define AUDIO_DIAG_UART 0
+#endif
+#endif
 
 static volatile uint32_t audio_cyc_max = 0;      /* longest fill so far (CPU cycles) */
 static volatile uint32_t audio_cyc_last = 0;
@@ -774,6 +781,9 @@ void Error_Handler(void)
   Diag_Puts("\n*** Error_Handler() called, LR=");
   Diag_PutHex((uint32_t)__builtin_return_address(0));
   Diag_Puts(" ***\n");
+  /* There is no explicit reset here: the restart is done by the IWDG started in SysInit (Watchdog_Start): ~8 s
+   * during boot, ~1.5 s after Watchdog_EnterRuntime(). Note: an Error_Handler() call before Watchdog_Start()
+   * (MPU_Config, HAL_Init, SystemClock_Config) is NOT followed by a reset - see TODO.md. */
   while (1)
   {
   }

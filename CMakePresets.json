@@ -137,6 +137,13 @@
             "output": {
                 "outputOnFailure": true
             }
+        },
+        {
+            "name": "win-msvc-release",
+            "configurePreset": "win-msvc-release",
+            "output": {
+                "outputOnFailure": true
+            }
         }
     ]
 }

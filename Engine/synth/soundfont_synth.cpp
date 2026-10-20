@@ -42,9 +42,16 @@
 #include <cstring>
 #include <cstdio>
 
-/* 1 = collect per-block statistics (render time, voices, clipping) and print them from the main loop. */
+/* 1 = collect per-block statistics (render time, voices, clipping) and print them from the main loop.
+ * Costs extra work in the audio context (e.g. one more tsf_channel_get_note_start_samples() per Note On), so it is
+ * OFF in firmware Release builds (the ARM build without DEBUG) and ON in Debug and in host builds/tests.
+ * Override with -DSF2_DIAG_STATS=0/1. */
 #ifndef SF2_DIAG_STATS
+#if defined(__arm__) && !defined(DEBUG)
+#define SF2_DIAG_STATS 0
+#else
 #define SF2_DIAG_STATS 1
+#endif
 #endif
 
 /* Порог (в % бюджета блока), после которого гасятся отпущенные голоса, и сколько голосов гасить за блок. */
@@ -111,7 +118,7 @@ struct DiagStats {
     volatile uint32_t voices_shed;     /* отпущенные голоса, ускоренно погашенные защитой от перегрузки */
 };
 DiagStats g_diag;
-uint32_t  g_diag_fifo_dropped_seen = 0;
+[[maybe_unused]] uint32_t g_diag_fifo_dropped_seen = 0;  /* используется только при SF2_DIAG_STATS=1 */
 
 #if !SF2_HOST_MODE
 inline uint32_t diag_cycles() { return DWT->CYCCNT; }
@@ -467,7 +474,7 @@ void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
 
     const uint32_t t0 = diag_cycles();
     render_block(buffer, num_frames);
-    const uint32_t dt = diag_cycles() - t0;
+    [[maybe_unused]] const uint32_t dt = diag_cycles() - t0;   /* на хосте при SF2_DIAG_STATS=0 не используется */
 
 #if !SF2_HOST_MODE
     /* Защита от перегрузки: сложный аккорд с педалью даёт десятки голосов, и блок перестаёт укладываться в бюджет

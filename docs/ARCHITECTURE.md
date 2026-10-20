@@ -87,20 +87,19 @@ Drivers/, Middlewares/  HAL/CMSIS, USB Host Library, FatFs и сторонние
 SoundFonts/           Примеры SoundFont-банков и скрипт sf2_shrink.py
 tests/                Хостовые тесты (CMake preset host-tests)
 docs/                 Документация по подсистемам
-tools/                Вспомогательные скрипты (openocd-run.cmd)
+tools/                Вспомогательные скрипты (openocd-run.cmd, check_firmware_size.sh)
 ```
 
 ## Документация
 
 | Документ | О чём |
 | -------- | ----- |
-| [docs/ENGINES.md](docs/ENGINES.md) | Звуковые движки, правила Program Change, общая громкость, программный интерфейс |
-| [docs/PLUCK_SYNTH.md](docs/PLUCK_SYNTH.md) | Как устроена нейлоновая струна, параметры, измерения |
-| [docs/EPIANO_SYNTH.md](docs/EPIANO_SYNTH.md) | FM-электропиано |
-| [docs/SOUNDFONT_QSPI_SYNTH.md](docs/SOUNDFONT_QSPI_SYNTH.md) | Синтезатор SoundFont и QSPI Flash (XIP) |
-| [docs/SD_CARD_AND_QSPI.md](docs/SD_CARD_AND_QSPI.md) | Обновление банка с SD-карты, настройка SDMMC1, диагностика |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Путь MIDI-событий, DMA, D-Cache, карта памяти, арена голосов, общие компоненты |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Что реализовано, тесты и CI, этапы и статус разработки |
-| [docs/WINDOWS_BUILD.md](docs/WINDOWS_BUILD.md) | Сборка и запуск Windows-приложения |
-| [docs/USB_Enumeration_fix.md](docs/USB_Enumeration_fix.md) | Исправление зависания энумерации USB |
-| [docs/PCM5102A_PINOUT.md](docs/PCM5102A_PINOUT.md) | Подключение ЦАП PCM5102A |
+| [docs/ENGINES.md](ENGINES.md) | Звуковые движки, правила Program Change, общая громкость, программный интерфейс |
+| [docs/PLUCK_SYNTH.md](PLUCK_SYNTH.md) | Как устроена нейлоновая струна, параметры, измерения |
+| [docs/EPIANO_SYNTH.md](EPIANO_SYNTH.md) | FM-электропиано |
+| [docs/SOUNDFONT_QSPI_SYNTH.md](SOUNDFONT_QSPI_SYNTH.md) | Синтезатор SoundFont и QSPI Flash (XIP) |
+| [docs/SD_CARD_AND_QSPI.md](SD_CARD_AND_QSPI.md) | Обновление банка с SD-карты, настройка SDMMC1, диагностика |
+| [docs/ARCHITECTURE.md](ARCHITECTURE.md) | Путь MIDI-событий, DMA, D-Cache, карта памяти, арена голосов, общие компоненты |
+| [docs/WINDOWS_BUILD.md](WINDOWS_BUILD.md) | Сборка и запуск Windows-приложения |
+| [docs/USB_Enumeration_fix.md](USB_Enumeration_fix.md) | Исправление зависания энумерации USB |
+| [docs/PCM5102A_PINOUT.md](PCM5102A_PINOUT.md) | Подключение ЦАП PCM5102A |

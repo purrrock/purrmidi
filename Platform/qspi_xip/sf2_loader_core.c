@@ -226,71 +226,71 @@ static SF2L_Result flash_update(const SF2L_Env *e, uint32_t size, uint32_t crc, 
 
 /* -------------------------------- сценарий --------------------------------- */
 
-SF2L_Result SF2L_Run(const SF2L_Env *e, SF2L_Report *rep)
+SF2L_Result SF2L_Run(const SF2L_Env *env, SF2L_Report *report)
 {
     SF2L_Report dummy;
-    if (!rep) rep = &dummy;
-    memset(rep, 0, sizeof(*rep));
-    rep->file_status = SF2L_FILE_NOT_CHECKED;
+    if (!report) report = &dummy;
+    memset(report, 0, sizeof(*report));
+    report->file_status = SF2L_FILE_NOT_CHECKED;
 
-    if (!e || !e->flash || !e->buf || e->buf_size < SF2L_PAGE_SIZE || (e->buf_size % SF2L_PAGE_SIZE) != 0u ||
-        e->flash->flash_size < 4u * SF2L_SECTOR_SIZE) {
-        return rep->result = SF2L_ERR_PARAM;
+    if (!env || !env->flash || !env->buf || env->buf_size < SF2L_PAGE_SIZE || (env->buf_size % SF2L_PAGE_SIZE) != 0u ||
+        env->flash->flash_size < 4u * SF2L_SECTOR_SIZE) {
+        return report->result = SF2L_ERR_PARAM;
     }
 
-    const SF2FlashOps *fl = e->flash;
+    const SF2FlashOps *fl = env->flash;
     const uint32_t bank_max = fl->flash_size - SF2L_SECTOR_SIZE;
     SF2L_Header hdr;
-    bool have_bank = flash_bank_valid(e, bank_max, &hdr);
+    bool have_bank = flash_bank_valid(env, bank_max, &hdr);
     SF2L_Result res = SF2L_OK_UNCHANGED;
 
-    if (e->src) {
+    if (env->src) {
         uint32_t fsize = 0, fstamp = 0, fcrc = 0;
         bool opened = false;
-        rep->file_status = inspect_source(e, bank_max, &fsize, &fstamp, &opened);
+        report->file_status = inspect_source(env, bank_max, &fsize, &fstamp, &opened);
 
-        if (rep->file_status == SF2L_FILE_NEW) {
+        if (report->file_status == SF2L_FILE_NEW) {
             bool same = false;
 
             if (have_bank && hdr.bank_size == fsize) {
                 if (hdr.src_stamp == fstamp) {
                     same = true;                       /* тот же размер и тот же штамп: CRC не нужен */
                     fcrc = hdr.bank_crc32;
-                } else if (file_crc(e, fsize, &fcrc)) {
+                } else if (file_crc(env, fsize, &fcrc)) {
                     same = (fcrc == hdr.bank_crc32);   /* файл скопирован заново, содержимое то же */
                 } else {
-                    rep->file_status = SF2L_FILE_READ_ERROR;
+                    report->file_status = SF2L_FILE_READ_ERROR;
                 }
-            } else if (!file_crc(e, fsize, &fcrc)) {
-                rep->file_status = SF2L_FILE_READ_ERROR;
+            } else if (!file_crc(env, fsize, &fcrc)) {
+                report->file_status = SF2L_FILE_READ_ERROR;
             }
 
-            if (rep->file_status == SF2L_FILE_NEW) {
+            if (report->file_status == SF2L_FILE_NEW) {
                 if (same) {
-                    rep->file_status = SF2L_FILE_SAME;
+                    report->file_status = SF2L_FILE_SAME;
                 } else {
-                    res = flash_update(e, fsize, fcrc, fstamp);
+                    res = flash_update(env, fsize, fcrc, fstamp);
                     if (res != SF2L_OK_UPDATED) {
-                        if (opened) e->src->close(e->src_ctx);
-                        return rep->result = res;
+                        if (opened) env->src->close(env->src_ctx);
+                        return report->result = res;
                     }
                 }
             }
         }
-        if (opened) e->src->close(e->src_ctx);
+        if (opened) env->src->close(env->src_ctx);
     }
 
     /* Итог: во флеше должен быть валидный банк. Включаем XIP. */
-    have_bank = flash_bank_valid(e, bank_max, &hdr);
+    have_bank = flash_bank_valid(env, bank_max, &hdr);
     if (!have_bank) {
-        return rep->result = SF2L_ERR_NO_BANK;
+        return report->result = SF2L_ERR_NO_BANK;
     }
     const uint8_t *base = NULL;
-    if (!fl->map(e->flash_ctx, &base) || base == NULL) {
-        return rep->result = SF2L_ERR_FLASH;
+    if (!fl->map(env->flash_ctx, &base) || base == NULL) {
+        return report->result = SF2L_ERR_FLASH;
     }
-    rep->base  = base;
-    rep->size  = hdr.bank_size;
-    rep->crc32 = hdr.bank_crc32;
-    return rep->result = (res == SF2L_OK_UPDATED) ? SF2L_OK_UPDATED : SF2L_OK_UNCHANGED;
+    report->base  = base;
+    report->size  = hdr.bank_size;
+    report->crc32 = hdr.bank_crc32;
+    return report->result = (res == SF2L_OK_UPDATED) ? SF2L_OK_UPDATED : SF2L_OK_UNCHANGED;
 }

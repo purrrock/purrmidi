@@ -68,6 +68,9 @@ jobs:
       - name: Build purrmidi_win.exe
         run: cmake --build --preset win-msvc-release
 
+      - name: Run host tests (Windows)
+        run: ctest --preset win-msvc-release
+
   stm32-build:
     name: Build STM32H743 firmware
     runs-on: ubuntu-latest
@@ -111,10 +114,21 @@ jobs:
       - name: Check Release firmware size budget
         run: bash tools/check_firmware_size.sh build/Release/purrmidi.elf
 
+      # Образы для прошивки платы собираются из Release (на приборе работает именно он).
+      - name: Create Release .bin and .hex
+        run: |
+          arm-none-eabi-objcopy -O binary build/Release/purrmidi.elf build/Release/purrmidi.bin
+          arm-none-eabi-objcopy -O ihex build/Release/purrmidi.elf build/Release/purrmidi.hex
+          ls -l build/Release/purrmidi.elf build/Release/purrmidi.bin build/Release/purrmidi.hex
+
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
           name: purrmidi-stm32h743-firmware
-          path: build/Debug/purrmidi.elf
+          path: |
+            build/Release/purrmidi.elf
+            build/Release/purrmidi.bin
+            build/Release/purrmidi.hex
+            build/Debug/purrmidi.elf
           if-no-files-found: error
           retention-days: 14

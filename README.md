@@ -85,6 +85,8 @@ cmake --build --preset win-msvc-release
 
 Инструкции и дополнительные сведения: `docs/WINDOWS_BUILD.md`.
 
+Структура репозитория и список документов по подсистемам — в конце [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 
 
 ## Лицензии
