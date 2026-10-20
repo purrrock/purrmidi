@@ -45,9 +45,10 @@ static int max_step(int prev, const std::vector<int16_t>& v, size_t from = 0) {
     return m;
 }
 
-// With the x4 output gain a slow attack (CC77=1) reaches ~12% of full level after 512 frames.
-// A full-level single note peaks at ~2900, so anything below this limit is "still ramping".
-static const int kSlowAttackPeakLimit = 800;
+// A slow attack (CC77=1) reaches ~12% of full level after 512 frames. Before the output level was matched to the other
+// engines (organ_synth.cpp adds a x3.5 gain stage) a full-level single note peaked at ~2900, so 800 meant
+// "still ramping". The limit scales with that gain (800 * 3.5); the ratio (~28% of the full-level peak) is unchanged.
+static const int kSlowAttackPeakLimit = 2800;
 
 static void test_init_silence() {
     OrganSynth_Init();
@@ -294,7 +295,8 @@ static void test_output_level() {
     OrganSynth_NoteOn(60, 100);
     render_peak(2000);
     int single = render_peak(4800);
-    CHECK(single > 1500);
+    // Орган выровнен по громкости с остальными движками (было ~2900 пик, стало ~10000)
+    CHECK(single > 6000);
     CHECK(single <= 32767);
 
     OrganSynth_Init();
@@ -303,7 +305,7 @@ static void test_output_level() {
     render_peak(2000);
     int chord = render_peak(4800);
     CHECK(chord > 8000);
-    CHECK(chord <= 32767);
+    CHECK(chord <= 32200);   // мягкий ограничитель (потолок 0.98 от полной шкалы): жёсткого клиппинга нет
 }
 
 // 2. CC120 cuts immediately, CC123 releases without a click.

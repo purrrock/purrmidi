@@ -18,13 +18,15 @@
 
 ---
 
-## 2. Подготовка подмодулей Git
+## 2. Получение исходников
 
-Перед сборкой убедитесь, что все подмодули Git (включая `DaisySP` и вложенный `DaisySP-LGPL`) загружены:
+Подмодулей Git в проекте нет, достаточно обычного клонирования:
 
 ```bash
-git submodule update --init --recursive
+git clone https://github.com/purrrock/purrmidi
 ```
+
+Нужная часть DaisySP (`Oscillator`, `Svf`, `Adsr`) лежит в `Middlewares/Third_Party/DaisySP_lite/`.
 
 ---
 

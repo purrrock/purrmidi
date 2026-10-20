@@ -428,6 +428,89 @@ void test_polyphony_chords_and_clipping() {
     assert(energy_2_notes > 0.15 * energy_3_notes); // Remaining 2 notes continue sounding
 }
 
+
+static std::vector<double> render_mono(size_t frames) {
+    std::vector<int16_t> buf(frames * 2, 0);
+    PluckSynth_FillStereoBuffer(buf.data(), (uint32_t)frames);
+    std::vector<double> mono(frames);
+    for (size_t i = 0; i < frames; ++i) mono[i] = buf[i * 2];
+    return mono;
+}
+
+static double rms_of(const std::vector<double>& v, size_t from, size_t count) {
+    double e = 0.0;
+    for (size_t i = from; i < from + count; ++i) e += v[i] * v[i];
+    return std::sqrt(e / (double)count);
+}
+
+// Доля энергии на высоких частотах: энергия первой разности / энергия сигнала (≈ 2(1-ρ1)).
+// Чем она меньше, тем «теплее» звук. У прежнего «металлического» pluck на A3 она была ≈ 0.42.
+static double brightness_ratio(const std::vector<double>& v, size_t from, size_t count) {
+    double d = 0.0, e = 0.0;
+    for (size_t i = from; i < from + count; ++i) {
+        const double x = v[i] - v[i - 1];
+        d += x * x;
+        e += v[i] * v[i];
+    }
+    return d / e;
+}
+
+static void test_modwheel_release_keeps_sustain() {
+    // Регрессия: раньше CC1 жёстко задавал демпфирование, и после «повращать и отпустить колесо» (CC1 = 0)
+    // нота глохла за ~0.2 с (похоже на короткий удар по струне).
+    const size_t kFrames = 48000 * 2;
+    std::vector<double> baseline, wheel;
+
+    PluckSynth_Init();
+    PluckSynth_NoteOn(57, 100);                 // A3
+    baseline = render_mono(kFrames);
+
+    PluckSynth_Init();
+    PluckSynth_ControlChange(1, 127);           // повернули колесо
+    PluckSynth_ControlChange(1, 64);
+    PluckSynth_ControlChange(1, 0);             // и отпустили
+    PluckSynth_NoteOn(57, 100);
+    wheel = render_mono(kFrames);
+
+    const double rb = rms_of(baseline, 48000, 4800);      // 1.0 .. 1.1 c
+    const double rw = rms_of(wheel, 48000, 4800);
+    std::cout << "RMS at 1.0s: baseline " << rb << ", after wheel release " << rw << std::endl;
+    assert(rb > 300.0);                        // нота ещё звучит
+    assert(rw > 0.8 * rb && rw < 1.25 * rb);   // отпущенное колесо ничего не меняет
+
+    // Колесо, повёрнутое и отпущенное во время звучания, тоже не глушит ноту
+    PluckSynth_Init();
+    PluckSynth_NoteOn(57, 100);
+    render_mono(24000);
+    PluckSynth_ControlChange(1, 127);
+    std::vector<double> held = render_mono(24000);
+    PluckSynth_ControlChange(1, 0);
+    std::vector<double> released = render_mono(24000);
+    assert(rms_of(held, 0, 4800) > 100.0);
+    assert(rms_of(released, 0, 4800) > 100.0);   // ~1.0 с после щипка: нота ещё звучит
+}
+
+static void test_nylon_timbre_is_warm() {
+    PluckSynth_Init();
+    PluckSynth_NoteOn(57, 100);                 // A3, параметры по умолчанию
+    std::vector<double> v = render_mono(48000);
+    const double hf = brightness_ratio(v, 4800, 14400);   // 0.1 .. 0.4 c
+    std::cout << "Pluck A3 high-frequency ratio: " << hf << std::endl;
+    assert(hf < 0.12);                          // тёплый нейлон, а не звенящий металл
+
+    // Мод-колесо вверх - ярче
+    PluckSynth_Init();
+    PluckSynth_ControlChange(1, 127);
+    PluckSynth_NoteOn(57, 100);
+    std::vector<double> bright = render_mono(48000);
+    assert(brightness_ratio(bright, 4800, 14400) > hf);
+
+    // Тело звука затухает естественно: на 1 с ещё звучит, к 8 с - тишина
+    std::vector<double> tail = render_mono(48000 * 7);
+    assert(rms_of(v, 40000, 4800) > 100.0);
+    (void)tail;
+}
+
 int main() {
     test_pluck_render_and_freq();
     test_noteon_velocity_zero_regression();
@@ -438,6 +521,8 @@ int main() {
     test_reinit_and_control_regressions();
     test_deterministic_voice_stealing_and_reuse();
     test_polyphony_chords_and_clipping();
+    test_modwheel_release_keeps_sustain();
+    test_nylon_timbre_is_warm();
     std::cout << "test_pluck_host passed successfully." << std::endl;
     return 0;
 }

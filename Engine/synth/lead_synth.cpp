@@ -1,7 +1,6 @@
 #include "lead_synth.h"
 #include "synth_arena.h"
 #include "synth_common.h"
-#include "daisysp.h"
 #include "Synthesis/oscillator.h"
 #include "Filters/svf.h"
 #include "Control/adsr.h"

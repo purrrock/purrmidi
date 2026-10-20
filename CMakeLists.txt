@@ -39,70 +39,35 @@ add_executable(${CMAKE_PROJECT_NAME})
 add_subdirectory(cmake/stm32cubemx)
 
 # ---------------------------------------------------------------------------
-# DaisySP
+# DaisySP (урезанная копия: только Oscillator, Svf, Adsr для движка Lead)
 # ---------------------------------------------------------------------------
 
 set(DAISYSP_DIR
-    "${CMAKE_CURRENT_SOURCE_DIR}/Middlewares/Third_Party/DaisySP"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Middlewares/Third_Party/DaisySP_lite"
 )
-
-if(NOT EXISTS "${DAISYSP_DIR}/Source")
-    message(FATAL_ERROR
-        "DaisySP source directory not found: ${DAISYSP_DIR}/Source\n"
-        "Initialize the DaisySP git submodule:\n"
-        "git submodule update --init --recursive"
-    )
-endif()
-
-# Compile DaisySP C++ sources directly into a static library.
-file(GLOB_RECURSE DAISYSP_SOURCES CONFIGURE_DEPENDS
-    "${DAISYSP_DIR}/Source/*.cpp"
-    "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.cpp"
-)
-
-if(NOT DAISYSP_SOURCES)
-    message(FATAL_ERROR
-        "No DaisySP C++ source files found in ${DAISYSP_DIR}/Source"
-    )
-endif()
 
 add_library(DaisySP STATIC
-    ${DAISYSP_SOURCES}
+    ${DAISYSP_DIR}/Source/Control/adsr.cpp
+    ${DAISYSP_DIR}/Source/Filters/svf.cpp
+    ${DAISYSP_DIR}/Source/Synthesis/oscillator.cpp
 )
 
 # Передаем аппаратные флаги микроконтроллера (-mcpu, -mthumb) из CubeMX в DaisySP
 target_link_libraries(DaisySP PRIVATE stm32cubemx)
 
-# Add the DaisySP source directory and all its subdirectories
-# to the include search path.
-file(GLOB_RECURSE DAISYSP_HEADERS CONFIGURE_DEPENDS
-    "${DAISYSP_DIR}/Source/*.h"
-    "${DAISYSP_DIR}/Source/*.hpp"
-    "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.h"
-    "${DAISYSP_DIR}/DaisySP-LGPL/Source/*.hpp"
-)
-
-set(DAISYSP_INCLUDE_DIRS
-    "${DAISYSP_DIR}/Source"
-    "${DAISYSP_DIR}/DaisySP-LGPL/Source"
-)
-
-foreach(HEADER ${DAISYSP_HEADERS})
-    get_filename_component(HEADER_DIR "${HEADER}" DIRECTORY)
-    list(APPEND DAISYSP_INCLUDE_DIRS "${HEADER_DIR}")
-endforeach()
-
-list(REMOVE_DUPLICATES DAISYSP_INCLUDE_DIRS)
-
+# Каталоги заголовков: lead_synth.cpp подключает "Synthesis/oscillator.h", "Filters/svf.h",
+# "Control/adsr.h" и "Utility/dsp.h" от корня Source; сами исходники DaisySP включают dsp.h по короткому имени.
 target_include_directories(DaisySP PUBLIC
-    ${DAISYSP_INCLUDE_DIRS}
+    ${DAISYSP_DIR}/Source
+    ${DAISYSP_DIR}/Source/Utility
+    ${DAISYSP_DIR}/Source/Synthesis
+    ${DAISYSP_DIR}/Source/Filters
+    ${DAISYSP_DIR}/Source/Control
 )
-
-target_compile_definitions(DaisySP PUBLIC USE_DAISYSP_LGPL)
 
 target_compile_features(DaisySP PUBLIC cxx_std_17)
 
-# Pluck (струна) целиком считается в DaisySP на каждом сэмпле в аудио-прерывании: скорость важнее размера.
+# DaisySP (Lead: Oscillator/Svf/Adsr) считается на каждом сэмпле в аудио-прерывании: скорость важнее размера.
 # Только Release (в Debug остаётся -O0 -g3). Подробности - в блоке "Оптимизация по скорости" ниже.
 target_compile_options(DaisySP PRIVATE $<$<CONFIG:Release>:-O2>)
 
@@ -143,8 +108,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Platform/midi_usb/midi_usb.c
     Platform/midi_usb/usb_port_recover.c
 
-    Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/st7735.c
-    Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735/st7735_reg.c
+    Platform/display/st7735/st7735.c
+    Platform/display/st7735/st7735_reg.c
 )
 
 # ---------------------------------------------------------------------------
@@ -213,7 +178,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Engine/synth
     Platform/midi_usb
     Platform/qspi_xip
-    Middlewares/Third_Party/MiniSTM32H7xx/SDK/HAL/STM32H743/08-DCMI2LCD/Drivers/BSP/ST7735
+    Platform/display/st7735
 )
 target_include_directories(${CMAKE_PROJECT_NAME} SYSTEM PRIVATE
     Middlewares/Third_Party/bfreeOrgan2

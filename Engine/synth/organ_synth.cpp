@@ -1,4 +1,5 @@
 #include "organ_synth.h"
+#include "synth_common.h"
 #include "synth_organ.hpp"
 
 #include <atomic>
@@ -16,6 +17,21 @@ struct Event {
 
 constexpr uint32_t ORGAN_EVENT_FIFO_SIZE = 64;
 constexpr uint32_t ORGAN_MAX_EVENTS_PER_BLOCK = 16;
+
+/* Выравнивание громкости с остальными движками. Библиотека bfreeOrgan2 рассчитана с большим запасом по уровню
+ * (на 12 нотах с выдвинутыми регистрами пик около -18 дБFS, на аккорде из трёх нот с типовыми регистрами - около -12 дБFS),
+ * из-за чего орган звучал на 8-10 дБ тише E-Piano/Lead/Violin. Поэтому здесь добавляется усиление, а чтобы плотные
+ * аккорды не клиппировали, сигнал проходит через тот же мягкий ограничитель, что и в Lead/Violin. Ниже колена
+ * (0,80 от полной шкалы) сигнал не искажается. */
+constexpr float ORGAN_OUTPUT_GAIN  = 3.5f;      /* +10,9 дБ */
+constexpr float ORGAN_LIMIT_KNEE   = 0.80f;
+constexpr float ORGAN_LIMIT_CEIL   = 0.98f;
+
+inline int16_t organ_level(int16_t s)
+{
+    const float x = synth::SoftLimit((float)s * (ORGAN_OUTPUT_GAIN / 32768.0f), ORGAN_LIMIT_KNEE, ORGAN_LIMIT_CEIL);
+    return (int16_t)(x * 32767.0f);
+}
 
 Event                 g_fifo[ORGAN_EVENT_FIFO_SIZE];
 std::atomic<uint32_t> g_fifo_head{0};
@@ -175,8 +191,9 @@ void OrganSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
         const uint32_t n = (num_frames - done > kChunk) ? kChunk : (num_frames - done);
         g_organ.synthesize_block(mono, n);
         for (uint32_t i = 0; i < n; ++i) {
-            buffer[(done + i) * 2]     = mono[i];
-            buffer[(done + i) * 2 + 1] = mono[i];
+            const int16_t s = organ_level(mono[i]);
+            buffer[(done + i) * 2]     = s;
+            buffer[(done + i) * 2 + 1] = s;
         }
         done += n;
     }

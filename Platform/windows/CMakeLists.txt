@@ -13,13 +13,12 @@ option(PURRMIDI_WERROR "Treat compiler warnings in project code as errors (GCC/C
 
 # Все синтезаторы (epiano / pluck / lead / organ / violin / soundfont) входят в сборку; активный
 # выбирается во время работы сообщением MIDI Program Change (см. Engine/synth/synth_engine.h).
-set(DAISYSP_DIR "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/DaisySP")
+# Урезанная копия DaisySP (Oscillator, Svf, Adsr) лежит прямо в репозитории; подмодулей git в проекте нет.
+set(DAISYSP_DIR "${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/DaisySP_lite")
 if(NOT EXISTS "${DAISYSP_DIR}/Source")
     message(FATAL_ERROR
         "Исходники DaisySP не найдены: ${DAISYSP_DIR}/Source\n"
-        "Выполните команду для инициализации подмодулей:\n"
-        "git submodule update --init --recursive\n"
-        "(DaisySP нужна синтезатору pluck, а он всегда входит в сборку)"
+        "(они нужны синтезатору lead, а он всегда входит в сборку; проверьте, что репозиторий склонирован полностью)"
     )
 endif()
 
@@ -73,23 +72,13 @@ target_include_directories(purrmidi_synth_organ SYSTEM PUBLIC
 )
 target_compile_features(purrmidi_synth_organ PUBLIC cxx_std_17)
 
-# pluck: Карплус-Стронг на DaisySP Pluck
+# pluck: нейлоновая струна, собственная модель Карплуса-Стронга (без внешних зависимостей)
 add_library(purrmidi_synth_pluck STATIC
     "${CMAKE_SOURCE_DIR}/Engine/synth/pluck_synth.cpp"
-    "${DAISYSP_DIR}/DaisySP-LGPL/Source/PhysicalModeling/pluck.cpp"
 )
 target_include_directories(purrmidi_synth_pluck PUBLIC
     "${CMAKE_SOURCE_DIR}/Engine/synth"
 )
-target_include_directories(purrmidi_synth_pluck SYSTEM PUBLIC
-    "${DAISYSP_DIR}/Source"
-    "${DAISYSP_DIR}/Source/Utility"
-    "${DAISYSP_DIR}/Source/Synthesis"
-    "${DAISYSP_DIR}/Source/Filters"
-    "${DAISYSP_DIR}/Source/Control"
-    "${DAISYSP_DIR}/DaisySP-LGPL/Source"
-)
-target_compile_definitions(purrmidi_synth_pluck PUBLIC USE_DAISYSP_LGPL)
 target_compile_features(purrmidi_synth_pluck PUBLIC cxx_std_17)
 target_link_libraries(purrmidi_synth_pluck PUBLIC purrmidi_synth_common)
 
@@ -109,9 +98,7 @@ target_include_directories(purrmidi_synth_lead SYSTEM PUBLIC
     "${DAISYSP_DIR}/Source/Synthesis"
     "${DAISYSP_DIR}/Source/Filters"
     "${DAISYSP_DIR}/Source/Control"
-    "${DAISYSP_DIR}/DaisySP-LGPL/Source"
 )
-target_compile_definitions(purrmidi_synth_lead PUBLIC USE_DAISYSP_LGPL)
 target_compile_features(purrmidi_synth_lead PUBLIC cxx_std_17)
 target_link_libraries(purrmidi_synth_lead PUBLIC purrmidi_synth_common)
 
