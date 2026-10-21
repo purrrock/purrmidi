@@ -25,7 +25,15 @@ jobs:
         run: cmake --build --preset host-tests
 
       - name: Run host tests
-        run: ctest --test-dir build/host-tests --output-on-failure
+        run: ctest --test-dir build/host-tests --output-on-failure --no-tests=error
+
+      # Ветка SF2_DIAG_STATS=0 - это Release прошивки (статистика выключена). Раньше она не собиралась нигде и
+      # могла сломаться незаметно: хост-сборка идёт с -Wextra -Werror, как раз и ловит такие ошибки.
+      - name: Host tests with SF2_DIAG_STATS=0 (как в Release прошивки)
+        run: |
+          cmake --preset host-tests -B build/host-tests-nodiag -DCMAKE_CXX_FLAGS="-DSF2_DIAG_STATS=0"
+          cmake --build build/host-tests-nodiag
+          ctest --test-dir build/host-tests-nodiag --output-on-failure --no-tests=error
 
   host-tests-sanitizers:
     name: Host tests (ASan + UBSan)
@@ -49,7 +57,7 @@ jobs:
         env:
           ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
           UBSAN_OPTIONS: print_stacktrace=1
-        run: ctest --preset host-tests-asan
+        run: ctest --preset host-tests-asan --no-tests=error
 
   host-build-windows:
     runs-on: windows-latest
@@ -69,7 +77,8 @@ jobs:
         run: cmake --build --preset win-msvc-release
 
       - name: Run host tests (Windows)
-        run: ctest --preset win-msvc-release
+        # --no-tests=error: пустой набор тестов не должен выглядеть как успех.
+        run: ctest --preset win-msvc-release --no-tests=error
 
   stm32-build:
     name: Build STM32H743 firmware
@@ -113,6 +122,12 @@ jobs:
 
       - name: Check Release firmware size budget
         run: bash tools/check_firmware_size.sh build/Release/purrmidi.elf
+
+      # -O2 у горячих аудио-файлов и -Wextra у кода проекта: потеря этих флагов не даёт ни предупреждений, ни падения тестов.
+      - name: Check compiler flags of firmware sources
+        run: |
+          bash tools/check_firmware_flags.sh build/Release/compile_commands.json
+          bash tools/check_firmware_flags.sh build/Debug/compile_commands.json
 
       # Образы для прошивки платы собираются из Release (на приборе работает именно он).
       - name: Create Release .bin and .hex

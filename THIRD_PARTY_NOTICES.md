@@ -45,4 +45,3 @@ If no LICENSE file comes with this software, it is provided AS-IS»). Сгене
 | `SoundFonts/Piano/KawaiStereoGrand.sf2` | `ICOP = Matias Rockas 1997 FINLAND`; условий распространения в файле нет, права **не подтверждены**. |
 | `SoundFonts/Sax/RolandSuperTenor.sf2` | Метаданные: «Copyright Information Not Present», автор конвертации «Vienna Master». Название указывает на сэмплы Roland; права **не подтверждены**. |
 | `SoundFonts/Jews_Harp.sf2`, `tests/SNDFNT.SF2` (побайтно одинаковы) | Название «Jews Harp», создан в Polyphone; сведений об авторе и лицензии в файле нет, права **не подтверждены**. Тестовые данные. |
-

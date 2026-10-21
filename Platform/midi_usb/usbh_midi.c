@@ -120,7 +120,7 @@ static USBH_StatusTypeDef USBH_MIDI_InterfaceInit (USBH_HandleTypeDef *phost)
 		if (MIDI_Handle->InEp != 0) {
 			MIDI_Handle->InPipe = USBH_AllocPipe(phost, MIDI_Handle->InEp);
 
-			if (MIDI_Handle->InPipe == 0x00U || MIDI_Handle->InPipe == 0xFFU || (uint16_t)MIDI_Handle->InPipe == 0xFFFFU)
+			if (MIDI_Handle->InPipe == 0x00U || MIDI_Handle->InPipe == 0xFFU)
 			{
 				USBH_DbgLog("Cannot allocate Pipe for MIDI IN Endpoint");
 				USBH_free(MIDI_Handle);
@@ -286,6 +286,7 @@ static USBH_StatusTypeDef USBH_MIDI_Process (USBH_HandleTypeDef *phost)
   */
 static USBH_StatusTypeDef USBH_MIDI_SOFProcess (USBH_HandleTypeDef *phost)
 {
+	(void)phost;
   return USBH_OK;
 }
 
@@ -490,6 +491,7 @@ static void MIDI_ProcessReception(USBH_HandleTypeDef *phost)
  */
 __weak void USBH_MIDI_TransmitCallback(USBH_HandleTypeDef *phost)
 {
+	(void)phost;
 
 }
 
@@ -501,6 +503,7 @@ __weak void USBH_MIDI_TransmitCallback(USBH_HandleTypeDef *phost)
  */
 __weak void USBH_MIDI_ReceiveCallback(USBH_HandleTypeDef *phost)
 {
+	(void)phost;
 
 }
 

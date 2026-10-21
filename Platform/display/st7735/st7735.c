@@ -526,6 +526,7 @@ int32_t ST7735_SetOrientation(ST7735_Object_t *pObj, ST7735_Ctx_t *pDriver)
   */
 int32_t ST7735_GetOrientation(ST7735_Object_t *pObj, uint32_t *Orientation)
 {
+  (void)pObj;
 
   *Orientation = ST7735Ctx.Orientation;
 

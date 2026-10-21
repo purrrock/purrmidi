@@ -57,7 +57,8 @@ target_link_libraries(DaisySP PRIVATE stm32cubemx)
 
 # Каталоги заголовков: lead_synth.cpp подключает "Synthesis/oscillator.h", "Filters/svf.h",
 # "Control/adsr.h" и "Utility/dsp.h" от корня Source; сами исходники DaisySP включают dsp.h по короткому имени.
-target_include_directories(DaisySP PUBLIC
+# SYSTEM: предупреждения из заголовков сторонней DaisySP не должны попадать в lead_synth.cpp (там действует -Wextra).
+target_include_directories(DaisySP SYSTEM PUBLIC
     ${DAISYSP_DIR}/Source
     ${DAISYSP_DIR}/Source/Utility
     ${DAISYSP_DIR}/Source/Synthesis
@@ -181,6 +182,16 @@ target_include_directories(${CMAKE_PROJECT_NAME} SYSTEM PRIVATE
     Middlewares/Third_Party/bfreeOrgan2/components
     Middlewares/Third_Party/TinySoundFont
 )
+# -Wextra только для кода проекта: Engine/, Platform/ и Core/Src/main.c. Сгенерированные CubeMX файлы (user_diskio.c,
+# usbh_conf.c и т. п.) и сторонние каталоги остаются на -Wall: -Wextra даёт там шум (неиспользуемые параметры заглушек),
+# который CubeMX возвращает при каждой регенерации. Хост-тесты уже собираются с -Wextra.
+get_target_property(_purrmidi_own_sources ${CMAKE_PROJECT_NAME} SOURCES)
+list(FILTER _purrmidi_own_sources INCLUDE REGEX "^(Engine|Platform)/")
+list(APPEND _purrmidi_own_sources "${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/main.c")
+# APPEND обязателен: у горячих аудио-файлов уже задан COMPILE_OPTIONS (-O2, см. выше), а обычное присваивание
+# молча заменило бы его, и они собрались бы с -Os.
+set_property(SOURCE ${_purrmidi_own_sources} APPEND PROPERTY COMPILE_OPTIONS "-Wextra")
+
 if(PURRMIDI_WERROR)
     target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE -Werror)
 endif()

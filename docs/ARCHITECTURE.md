@@ -87,7 +87,7 @@ Drivers/, Middlewares/  HAL/CMSIS, USB Host Library, FatFs и сторонние
 SoundFonts/           Примеры SoundFont-банков и скрипт sf2_shrink.py
 tests/                Хостовые тесты (CMake preset host-tests)
 docs/                 Документация по подсистемам
-tools/                Вспомогательные скрипты (openocd-run.cmd, check_firmware_size.sh)
+tools/                Вспомогательные скрипты (openocd-run.cmd, check_firmware_size.sh, check_firmware_flags.sh)
 ```
 
 ## Документация
