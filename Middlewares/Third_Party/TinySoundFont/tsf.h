@@ -128,6 +128,12 @@ void tsf_set_smpl_pcm16(struct tsf* f, const short* pcm, unsigned int count);
 // PurrMidi: защита от перегрузки CPU. Ускоренно гасит до max_count голосов, которые уже в фазе release
 // (начиная с самых затихших). Звучащие (не отпущенные) ноты не трогает. Возвращает число затронутых голосов.
 int tsf_shed_releasing_voices(struct tsf* f, int max_count);
+// PurrMidi: аварийная защита от устойчивой перегрузки CPU, когда отпущенных голосов уже нет (например, много нажатых
+// клавиш или педаль). Ускоренно (~10 мс, без щелчка) гасит до max_notes НОТ целиком (все голоса-регионы одной ноты, чтобы
+// не остаться с половиной стереопары). Берёт ноту, которую слышно меньше всего: сначала удерживаемые только педалью,
+// затем самые затихшие (огибающая в фазе decay/sustain); ноты, которые ещё в атаке, не трогает. Возвращает число
+// затронутых голосов.
+int tsf_shed_sounding_voices(struct tsf* f, int max_notes);
 #ifdef __cplusplus
 }
 #endif
@@ -1429,6 +1435,43 @@ int tsf_shed_releasing_voices(struct tsf* f, int max_count)
 		tsf_voice_envelope_nextsegment(&best->ampenv, TSF_SEGMENT_SUSTAIN, f->outSampleRate);
 		tsf_voice_envelope_nextsegment(&best->modenv, TSF_SEGMENT_SUSTAIN, f->outSampleRate);
 		done++;
+	}
+	return done;
+}
+int tsf_shed_sounding_voices(struct tsf* f, int max_notes)
+{
+	int done = 0, notes;
+	if (!f) return 0;
+	for (notes = 0; notes < max_notes; notes++)
+	{
+		struct tsf_voice *v, *vEnd, *best = TSF_NULL;
+		for (v = f->voices, vEnd = v + f->voiceNum; v != vEnd; v++)
+		{
+			if (v->playingPreset == -1) continue;
+			// Только установившаяся фаза: атаку (новую ноту) и уже идущий release не трогаем.
+			if (v->ampenv.segment != TSF_SEGMENT_DECAY && v->ampenv.segment != TSF_SEGMENT_SUSTAIN) continue;
+			if (!best ||
+				(v->heldSustain && !best->heldSustain) ||
+				(v->heldSustain == best->heldSustain &&
+					(v->ampenv.level < best->ampenv.level ||
+					(v->ampenv.level == best->ampenv.level && v->playIndex < best->playIndex))))
+				best = v;
+		}
+		if (!best) break;
+		{
+			// Гасим все голоса этой ноты (одинаковый playIndex): регионы стереопары и слои звучат вместе.
+			const unsigned int idx = best->playIndex;
+			for (v = f->voices, vEnd = v + f->voiceNum; v != vEnd; v++)
+			{
+				if (v->playingPreset == -1 || v->playIndex != idx || v->ampenv.segment >= TSF_SEGMENT_RELEASE) continue;
+				v->heldSustain = 0; // после педали note-off не должен снова запустить release
+				v->ampenv.parameters.release = 0.01f;
+				v->modenv.parameters.release = 0.01f;
+				tsf_voice_envelope_nextsegment(&v->ampenv, TSF_SEGMENT_SUSTAIN, f->outSampleRate);
+				tsf_voice_envelope_nextsegment(&v->modenv, TSF_SEGMENT_SUSTAIN, f->outSampleRate);
+				done++;
+			}
+		}
 	}
 	return done;
 }

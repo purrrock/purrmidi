@@ -58,6 +58,203 @@ inline float SoftLimit(float x, float knee, float ceil)
 }
 
 /* ------------------------------------------------------------------------------------------------------------
+ * Медленный регулятор усиления (AutoGain): держит пик блока не выше `target_peak`, не искажая форму волны.
+ *
+ * Зачем. SoftLimit - статическая кривая: пока пик выходит за колено, она сплющивает вершины каждого периода, то есть
+ * вносит гармонические искажения («хрип»). Для движка, у которого усиление выбрано под одну-три ноты (Organ: x3,5), на
+ * плотных аккордах этого не избежать. Здесь усиление меняется медленно и одинаково для всех отсчётов блока, поэтому
+ * форма волны сохраняется, а громкость аккорда просто не растёт выше цели.
+ *
+ * Как работает. Для каждого блока (блок уже отрисован, его пик известен заранее, предсказание не нужно):
+ *   - цель = min(max_gain, target_peak / пик_блока);
+ *   - если цель ниже текущего усиления (аккорд стал громче): усиление линейно доходит до цели за kAttackRamp
+ *     отсчётов (быстро, но без щелчка); остаток перерегулирования, если он есть, снимет SoftLimit;
+ *   - иначе усиление медленно (с постоянной времени release_seconds) растёт к цели: за время затухания аккорда нет
+ *     «накачки», а на низких нотах (период до 30 мс) нет модуляции усиления с частотой сигнала.
+ * Пока пик * max_gain <= target_peak (например, 1-3 ноты органа), усиление равно max_gain, и выход бит-в-бит
+ * совпадает с обычным умножением на max_gain.
+ * ------------------------------------------------------------------------------------------------------------ */
+class AutoGain {
+public:
+    static constexpr uint32_t kAttackRamp = 32U;   /* отсчётов на снижение усиления (около 0,7 мс при 48 кГц) */
+
+    AutoGain(float max_gain, float target_peak, float release_seconds, float sample_rate = 48000.0f)
+        : max_gain_(max_gain), target_peak_(target_peak), release_seconds_(release_seconds),
+          sample_rate_(sample_rate), gain_(max_gain) {}
+
+    /** Вернуть усиление к максимальному (при Init() движка). */
+    void Reset() { gain_ = max_gain_; }
+
+    /** Текущее усиление (после последнего блока). */
+    float Gain() const { return gain_; }
+
+    /**
+     * Обработать блок: in - int16-отсчёты движка, out - float, 1.0 = полная шкала, уже умноженные на усиление.
+     * Дальше обычно идёт SoftLimit как страховка.
+     */
+    void Process(const int16_t *in, float *out, uint32_t n)
+    {
+        int32_t peak_i = 0;
+        for (uint32_t i = 0; i < n; ++i) {
+            const int32_t a = (in[i] < 0) ? -(int32_t)in[i] : (int32_t)in[i];
+            if (a > peak_i) peak_i = a;
+        }
+        const float peak = (float)peak_i * (1.0f / 32768.0f);
+        const float target = (peak * max_gain_ > target_peak_) ? (target_peak_ / peak) : max_gain_;
+
+        const float g0 = gain_;
+        float goal;
+        uint32_t ramp;
+        if (target < g0) {
+            goal = target;
+            ramp = (n < kAttackRamp) ? n : kAttackRamp;
+        } else {
+            const float k = 1.0f - std::exp(-(float)n / (sample_rate_ * release_seconds_));
+            goal = g0 + (target - g0) * k;
+            ramp = n;
+        }
+
+        const float step = (ramp != 0U) ? (goal - g0) / (float)ramp : 0.0f;
+        float g = g0;
+        for (uint32_t i = 0; i < n; ++i) {
+            if (i < ramp) g += step; else g = goal;
+            out[i] = (float)in[i] * (1.0f / 32768.0f) * g;
+        }
+        gain_ = goal;
+    }
+
+private:
+    float max_gain_;
+    float target_peak_;
+    float release_seconds_;
+    float sample_rate_;
+    float gain_;
+};
+
+/* ------------------------------------------------------------------------------------------------------------
+ * Регулятор нагрузки движка с дорогими голосами (SoundFont): чистая логика без обращений к железу, поэтому проверяется
+ * хост-тестами с заданными числами (test_synth_common). Всё считается в тактах процессора; блок - это один вызов
+ * рендера, его бюджет `block_budget` передаёт движок.
+ *
+ * Две задачи:
+ *  1) Не растягивать блок событиями. Старт голоса в TinySoundFont дорог (десятки pow/tan/log в double), а аккорд
+ *     из пяти клавиш запускает десятки голосов в одном блоке, и блок вылетает за бюджет (хрип, пропуск блока).
+ *     ShouldDeferNoteOn() говорит, что очередной Note On лучше отложить на следующий блок: прогноз = уже потраченное на
+ *     события + оценка рендера всех голосов, включая будущие голоса этой ноты, по измеренной цене голоса.
+ *     Хотя бы один Note On за блок применяется всегда, поэтому ноты не могут застрять.
+ *  2) Если рендер устойчиво (не один блок) выходит за порог, а отпущенных голосов для гашения уже нет, нужно погасить
+ *     звучащие ноты: ShedSoundingNotes() возвращает, сколько нот гасить сейчас (0, 1 или 2), с паузой между
+ *     гашениями, потому что затухание идёт ~10 мс (4 блока) и голос ещё стоит рендеру тактов.
+ * Цена голоса - скользящее среднее (1/8) тактов рендера на голос на кадр, в формате с фиксированной точкой x256.
+ * ------------------------------------------------------------------------------------------------------------ */
+class LoadGovernor {
+public:
+    static constexpr uint32_t kCooldownBlocks  = 4U;    /* пауза между гашениями звучащих нот */
+    static constexpr uint32_t kOverBlocksToShed = 2U;   /* столько блоков подряд выше порога, прежде чем гасить */
+
+    LoadGovernor(uint32_t event_limit_pct, uint32_t shed_pct)
+        : event_limit_pct_(event_limit_pct), shed_pct_(shed_pct) {}
+
+    /** Полный сброс, включая выученные оценки (новый банк: цена голоса и число регионов на ноту могли измениться). */
+    void Reset()
+    {
+        cost_x256_ = 0U;
+        voices_per_note_x16_ = 4U * 16U;
+        ResetState();
+    }
+
+    /**
+     * Сброс только счётчиков перегрузки (выбор движка, All Sound Off). Выученные оценки сохраняются: цена голоса - свойство
+     * банка и железа, и забывать её при каждом переключении нельзя: первый же аккорд после выбора SoundFont шёл бы без
+     * прогноза и мог вылететь за бюджет.
+     */
+    void ResetState()
+    {
+        over_blocks_ = 0U;
+        cooldown_ = 0U;
+    }
+
+    /** После рендера: обновить цену голоса. voices - сколько голосов рендерилось в этом блоке. */
+    void RenderDone(uint32_t render_cycles, uint32_t voices, uint32_t frames)
+    {
+        if (voices == 0U || frames == 0U) return;
+        const uint32_t sample = (uint32_t)(((uint64_t)render_cycles * 256U) / ((uint64_t)voices * frames));
+        if (cost_x256_ == 0U) {
+            cost_x256_ = sample;
+        } else if (sample >= cost_x256_) {
+            cost_x256_ += (sample - cost_x256_) / 8U;
+        } else {
+            cost_x256_ -= (cost_x256_ - sample) / 8U;
+        }
+    }
+
+    /** После Note On: сколько голосов он запустил (регионов банка на ноту); 0 - не запустил, в среднее не идёт. */
+    void NoteStarted(uint32_t voices_started)
+    {
+        if (voices_started == 0U) return;
+        const uint32_t sample = voices_started * 16U;
+        /* Шаг округляется вверх: иначе среднее на целых числах застревает рядом с целью и не доходит до неё. */
+        if (sample >= voices_per_note_x16_) {
+            voices_per_note_x16_ += (sample - voices_per_note_x16_ + 3U) / 4U;
+        } else {
+            voices_per_note_x16_ -= (voices_per_note_x16_ - sample + 3U) / 4U;
+        }
+    }
+
+    /** Ожидаемое число голосов одной ноты (округление вверх). */
+    uint32_t VoicesPerNote() const { return (voices_per_note_x16_ + 15U) / 16U; }
+
+    /** Цена голоса, такты на голос на кадр, x256 (0 - ещё не измерена). */
+    uint32_t CostPerVoiceX256() const { return cost_x256_; }
+
+    /** Оценка времени рендера для `voices` голосов и `frames` кадров. */
+    uint32_t PredictRender(uint32_t voices, uint32_t frames) const
+    {
+        return (uint32_t)(((uint64_t)cost_x256_ * voices * frames) / 256U);
+    }
+
+    /**
+     * Отложить ли очередной Note On на следующий блок.
+     * elapsed - такты, уже потраченные на события в этом блоке; voices_now - голосов сейчас;
+     * applied_note_ons - сколько Note On уже применено в этом блоке (первый не откладывается никогда).
+     */
+    bool ShouldDeferNoteOn(uint32_t elapsed, uint32_t voices_now, uint32_t frames, uint32_t block_budget,
+                           uint32_t applied_note_ons) const
+    {
+        if (applied_note_ons == 0U) return false;
+        const uint64_t limit = (uint64_t)block_budget * event_limit_pct_ / 100U;
+        const uint64_t predicted = (uint64_t)elapsed + PredictRender(voices_now + VoicesPerNote(), frames);
+        return predicted > limit;
+    }
+
+    /**
+     * После рендера: сколько звучащих нот погасить сейчас. Вызывается на каждом блоке (ведёт счётчики).
+     * 0 - ничего; 1 - устойчивая перегрузка (порог shed_pct); 2 - тяжёлая (выше 110% бюджета).
+     */
+    uint32_t ShedSoundingNotes(uint32_t render_cycles, uint32_t block_budget)
+    {
+        if (cooldown_ != 0U) --cooldown_;
+        const uint64_t limit = (uint64_t)block_budget * shed_pct_ / 100U;
+        if ((uint64_t)render_cycles <= limit) {
+            over_blocks_ = 0U;
+            return 0U;
+        }
+        if (over_blocks_ < 255U) ++over_blocks_;
+        if (over_blocks_ < kOverBlocksToShed || cooldown_ != 0U) return 0U;
+        cooldown_ = kCooldownBlocks;
+        return ((uint64_t)render_cycles * 100U > (uint64_t)block_budget * 110U) ? 2U : 1U;
+    }
+
+private:
+    uint32_t event_limit_pct_;
+    uint32_t shed_pct_;
+    uint32_t cost_x256_ = 0U;
+    uint32_t voices_per_note_x16_ = 4U * 16U;
+    uint32_t over_blocks_ = 0U;
+    uint32_t cooldown_ = 0U;
+};
+
+/* ------------------------------------------------------------------------------------------------------------
  * Частота MIDI-ноты в герцах (равномерно темперированный строй, A4 = 440 Гц). Таблица на 128 нот считается один раз
  * (при первом обращении или при MidiFreqInit() из Init() движка) и общая для всех движков.
  * ------------------------------------------------------------------------------------------------------------ */
@@ -185,6 +382,16 @@ public:
     }
 
     /* ---------------- сторона потребителя (рендер) ---------------- */
+
+    /** Посмотреть следующее событие, не извлекая его (только потребитель). Нужен, чтобы отложить событие до следующего блока. */
+    bool Peek(Event &ev) const
+    {
+        const uint32_t tail = tail_.load(std::memory_order_relaxed);
+        const uint32_t head = head_.load(std::memory_order_acquire);
+        if (head == tail) return false;
+        ev = fifo_[tail & (kSize - 1U)];
+        return true;
+    }
 
     bool Pop(Event &ev)
     {

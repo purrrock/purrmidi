@@ -26,12 +26,14 @@ constexpr uint32_t ORGAN_MAX_EVENTS_PER_BLOCK = 16;
 constexpr float ORGAN_OUTPUT_GAIN  = 3.5f;      /* +10,9 дБ */
 constexpr float ORGAN_LIMIT_KNEE   = 0.80f;
 constexpr float ORGAN_LIMIT_CEIL   = 0.98f;
+constexpr float ORGAN_AGC_RELEASE  = 0.25f;     /* с: возврат усиления после затухания плотного аккорда */
 
-inline int16_t organ_level(int16_t s)
-{
-    const float x = synth::SoftLimit((float)s * (ORGAN_OUTPUT_GAIN / 32768.0f), ORGAN_LIMIT_KNEE, ORGAN_LIMIT_CEIL);
-    return (int16_t)(x * 32767.0f);
-}
+/* Усиление x3,5 подобрано под одну-три ноты (пик на трёх нотах 0,79 от полной шкалы). На шести и более нотах пик
+ * после усиления заходит за колено ограничителя, и статическая кривая SoftLimit сплющивает вершины каждого периода:
+ * это слышно как хрип (на шести нотах 7% отсчётов лежат в нелинейной зоне, на восьми - 18%). Поэтому усиление делает
+ * медленный регулятор AutoGain: на 1-3 нотах оно остаётся x3,5 (звук не меняется), на плотных аккордах плавно
+ * снижается так, чтобы пик не превышал колено, и форма волны не искажается. SoftLimit остаётся страховкой. */
+synth::AutoGain g_gain(ORGAN_OUTPUT_GAIN, ORGAN_LIMIT_KNEE, ORGAN_AGC_RELEASE);
 
 Event                 g_fifo[ORGAN_EVENT_FIFO_SIZE];
 std::atomic<uint32_t> g_fifo_head{0};
@@ -140,6 +142,7 @@ extern "C" {
 void OrganSynth_Init(void)
 {
     g_organ.init();
+    g_gain.Reset();
     g_fifo_head.store(0, std::memory_order_relaxed);
     g_fifo_tail.store(0, std::memory_order_relaxed);
     g_dropped_events.store(0, std::memory_order_relaxed);
@@ -190,8 +193,11 @@ void OrganSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
     while (done < num_frames) {
         const uint32_t n = (num_frames - done > kChunk) ? kChunk : (num_frames - done);
         g_organ.synthesize_block(mono, n);
+        float scaled[kChunk];
+        g_gain.Process(mono, scaled, n);
         for (uint32_t i = 0; i < n; ++i) {
-            const int16_t s = organ_level(mono[i]);
+            const float x = synth::SoftLimit(scaled[i], ORGAN_LIMIT_KNEE, ORGAN_LIMIT_CEIL);
+            const int16_t s = (int16_t)(x * 32767.0f);
             buffer[(done + i) * 2]     = s;
             buffer[(done + i) * 2 + 1] = s;
         }

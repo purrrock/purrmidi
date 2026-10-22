@@ -85,6 +85,17 @@ uint32_t SoundFontSynth_GetPreset(void);
 /** Возвращает true, если банк SoundFont2 успешно загружен. */
 bool SoundFontSynth_IsLoaded(void);
 
+/** Сколько голосов TinySoundFont звучит сейчас (диагностика и тесты). */
+uint32_t SoundFontSynth_GetActiveVoiceCount(void);
+
+#if !defined(__arm__)
+/**
+ * Только для хоста (тесты): подменить счётчик тактов и задать бюджет блока из 128 кадров в тактах. По умолчанию на хосте
+ * тактов нет, и регулятор нагрузки (откладывание Note On, гашение звучащих нот) выключен. now == NULL возвращает так.
+ */
+void SoundFontSynth_SetClockForTest(uint32_t (*now)(void), uint32_t block_budget_cycles);
+#endif
+
 /** Число 16-битных отсчётов PCM в банке (0, если банк не загружен). */
 uint32_t SoundFontSynth_GetSampleCount(void);
 

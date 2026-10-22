@@ -62,6 +62,18 @@
 #define SF2_SHED_VOICES_PER_BLOCK 4
 #endif
 
+/* Регулятор нагрузки (synth::LoadGovernor, см. synth_common.h).
+ * SF2_EVENT_BUDGET_PCT: Note On откладывается на следующий блок, если прогноз (потраченное на события + рендер всех
+ * голосов, включая будущие голоса этой ноты) выходит за этот процент бюджета блока. Хотя бы один Note On за блок
+ * применяется всегда. SF2_SHED_SOUNDING_PCT: если рендер устойчиво (2 блока подряд) выше этого процента, а отпущенных
+ * голосов для гашения нет, ускоренно гасятся самые тихие звучащие ноты. */
+#ifndef SF2_EVENT_BUDGET_PCT
+#define SF2_EVENT_BUDGET_PCT 85U
+#endif
+#ifndef SF2_SHED_SOUNDING_PCT
+#define SF2_SHED_SOUNDING_PCT 90U
+#endif
+
 #define SF_EVENT_FIFO_SIZE 256U   /* power of two */
 #define SF_NOTE_ON_FIFO_LIMIT 224U /* slots for Note On / Program / continuous CC; the rest is reserved for Note Off and pedal */
 #define SF_MAX_NOTE_REGIONS 8
@@ -86,6 +98,9 @@ struct Event {
  * the whole FIFO; Note On, Program Change and other CCs are limited to SF_NOTE_ON_FIFO_LIMIT slots so that a flood of
  * notes can never push out a Note Off (which would leave a stuck note). */
 synth::NoteInput<Event, SF_EVENT_FIFO_SIZE, SF_NOTE_ON_FIFO_LIMIT> g_input;
+
+/* Регулятор нагрузки: откладывает Note On, если блок не успевает, и гасит звучащие ноты при устойчивой перегрузке. */
+synth::LoadGovernor g_gov(SF2_EVENT_BUDGET_PCT, SF2_SHED_SOUNDING_PCT);
 
 /* Pitch wheel: "last value" (0..16383, centre 8192), no queue - losing intermediate values is harmless and the return
  * to centre can never be lost. Written by main, read by the audio context. */
@@ -116,6 +131,9 @@ struct DiagStats {
     volatile uint32_t voice_shortfall; /* wanted - started: voices stolen from releasing notes or lost */
     volatile uint32_t regions_max;     /* most regions of one note seen (session)                      */
     volatile uint32_t voices_shed;     /* отпущенные голоса, ускоренно погашенные защитой от перегрузки */
+    volatile uint32_t voices_shed_sounding; /* голоса звучащих нот, погашенные при устойчивой перегрузке  */
+    volatile uint32_t events_deferred; /* Note On, отложенные на следующий блок (блок не успевал)      */
+    volatile uint32_t ev_cycles_max;   /* такты, потраченные на обработку событий (Note On) за блок   */
 };
 DiagStats g_diag;
 [[maybe_unused]] uint32_t g_diag_fifo_dropped_seen = 0;  /* используется только при SF2_DIAG_STATS=1 */
@@ -123,9 +141,18 @@ DiagStats g_diag;
 #if !SF2_HOST_MODE
 inline uint32_t diag_cycles() { return DWT->CYCCNT; }
 inline uint32_t diag_cycles_per_us() { const uint32_t v = SystemCoreClock / 1000000U; return v ? v : 1U; }
+/* Бюджет блока в тактах: столько длится num_frames кадров при 48 кГц. */
+inline uint32_t block_budget_cycles(uint32_t num_frames) { return (SystemCoreClock / 48000U) * num_frames; }
 #else
-inline uint32_t diag_cycles() { return 0U; }
+/* На хосте тактов нет: регулятор нагрузки выключен (бюджет 0), пока тест не задал свои «часы». */
+uint32_t (*g_test_clock)(void) = nullptr;
+uint32_t   g_test_block_budget = 0U;      /* такты на блок из 128 кадров */
+inline uint32_t diag_cycles() { return g_test_clock ? g_test_clock() : 0U; }
 inline uint32_t diag_cycles_per_us() { return 1U; }
+inline uint32_t block_budget_cycles(uint32_t num_frames)
+{
+    return g_test_clock ? (uint32_t)(((uint64_t)g_test_block_budget * num_frames) / 128U) : 0U;
+}
 #endif
 
 /* Smooth limiter: identity below the knee, above it a tanh-shaped approach to the ceiling (the value and the
@@ -281,6 +308,7 @@ bool SoundFontSynth_InitSF2(void)
     g_loaded = false;
     g_init_attempted = true;
     g_input.Reset();
+    g_gov.Reset();
     g_pitch_wheel.store(8192, std::memory_order_relaxed);
     g_pitch_applied = 8192;
 
@@ -352,6 +380,7 @@ void SoundFontSynth_Init(void)
         tsf_channel_set_pitchwheel(g_tsf, 0, 8192);
     }
     g_input.Reset();
+    g_gov.ResetState();     /* оценки цены голоса сохраняются между выборами движка */
     g_pitch_wheel.store(8192, std::memory_order_relaxed);
     g_pitch_applied = 8192;
 }
@@ -456,10 +485,35 @@ void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
         tsf_channel_set_pitchwheel(g_tsf, 0, wheel);
     }
 
+    /* События применяются по порядку, но Note On не растягивает блок: старт голоса TinySoundFont дорог, а аккорд из
+     * нескольких клавиш запускает десятки голосов сразу. Если прогноз времени блока выходит за SF2_EVENT_BUDGET_PCT
+     * бюджета, этот Note On и всё, что за ним, остаётся в очереди до следующего блока (порядок событий сохраняется, Note Off
+     * не обгонит свой Note On). Первый Note On за блок применяется всегда, поэтому ноты не застревают. */
+    const uint32_t budget_cycles = block_budget_cycles(num_frames);
+    const uint32_t t_events = diag_cycles();
+    uint32_t applied_note_ons = 0U;
     Event ev;
-    while (g_input.Pop(ev)) {
-        apply_event(ev);
+    while (g_input.Peek(ev)) {
+        if (ev.type == EV_NOTE_ON && budget_cycles != 0U &&
+            g_gov.ShouldDeferNoteOn(diag_cycles() - t_events, (uint32_t)tsf_active_voice_count(g_tsf), num_frames,
+                                    budget_cycles, applied_note_ons)) {
+#if SF2_DIAG_STATS
+            g_diag.events_deferred++;
+#endif
+            break;
+        }
+        (void)g_input.Pop(ev);
+        if (ev.type == EV_NOTE_ON) {
+            const int before = tsf_active_voice_count(g_tsf);
+            apply_event(ev);
+            const int started = tsf_active_voice_count(g_tsf) - before;
+            g_gov.NoteStarted((uint32_t)(started > 0 ? started : 0));
+            ++applied_note_ons;
+        } else {
+            apply_event(ev);
+        }
     }
+    [[maybe_unused]] const uint32_t ev_cycles = diag_cycles() - t_events;
 
     /* XIP guard: if the bank window is closed (QSPI switched to indirect mode, see sf2_loader.h), reading the PCM
      * would fault (MemManage on the target). Events above only touch voice bookkeeping in the heap, so they are
@@ -472,24 +526,35 @@ void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
     /* Обнуление денормалей: затухающие хвосты голосов (огибающие, ФНЧ) иначе резко замедляют FPU. */
     synth::EnableFlushToZero();
 
+    [[maybe_unused]] const uint32_t voices_pre = (uint32_t)tsf_active_voice_count(g_tsf);
     const uint32_t t0 = diag_cycles();
     render_block(buffer, num_frames);
     [[maybe_unused]] const uint32_t dt = diag_cycles() - t0;   /* на хосте при SF2_DIAG_STATS=0 не используется */
 
-#if !SF2_HOST_MODE
     /* Защита от перегрузки: сложный аккорд с педалью даёт десятки голосов, и блок перестаёт укладываться в бюджет
-     * (хрипы и пропуски). Если блок занял больше SF2_SHED_THRESHOLD_PCT % бюджета, ускоренно гасим до
-     * SF2_SHED_VOICES_PER_BLOCK уже отпущенных голосов с самыми тихими хвостами; звучащие ноты не трогаем. */
-    const uint32_t budget_cycles = (SystemCoreClock / 48000U) * num_frames;
-    if (dt > (budget_cycles / 100U) * SF2_SHED_THRESHOLD_PCT) {
-        const int shed = tsf_shed_releasing_voices(g_tsf, SF2_SHED_VOICES_PER_BLOCK);
+     * (хрипы и пропуски). 1) Если блок занял больше SF2_SHED_THRESHOLD_PCT % бюджета, ускоренно гасим до
+     * SF2_SHED_VOICES_PER_BLOCK уже отпущенных голосов с самыми тихими хвостами. 2) Если при этом перегрузка устойчива
+     * (SF2_SHED_SOUNDING_PCT % два блока подряд), а отпущенных голосов для гашения нет, гасим самые тихие звучащие
+     * ноты целиком (сначала удерживаемые только педалью): лучше потерять тихий голос, чем пропустить блок. */
+    if (budget_cycles != 0U) {
+        g_gov.RenderDone(dt, voices_pre, num_frames);
+        int shed_released = 0;
+        if (dt > (budget_cycles / 100U) * SF2_SHED_THRESHOLD_PCT) {
+            shed_released = tsf_shed_releasing_voices(g_tsf, SF2_SHED_VOICES_PER_BLOCK);
 #if SF2_DIAG_STATS
-        g_diag.voices_shed += (uint32_t)shed;
+            g_diag.voices_shed += (uint32_t)shed_released;
+#endif
+        }
+        const uint32_t shed_notes = g_gov.ShedSoundingNotes(dt, budget_cycles);
+        if (shed_notes != 0U && shed_released == 0) {
+            const int shed_sounding = tsf_shed_sounding_voices(g_tsf, (int)shed_notes);
+#if SF2_DIAG_STATS
+            g_diag.voices_shed_sounding += (uint32_t)shed_sounding;
 #else
-        (void)shed;
+            (void)shed_sounding;
 #endif
+        }
     }
-#endif
 
 #if SF2_DIAG_STATS
     const uint32_t voices = (uint32_t)tsf_active_voice_count(g_tsf);
@@ -497,6 +562,7 @@ void SoundFontSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
     g_diag.blocks++;
     g_diag.cycles_sum += dt;
     if (dt > g_diag.cycles_max) g_diag.cycles_max = dt;
+    if (ev_cycles > g_diag.ev_cycles_max) g_diag.ev_cycles_max = ev_cycles;
 #if !SF2_HOST_MODE
     if (dt > budget_cycles) g_diag.over_budget++;
 #endif
@@ -509,6 +575,19 @@ bool SoundFontSynth_IsLoaded(void)
 {
     return g_loaded;
 }
+
+uint32_t SoundFontSynth_GetActiveVoiceCount(void)
+{
+    return g_tsf ? (uint32_t)tsf_active_voice_count(g_tsf) : 0U;
+}
+
+#if SF2_HOST_MODE
+void SoundFontSynth_SetClockForTest(uint32_t (*now)(void), uint32_t block_budget_cycles)
+{
+    g_test_clock = now;
+    g_test_block_budget = block_budget_cycles;
+}
+#endif
 
 uint32_t SoundFontSynth_GetSampleCount(void)
 {
@@ -557,7 +636,8 @@ void SoundFontSynth_ReportStats(uint32_t now_ms)
     /* Печатаем только при проблемах: превышен бюджет блока, не хватило голосов, перегрузка
      * микса выше полной шкалы или потеряны события в FIFO. Иначе окно просто сбрасывается. */
     const bool problem = g_diag.over_budget != 0U || g_diag.voice_shortfall != 0U ||
-                         g_diag.over_fs_samples != 0U || dropped != g_diag_fifo_dropped_seen;
+                         g_diag.over_fs_samples != 0U || dropped != g_diag_fifo_dropped_seen ||
+                         g_diag.events_deferred != 0U || g_diag.voices_shed_sounding != 0U;
     if (!problem) {
         const uint32_t keep = g_diag.regions_max;
         SoundFontSynth_ResetStats();
@@ -570,11 +650,14 @@ void SoundFontSynth_ReportStats(uint32_t now_ms)
     std::fprintf(stderr,
         "[SF2] 1s: render avg=%lu max=%lu us (over budget=%lu of %lu blocks) | voices max=%lu now=%lu"
         " | notes=%lu regions want=%lu started=%lu short=%lu (max/note=%lu) shed_voices=%lu"
+        " | events max=%lu us deferred=%lu shed_sounding=%lu"
         " | mix peak=%lu.%02lu FS, over 1.0 FS: %lu samples in %lu blocks%s | fifo dropped=%lu\n",
         avg_us, max_us, (unsigned long)g_diag.over_budget, (unsigned long)blocks,
         (unsigned long)g_diag.voices_max, (unsigned long)g_diag.voices_last,
         (unsigned long)g_diag.notes_on, (unsigned long)g_diag.regions_wanted, (unsigned long)g_diag.voices_started,
         (unsigned long)g_diag.voice_shortfall, (unsigned long)g_diag.regions_max, (unsigned long)g_diag.voices_shed,
+        (unsigned long)(g_diag.ev_cycles_max / us), (unsigned long)g_diag.events_deferred,
+        (unsigned long)g_diag.voices_shed_sounding,
         (unsigned long)(g_diag.peak_permille / 1000U), (unsigned long)((g_diag.peak_permille / 10U) % 100U),
         (unsigned long)g_diag.over_fs_samples, (unsigned long)g_diag.over_fs_blocks,
         SF2_SOFT_LIMITER ? " (soft limiter ON)" : " (HARD CLIP)",

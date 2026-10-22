@@ -1,4 +1,6 @@
+#include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <vector>
 
@@ -401,7 +403,49 @@ static void test_retrigger_in_release_has_no_dip() {
     CHECK(peak_after * 2 >= peak_before);                       // no restart from zero
 }
 
+// Плотный аккорд не должен насыщать выход: раньше усиление x3,5 уводило пик за колено ограничителя уже на шести нотах,
+// и вершины волны сплющивались (хрип; на восьми нотах 11% отсчётов выше 0,95 от полной шкалы).
+struct DenseStats { long total = 0, over_knee = 0, over_95 = 0; double rms = 0.0; };
+
+static DenseStats render_chord_stats(int note_count) {
+    static const int kNotes[] = {48, 52, 55, 60, 64, 67, 72, 76, 79, 84};
+    OrganSynth_Init();
+    for (int i = 0; i < note_count; ++i) OrganSynth_NoteOn(static_cast<uint8_t>(kNotes[i]), 100);
+    std::vector<int16_t> buf(128 * 2);
+    DenseStats st; double e = 0.0;
+    for (int blk = 0; blk < 300; ++blk) {
+        OrganSynth_FillStereoBuffer(buf.data(), 128);
+        if (blk < 150) continue;                                // атака, затем регулятор усиления успокаивается
+        for (int i = 0; i < 128; ++i) {
+            const int a = std::abs(static_cast<int>(buf[i * 2]));
+            if (a > static_cast<int>(0.80 * 32767)) ++st.over_knee;
+            if (a > static_cast<int>(0.95 * 32767)) ++st.over_95;
+            e += static_cast<double>(buf[i * 2]) * buf[i * 2];
+            ++st.total;
+        }
+    }
+    st.rms = std::sqrt(e / static_cast<double>(st.total));
+    return st;
+}
+
+static void test_dense_chord_is_not_saturated() {
+    for (int n : {6, 8, 10}) {
+        const DenseStats s = render_chord_stats(n);
+        CHECK(s.over_95 * 1000 < s.total * 5);                  // меньше 0,5% (раньше: 2,6% на 6 нотах, 25% на 10)
+        CHECK(s.over_knee * 100 < s.total * 2);                 // меньше 2% выше колена (раньше 6,9% / 33%)
+    }
+    // Громкость при этом не падает: плотный аккорд не тише аккорда из трёх нот.
+    const DenseStats three = render_chord_stats(3);
+    const DenseStats eight = render_chord_stats(8);
+    CHECK(eight.rms > three.rms * 0.9);
+    // Пока нот мало, регулятор не вмешивается: два ноты проходят через усиление x3,5 без снижения (пик на выходе
+    // совпадает с прежним значением, около 19400 для регистров по умолчанию).
+    const DenseStats two = render_chord_stats(2);
+    CHECK(two.over_knee == 0);
+}
+
 int main() {
+    test_dense_chord_is_not_saturated();
     test_init_silence();
     test_note_on_off();
     test_repeated_note_on();

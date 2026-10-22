@@ -1,0 +1,79 @@
+// Параметры корпуса PurrMIDI
+wall = 2.0;          // Толщина стенки
+tolerance = 0.6;     // Зазор для свободного входа плат
+box_l = 110;         // Внутренняя длина корпуса
+box_w = 46;          // Внутренняя ширина корпуса
+box_h = 20;          // Внутренняя высота (каждой половинки ~10 мм)
+
+// Размеры платы WeAct STM32H7
+pcb1_l = 66.88;
+pcb1_w = 40.64;
+hole_l1 = 61.38;
+hole_w1 = 35.51;
+
+// Размеры платы PCM5102A
+pcb2_l = 31.9;
+pcb2_w = 17.2;
+
+module base_shell() {
+    difference() {
+        // Внешний контур нижней части
+        cube([box_l + wall*2, box_w + wall*2, box_h/2 + wall], center=true);
+        
+        // Внутренняя полость
+        translate([0, 0, wall])
+            cube([box_l, box_w, box_h/2], center=true);
+            
+        // Вырез под USB-C и SD-карту (на торце с одной стороны)
+        translate([-box_l/2 - wall, 0, -2])
+            cube([wall*2, 12, 8], center=true);
+            
+        // Вырез под 3.5 мм аудиогнездо (на противоположном торце)
+        translate([box_l/2 + wall, 10, -2])
+            cube([wall*2, 10, 8], center=true);
+    }
+    
+    // Стойки под крепеж платы WeAct (по углам монтажных отверстий)
+    hx = hole_l1 / 2;
+    hy = hole_w1 / 2;
+    translate([-20, 0, 0]) { // Смещение для компоновки
+        for (dx = [-hx, hx]) {
+            for (dy = [-hy, hy]) {
+                translate([dx, dy, -box_h/4 + wall])
+                    difference() {
+                        cylinder(h=box_h/2, r=3.5, center=true);
+                        cylinder(h=box_h/2 + 1, r=1.5, center=true); // Отверстие под винт M3
+                    }
+            }
+        }
+    }
+}
+
+module top_cover() {
+    difference() {
+        // Верхняя крышка
+        cube([box_l + wall*2, box_w + wall*2, box_h/2 + wall], center=true);
+        
+        // Внутреннее пространство крышки
+        translate([0, 0, -wall])
+            cube([box_l, box_w, box_h/2], center=true);
+            
+        // Окно для 0.96" TFT экрана (примерное положение сверху)
+        translate([-20, 0, wall/2])
+            cube([26, 16, wall*2], center=true);
+            
+        // Отверстия для кнопок управления (NR, B0, K1)
+        translate([-20 - 15, -10, wall/2])
+            cylinder(h=wall*2, r=2, center=true);
+        translate([-20 - 15, 0, wall/2])
+            cylinder(h=wall*2, r=2, center=true);
+        translate([-20 - 15, 10, wall/2])
+            cylinder(h=wall*2, r=2, center=true);
+    }
+}
+
+// Отрендерить нижнюю часть (сдвинута для наглядности)
+translate([0, 60, 0]) base_shell();
+
+// Отрендерить верхнюю крышку
+translate([0, 0, 0]) top_cover();

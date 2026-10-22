@@ -363,7 +363,142 @@ static void test_pitch_bend_changes_sound() {
     CHECK(std::fabs(back - 220.0) < 4.0);
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Регулятор нагрузки (откладывание Note On, гашение звучащих нот) на подменённых «часах».
+// На хосте счётчика тактов нет, поэтому тест задаёт свой: каждое обращение к часам сдвигает время на g_step тактов.
+// Бюджет блока из 128 кадров здесь 1000 «тактов»: рендер блока стоит g_step, обработка каждого Note On тоже около g_step.
+// ---------------------------------------------------------------------------------------------------------------
+static uint32_t g_fake_now = 0;
+static uint32_t g_fake_step = 0;
+static uint32_t fake_clock() { g_fake_now += g_fake_step; return g_fake_now; }
+
+static const uint8_t kGovNotes[] = {48, 52, 55, 60, 64, 67};
+
+static bool gov_open_bank() {
+    SF2LoaderHost_SetPath(nullptr);
+    if (!SoundFontSynth_InitSF2()) {
+        std::cout << "[INFO] SoundFont bank not found, skipping load governor tests" << std::endl;
+        return false;
+    }
+    return true;
+}
+
+static void gov_run_blocks(int n) {
+    std::vector<int16_t> buf(128 * 2);
+    for (int i = 0; i < n; ++i) SoundFontSynth_FillStereoBuffer(buf.data(), 128);
+}
+
+// Чистый старт сценария: сброс движка и несколько блоков без часов, чтобы голоса прошлого сценария (их гасит Init,
+// но они числятся до следующего рендера) исчезли и не искажали подсчёт.
+static void gov_clean_start() {
+    SoundFontSynth_SetClockForTest(nullptr, 0);
+    SoundFontSynth_Init();
+    gov_run_blocks(10);
+    CHECK(SoundFontSynth_GetActiveVoiceCount() == 0U);
+}
+
+// Эталон без регулятора (часов нет): сколько голосов у шести нот через `blocks` блоков.
+static uint32_t gov_reference_voices(int blocks) {
+    gov_clean_start();
+    for (uint8_t n : kGovNotes) SoundFontSynth_NoteOn(n, 100);
+    gov_run_blocks(blocks);
+    return SoundFontSynth_GetActiveVoiceCount();
+}
+
+// Блок не успевает: Note On растягиваются на несколько блоков, но все доходят до рендера.
+static void test_governor_spreads_chord_over_blocks() {
+    if (!gov_open_bank()) return;
+    const uint32_t ref = gov_reference_voices(30);
+    CHECK(ref >= 6U);
+
+    gov_clean_start();
+    g_fake_now = 0; g_fake_step = 400;
+    SoundFontSynth_SetClockForTest(fake_clock, 1000);
+    for (uint8_t n : kGovNotes) SoundFontSynth_NoteOn(n, 100);
+    gov_run_blocks(1);
+    const uint32_t first = SoundFontSynth_GetActiveVoiceCount();
+    CHECK(first > 0U);        // хотя бы одна нота стартовала (прогресс гарантирован)
+    CHECK(first < ref);       // но не все: остальные отложены
+    gov_run_blocks(29);
+    CHECK(SoundFontSynth_GetActiveVoiceCount() == ref);   // через несколько блоков все ноты звучат
+    SoundFontSynth_SetClockForTest(nullptr, 0);
+}
+
+// Даже при бюджете, которого не хватает на любую ноту, за блок стартует ровно одна нота: ничто не застревает.
+static void test_governor_always_makes_progress() {
+    if (!gov_open_bank()) return;
+    const uint32_t ref = gov_reference_voices(30);
+
+    gov_clean_start();
+    g_fake_now = 0; g_fake_step = 600;                      // elapsed уже после первой ноты выше лимита 85%
+    SoundFontSynth_SetClockForTest(fake_clock, 1000);
+    for (uint8_t n : kGovNotes) SoundFontSynth_NoteOn(n, 100);
+    uint32_t prev = 0;
+    for (int blk = 0; blk < 6; ++blk) {
+        gov_run_blocks(1);
+        const uint32_t v = SoundFontSynth_GetActiveVoiceCount();
+        CHECK(v > prev);                                    // каждый блок стартует новую ноту
+        prev = v;
+    }
+    gov_run_blocks(24);
+    CHECK(SoundFontSynth_GetActiveVoiceCount() == ref);
+    SoundFontSynth_SetClockForTest(nullptr, 0);
+}
+
+// Порядок событий сохраняется: Note Off не обгоняет свой Note On, залипших нот нет.
+static void test_governor_keeps_event_order_and_leaves_no_stuck_notes() {
+    if (!gov_open_bank()) return;
+    gov_clean_start();
+    g_fake_now = 0; g_fake_step = 600;
+    SoundFontSynth_SetClockForTest(fake_clock, 1000);
+    for (uint8_t n : kGovNotes) {
+        SoundFontSynth_NoteOn(n, 100);
+        SoundFontSynth_NoteOff(n);                          // сразу отпустили
+    }
+    gov_run_blocks(2500);                                   // ~6,7 с: хвосты отпущенных нот закончились
+    CHECK(SoundFontSynth_GetActiveVoiceCount() == 0U);      // залипшей ноты нет
+
+    // Тот же сценарий без регулятора заканчивается так же.
+    gov_clean_start();
+    for (uint8_t n : kGovNotes) { SoundFontSynth_NoteOn(n, 100); SoundFontSynth_NoteOff(n); }
+    gov_run_blocks(2500);
+    CHECK(SoundFontSynth_GetActiveVoiceCount() == 0U);
+}
+
+// Устойчивая перегрузка гасит звучащие ноты (отпущенных нет), одиночный всплеск - нет.
+static void test_governor_sheds_sounding_notes_on_sustained_overload() {
+    if (!gov_open_bank()) return;
+    gov_clean_start();
+    g_fake_now = 0; g_fake_step = 100;                      // нагрузка 10% бюджета: всё нормально
+    SoundFontSynth_SetClockForTest(fake_clock, 1000);
+    for (uint8_t n : kGovNotes) SoundFontSynth_NoteOn(n, 100);
+    gov_run_blocks(40);
+    const uint32_t steady = SoundFontSynth_GetActiveVoiceCount();
+    CHECK(steady >= 6U);
+
+    g_fake_step = 1000;                                     // один блок перегружен (100% бюджета)...
+    gov_run_blocks(1);
+    g_fake_step = 100;                                      // ...и нагрузка снова нормальная
+    gov_run_blocks(20);
+    CHECK(SoundFontSynth_GetActiveVoiceCount() == steady);  // одиночный всплеск ничего не погасил
+
+    g_fake_step = 1000;                                     // теперь перегрузка держится
+    gov_run_blocks(150);
+    CHECK(SoundFontSynth_GetActiveVoiceCount() < steady);   // защита погасила звучащие ноты без единого Note Off
+    SoundFontSynth_SetClockForTest(nullptr, 0);
+
+    // Без регулятора те же ноты звучали бы бесконечно (сустейн банка).
+    gov_clean_start();
+    for (uint8_t n : kGovNotes) SoundFontSynth_NoteOn(n, 100);
+    gov_run_blocks(200);
+    CHECK(SoundFontSynth_GetActiveVoiceCount() >= 6U);
+}
+
 int main() {
+    test_governor_spreads_chord_over_blocks();
+    test_governor_always_makes_progress();
+    test_governor_keeps_event_order_and_leaves_no_stuck_notes();
+    test_governor_sheds_sounding_notes_on_sustained_overload();
     test_engine_registration_and_pc();
     test_presets_are_programs();
     test_bank_loading_and_rendering();
