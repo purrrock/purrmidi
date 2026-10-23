@@ -1,3 +1,0 @@
-[submodule "enclosure/Third_Party"]
-	path = enclosure/Third_Party
-	url = https://github.com/koendv/weact-mini-stm32h7xx-box
