@@ -1,8 +1,0 @@
-Взять за образец MiniSTM32H7xx_box_bottom.stl и MiniSTM32H7xx_box_top.stl
-
-В MiniSTM32H7xx_box_bottom.stl убрать все отверсия на дне.
-
-В MiniSTM32H7xx_box_top.stl надпись заменить на PurrMIDI. Кнопку оставить только одну правую.
-
-Корпус немного расширить вверх чтобы влезла плата PCM5102 и сделать отверстие под 3.5мм разъем.
-Плата PCM5102 board sizes.png, пример корпуса для неё PCM5102_DAC_bottom.stl и PCM5102_DAC_top.stl.
