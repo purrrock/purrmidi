@@ -1,3 +1,6 @@
+<p align="center">
+  <img src="./logo/PurrMIDI_logo.png" alt="Logo PurrMIDI" width="200"/>
+</p>
 # PurrMidi
 
 **PurrMidi** — автономный MIDI-синтезатор на базе STM32: подключаете USB MIDI-клавиатуру, звук генерирует микроконтроллер и выводит его через внешний аудио ЦАП.
