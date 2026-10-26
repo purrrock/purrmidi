@@ -98,6 +98,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Platform/display/display.c
     Platform/system/diag.c
     Platform/system/watchdog.c
+    Platform/system/backup.c
     Platform/system/ram_init.c
     Engine/midi/chord_detector.c
     Engine/midi/midi_queue.c

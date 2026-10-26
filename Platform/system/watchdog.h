@@ -32,6 +32,9 @@ void Watchdog_EnterRuntime(void);
 /** «Покормить» таймер. Безопасно вызывать из любого контекста (одна запись в регистр). */
 void Watchdog_Kick(void);
 
+/** Флаги RCC->RSR, запомненные в Watchdog_Start() до их очистки (для учёта сбросов в Platform/system/backup.c). */
+uint32_t Watchdog_GetResetFlags(void);
+
 /** Напечатать в UART причину последнего сброса (IWDG, программный, питание, ...). Вызывать после инициализации UART. */
 void Watchdog_ReportResetCause(void);
 

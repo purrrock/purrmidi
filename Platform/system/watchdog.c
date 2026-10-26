@@ -66,6 +66,11 @@ void Watchdog_Kick(void)
     IWDG1->KR = IWDG_KEY_RELOAD;
 }
 
+uint32_t Watchdog_GetResetFlags(void)
+{
+    return s_reset_flags;
+}
+
 void Watchdog_ReportResetCause(void)
 {
     const uint32_t f = s_reset_flags;

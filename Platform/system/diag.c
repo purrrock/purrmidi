@@ -1,6 +1,7 @@
 #include "diag.h"
 #include "main.h"
 #include "usart.h"
+#include "backup.h"
 #include <stdio.h>
 
 /*
@@ -184,6 +185,8 @@ void Diag_FaultReport(uint32_t *frame, uint32_t exc_return, uint32_t kind)
 
     __disable_irq();
     Diag_EnterPanic();                 /* только прямой вывод: основной цикл мог умереть посреди передачи */
+    /* Сначала запись в резервные регистры (быстро, без HAL): пережившая перезагрузку причина сбоя видна и без UART. */
+    Backup_RecordFault(kind & 3U, frame[6], frame[5], SCB->CFSR, SCB->HFSR);
     Diag_Puts("\n*** ");
     Diag_Puts(names[kind & 3U]);
     Diag_Puts(" ***\n");

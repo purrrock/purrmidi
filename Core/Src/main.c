@@ -47,6 +47,7 @@
 #include "sf2_loader.h"
 #include "audio_halves.h"
 #include "watchdog.h"
+#include "backup.h"
 
 /* Статистика кучи malloc (Core/Src/sysmem.c) */
 void Sysmem_GetHeapStats(uint32_t *used_bytes, uint32_t *total_bytes);
@@ -199,6 +200,55 @@ static void Display_SyncVolume(void)
     Display_SetVolume((uint8_t)(((uint32_t)SynthEngine_GetMasterVolume() * 100U + 63U) / 127U));
 }
 
+/* ---- Сохранение выбора (программа Program Change + громкость) в резервных регистрах RTC (см. backup.h) ----
+ * Работает и без батарейки на VBAT: тогда после выключения питания блок пуст, и прибор стартует с настройками
+ * по умолчанию (E-Piano, громкость SYNTH_MASTER_VOLUME_DEFAULT); об этом сообщается в UART. */
+#define SETTINGS_SAVE_DELAY_MS 1000U   /* запись не раньше чем через 1 с после последнего изменения (ручки шлют CC7 потоком) */
+
+static bool     settings_dirty = false;
+static uint32_t settings_dirty_tick = 0U;
+
+static void Settings_MarkDirty(void)
+{
+    settings_dirty = true;
+    settings_dirty_tick = HAL_GetTick();
+}
+
+static void Settings_Service(void)
+{
+    if (settings_dirty && (HAL_GetTick() - settings_dirty_tick) >= SETTINGS_SAVE_DELAY_MS)
+    {
+        settings_dirty = false;
+        Backup_SaveSettings((uint16_t)SynthEngine_GetProgram(), SynthEngine_GetMasterVolume());
+    }
+}
+
+/* Вызывать после SoundFontSynth_InitSF2(): допустимый номер программы зависит от числа пресетов загруженного SF2. */
+static void Settings_Restore(void)
+{
+    uint16_t program = 0U;
+    uint8_t  volume  = SYNTH_MASTER_VOLUME_DEFAULT;
+
+    if (!Backup_LoadSettings(&program, &volume))
+    {
+        printf("[SET] no saved settings - defaults: %s, volume %u\r\n",
+               SynthEngine_GetName(), (unsigned)SynthEngine_GetMasterVolume());
+        return;
+    }
+
+    if (!SynthEngine_SelectProgram(program) || !SynthEngine_IsAvailable(SynthEngine_GetCurrent()))
+    {
+        printf("[SET] saved program %u is not available (SoundFont bank changed?) - default engine\r\n",
+               (unsigned)program);
+        SynthEngine_Select(SYNTH_ENGINE_DEFAULT);
+    }
+    SynthEngine_SetMasterVolume(volume);
+    Display_SyncPatch();
+    Display_SyncVolume();
+    printf("[SET] restored: program %u (%s), volume %u\r\n",
+           (unsigned)SynthEngine_GetProgram(), SynthEngine_GetName(), (unsigned)SynthEngine_GetMasterVolume());
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -249,7 +299,10 @@ int main(void)
   MX_SPI4_Init();
   MX_QUADSPI_Init();
   /* USER CODE BEGIN 2 */
+  Backup_Init();                                  /* резервные регистры RTC (VBAT); без батарейки - пустой блок */
+  Backup_NoteReset(Watchdog_GetResetFlags());
   Watchdog_ReportResetCause();
+  Backup_ReportPrevious();                        /* счётчики и запись о предыдущем сбое */
   Display_Init();
   Watchdog_Kick();
   MIDI_Queue_Init();
@@ -281,6 +334,7 @@ int main(void)
     printf("[SF2] SoundFont NOT available - the soundfont engine will be skipped\r\n");
   }
   Watchdog_Kick();
+  Settings_Restore();     /* после загрузки SF2: от числа его пресетов зависит допустимый номер программы */
   {
     /* Куча занята в основном метаданными SoundFont. Сообщаем только если запас мал (<20%):
      * нормальная работа UART не засоряет. */
@@ -323,6 +377,7 @@ int main(void)
      * перегенерации (так пропадал watchdog_service() и сторожевой таймер перезапускал прошивку). */
     watchdog_service();
     Diag_Flush();                       /* сообщения, отложенные из прерываний (см. diag.h) */
+    Settings_Service();                 /* отложенная запись выбора/громкости в резервные регистры RTC */
     Button_K1_Process();
     USB_PortLostRecover(&hUsbHostFS);   /* port silently disabled by HW -> re-enumerate */
     MIDI_USB_Process();
@@ -378,12 +433,14 @@ int main(void)
             printf("[PC] ch=%u program %u -> %s\r\n", event.status & 0x0FU, event.data1, SynthEngine_GetName());
             audio_reset_stats = true;   /* separate timing statistics for every engine */
             Display_SyncPatch();
+            Settings_MarkDirty();
         }
         else if (command == MIDI_STATUS_CONTROL_CHANGE)
         {
             if (event.data1 == SYNTH_MASTER_VOLUME_CC)
             {
                 Display_SyncVolume();
+                Settings_MarkDirty();
             }
             else if (event.data1 == 64U)
             {
@@ -778,6 +835,7 @@ void Error_Handler(void)
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   Diag_EnterPanic();
+  Backup_RecordFault(4U, (uint32_t)__builtin_return_address(0), (uint32_t)__builtin_return_address(0), SCB->CFSR, SCB->HFSR);
   Diag_Puts("\n*** Error_Handler() called, LR=");
   Diag_PutHex((uint32_t)__builtin_return_address(0));
   Diag_Puts(" ***\n");
