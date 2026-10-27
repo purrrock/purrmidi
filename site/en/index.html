@@ -152,6 +152,18 @@
     <p class="note">Can't find an answer? Describe the problem in <a href="https://github.com/purrrock/purrmidi/issues">Issues</a>: which keyboard, what the display shows and what the UART prints.</p>
   </div>
 </section>
+<section id="poll" class="tint">
+  <div class="wrap">
+    <h2>Do you want an even simpler build?</h2>
+    <p class="sub">We are asking what matters more to you: ease of building or sound quality.</p>
+    <p>PurrMIDI keeps the PCM5102A DAC: it gives clean 16-bit sound. But we are considering an additional option <strong>without a DAC module</strong>: the microcontroller's built-in DAC produces the sound, and all you connect is a <strong>3.5 mm jack and a capacitor</strong>. No jumpers on a module.</p>
+    <p>The price of that simplification: the built-in DAC is 12-bit, so quiet notes will sound noisier, and we have not yet measured possible hum from the board supply. The output is line-level, meant for active speakers or an amplifier rather than headphones directly.</p>
+    <div class="btns" style="justify-content:flex-start;margin-top:18px">
+      <a class="btn" href="https://github.com/purrrock/purrmidi/issues/new?template=audio_poll.yml">Vote</a>
+    </div>
+    <p class="note">The vote runs on GitHub and needs an account. Picking an option takes under a minute.</p>
+  </div>
+</section>
 </main>
 
 <footer>

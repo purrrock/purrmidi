@@ -1,0 +1,65 @@
+name: Опрос - упрощённый звук без внешнего ЦАП / Poll - simpler audio without external DAC
+description: Нужен ли вариант без модуля PCM5102A ценой качества звука? / Do you want a no-DAC-module option at the cost of sound quality?
+title: "[Опрос] Звук без внешнего ЦАП / [Poll] Audio without external DAC"
+labels: ["poll"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Что спрашиваем / What we ask.** PurrMIDI останется с ЦАП PCM5102A: это основной вариант, он не меняется.
+        Мы обсуждаем *дополнительный* упрощённый вариант: звук выводится встроенным ЦАП микроконтроллера (выводы PA4 и PA5),
+        а вместо модуля PCM5102A нужны только **гнездо 3,5 мм и разделительный конденсатор** (без перемычек и пайки модуля).
+
+        PurrMIDI keeps the PCM5102A DAC as the main option; that does not change. We are asking about an *additional*, simpler
+        option: sound comes from the microcontroller's built-in DAC (pins PA4 and PA5), and instead of the PCM5102A module you
+        only need a **3.5 mm jack and a coupling capacitor** (no module jumpers, no soldering them).
+
+        **Цена вопроса / The trade-off** (мы пока не измеряли это на плате / we have not measured this on the board yet):
+
+        * 12 бит вместо 16 (у PCM5102A точнее): тихие хвосты нот будут звучать с заметным шумом.
+        * 12 bits instead of 16 (the PCM5102A is better): quiet note tails will be noticeably noisier.
+        * Опорное напряжение встроенного ЦАП общее с питанием платы: возможен фон от USB, дисплея и QSPI.
+        * The built-in DAC shares its reference with the board supply: hum or clicks from USB, display and QSPI are possible.
+        * Выход линейный и негромкий: к активным колонкам или усилителю. Наушники напрямую подключать не стоит.
+        * The output is line-level and quiet: for active speakers or an amplifier; connecting headphones directly is not advisable.
+        * Желательна простая RC-цепочка на выходе; при включении возможен щелчок, который в коде нужно гасить.
+        * A simple RC filter on the output is advisable; a power-on click is possible and has to be handled in code.
+
+        Подробности: [HARDWARE.md](https://github.com/purrrock/purrmidi/blob/main/docs/HARDWARE.md). / Details: see HARDWARE.md.
+  - type: dropdown
+    id: vote
+    attributes:
+      label: Ваш выбор / Your choice
+      options:
+        - "Да, добавьте такой вариант: звук хуже, зато проще собрать / Yes, add it: worse sound, easier to build"
+        - "Только если звук будет заметно не хуже, чем сейчас / Only if the sound is clearly not worse than now"
+        - "Нет, качество звука важнее, оставьте только PCM5102A / No, sound quality matters more, keep PCM5102A only"
+        - "Мне всё равно / I don't mind"
+    validations:
+      required: true
+  - type: dropdown
+    id: output
+    attributes:
+      label: Что вы подключали бы к выходу / What would you connect to the output
+      options:
+        - "Активные колонки или линейный вход / Active speakers or a line input"
+        - "Наушники через усилитель / Headphones via an amplifier"
+        - "Наушники напрямую / Headphones directly"
+        - "Пока не знаю / Not sure yet"
+    validations:
+      required: true
+  - type: dropdown
+    id: soldering
+    attributes:
+      label: Как у вас с пайкой / Your soldering skills
+      options:
+        - "Паяю уверенно / I solder confidently"
+        - "Могу при необходимости / I can if I have to"
+        - "Не паяю, только провода DuPont / I don't solder, jumper wires only"
+    validations:
+      required: true
+  - type: textarea
+    id: comment
+    attributes:
+      label: Комментарий (необязательно) / Comment (optional)
+      description: Например, почему важен или не важен звук, или что сделало бы сборку проще. / For example, why sound quality matters or not, or what would make building easier.
