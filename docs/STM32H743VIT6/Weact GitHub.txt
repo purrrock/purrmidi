@@ -1,1 +1,0 @@
-https://github.com/WeActStudio/MiniSTM32H7xx

@@ -32,16 +32,3 @@
 Файлы, сгенерированные STM32CubeMX, содержат стандартную шапку ST («licensed under terms that can be found in the LICENSE file…
 If no LICENSE file comes with this software, it is provided AS-IS»). Сгенерированный ST код (init-функции, `stm32h7xx_it.c`,
 `usb_host.c` и т. п.) подпадает под лицензию ST; код PurrMidi, добавленный в секции `USER CODE`, — под лицензию проекта.
-
-## SoundFont-банки и тестовые данные
-
-Сведения взяты из внутренних метаданных самих файлов (блок INFO: `ICOP`, `ICMT`, `IENG`); внешние источники не проверялись.
-
-| Файл | Происхождение / лицензия |
-|---|---|
-| `SoundFonts/Florestan/*.sf2` — все, кроме `070_Bassoon_Ethan-Nando.sf2` | Проект Florestan (Nando Florestan). В метаданных каждого файла: `ICOP = Public Domain`. |
-| `SoundFonts/Florestan/070_Bassoon_Ethan-Nando.sf2` | `ICOP = Copyright (c) 2000 Ethan Winer`. В комментарии автора: банк можно свободно распространять, если не удалять имя автора и уведомление об авторских правах. Метаданные файла менять нельзя. |
-| `SoundFonts/Guitar/maestro_velocity.sf2` | `ICOP = Copyright© Mats Helgesson, 2001`; условий распространения в файле нет, права **не подтверждены**. |
-| `SoundFonts/Piano/KawaiStereoGrand.sf2` | `ICOP = Matias Rockas 1997 FINLAND`; условий распространения в файле нет, права **не подтверждены**. |
-| `SoundFonts/Sax/RolandSuperTenor.sf2` | Метаданные: «Copyright Information Not Present», автор конвертации «Vienna Master». Название указывает на сэмплы Roland; права **не подтверждены**. |
-| `SoundFonts/Jews_Harp.sf2`, `tests/SNDFNT.SF2` (побайтно одинаковы) | Название «Jews Harp», создан в Polyphone; сведений об авторе и лицензии в файле нет, права **не подтверждены**. Тестовые данные. |

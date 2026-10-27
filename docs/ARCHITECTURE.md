@@ -1,17 +1,11 @@
 # Архитектура программного обеспечения
 
-Документ описывает, как устроен PurrMidi внутри: путь MIDI-событий, аудиотракт, память STM32H743 и общие компоненты звуковых движков. Краткое описание прибора и основы работы — в [README](../README_RU.md); звуковые движки — в [ENGINES.md](ENGINES.md).
+Документ описывает, как устроен PurrMidi внутри: путь MIDI-событий, аудиотракт, память STM32H743 и общие компоненты звуковых движков. Основы работы — в [README](../README_RU.md), звуковые движки — в [ENGINES.md](ENGINES.md), SoundFont и QSPI — в [SOUNDFONT.md](SOUNDFONT.md).
 
-## Аппаратное обеспечение
+## Аппаратная платформа
 
-* **Микроконтроллер:** WeAct STM32H743VIT6 Mini (Cortex-M7).
-* **Тактирование:** HSE 25 МГц; CPU 480 МГц, USB 48 МГц, аудио 48 кГц.
-* **Аудио ЦАП:** PCM5102A, стереовыход через SAI1 Block A, 16 бит, два слота, кадр 32 бита.
-* **MIDI-вход:** USB MIDI-клавиатура через USB OTG FS Host.
-* **Кнопка управления:** User Key K1 (PC13) на плате микроконтроллера для переключения инструмента.
-* **Дисплей:** TFT ST7735 160×80, SPI4 — статус MIDI, активные ноты, название аккорда и выбранный инструмент.
-* **Внешняя флеш-память:** Winbond W25Q64 (8 МБ), QUADSPI Bank1. Используется в режиме прямого адресации Memory-Mapped (XIP) для хранения и мгновенного исполнения/чтения сэмплов SoundFont.
-* **Карта памяти:** microSD через SDMMC1, 4-битный режим (FAT32). Используется **только при запуске** и **только для чтения**: для автоматической записи/обновления SoundFont-банка `0:/SNDFNT.SF2` во внешнюю QSPI Flash. Во время игры SD-карта не нужна и не используется.
+STM32H743VIT6 (Cortex-M7): CPU 480 МГц, аудио 48 кГц. ЦАП PCM5102A на SAI1 Block A (16 бит, два слота, кадр 32 бита). Банк SoundFont лежит во внешней QSPI Flash и читается в режиме XIP; microSD используется только при запуске и
+только для чтения. Выводы и подключение — в [HARDWARE.md](HARDWARE.md).
 
 ## Общая схема
 
@@ -62,8 +56,8 @@ MIDI-диспетчер обрабатывает Note On, Note Off, Control Chan
   * **DTCM** (128 КБ): `.data`, `.bss`, стек (недоступна DMA);
   * **D2 SRAM** (288 КБ, `0x30000000`): только DMA-буферы DMA1/DMA2 — секция `.dma_buffer` (кольцо SAI1, холст дисплея). **SD сюда нельзя**: IDMA SDMMC1 находится в домене D1 и видит только AXI SRAM (ST AN5200); MPU: Normal Non-cacheable, DMA и CPU видят одни и те же данные без операций с кэшем;
   * **AXI SRAM** (512 КБ, `0x24000000`): **арена голосов** `.synth_arena` (72 КБ, общая для всех движков) и **куча malloc** `.axi_heap` (320 КБ: метаданные TinySoundFont, USB). MPU: Normal Write-back + write-allocate, кэшируется D-cache; DMA сюда не работает. Занято около 80%.
-* **Арена голосов** (`Engine/synth/synth_arena.h`). Одновременно звучит один движок, поэтому голоса Pluck (66 КБ), Violin (≈41 КБ) и Lead (2 КБ) делят одну область размером с самый большой набор вместо раздельной памяти (арена 72 КБ; раньше была 144 КБ, оставшихся от Dulcimer; размер задают `SYNTH_ARENA_BYTES` и `ASSERT` в `STM32H743xx_FLASH.ld`). Движок создаёт голоса в арене в своём `Init()` (`SynthArena_NewArray`, явные конструкторы), а движок, у которого арену забрал другой, молчит. Увеличить арену нужно, только если новый движок не помещается: `static_assert` и `ASSERT` линкера подскажут (`SYNTH_ARENA_BYTES`).
-* **Общая инфраструктура движков** (`Engine/synth/synth_common.h`): очередь событий с резервом под Note Off и протоколом аварийного восстановления (`synth::NoteInput`), мягкий ограничитель `synth::SoftLimit`, таблица частот `synth::MidiFreq`. Раньше эти ~150 строк были скопированы в пять движков; звук после выноса совпадает бит-в-бит (`test_engine_golden`).
+* **Арена голосов** (`Engine/synth/synth_arena.h`). Одновременно звучит один движок, поэтому голоса Pluck (66 КБ), Violin (≈41 КБ) и Lead (2 КБ) делят одну область размером с самый большой набор вместо раздельной памяти (арена 72 КБ; размер задают `SYNTH_ARENA_BYTES` и `ASSERT` в `STM32H743xx_FLASH.ld`). Движок создаёт голоса в арене в своём `Init()` (`SynthArena_NewArray`, явные конструкторы), а движок, у которого арену забрал другой, молчит. Увеличить арену нужно, только если новый движок не помещается: `static_assert` и `ASSERT` линкера подскажут (`SYNTH_ARENA_BYTES`).
+* **Общая инфраструктура движков** (`Engine/synth/synth_common.h`): очередь событий с резервом под Note Off и протоколом аварийного восстановления (`synth::NoteInput`), мягкий ограничитель `synth::SoftLimit`, таблица частот `synth::MidiFreq`. Звук движков проверяется бит-в-бит тестом `test_engine_golden`.
 * Для быстрой и эффективной работы QSPI Flash в режиме Memory-Mapped (XIP) включён **D-Cache** для MPU-региона `0x90000000...0x907FFFFF` (8 МБ, read-only, write-through). Это позволяет подтягивать данные сэмплов TinySoundFont 32-байтными строками кэша без задержек.
 * Буферы DMA1/DMA2 лежат в D2 SRAM (Normal Non-cacheable), а AXI SRAM кэшируется write-back: линии задержки физических моделей (Violin, Pluck) читаются последовательно и хорошо ложатся в 16-КБ D-cache. Буферы SD (bounce-буфер и буфер загрузчика SF2) лежат в секции `.sd_dma_buffer` (AXI SRAM, выровнены по 32 байта), драйвер SD инвалидирует D-cache до и после каждой передачи; прямая DMA-передача разрешена в любой выровненный буфер AXI SRAM, остальное идёт через bounce-буфер. **Любой новый DMA-буфер DMA1/DMA2 обязан лежать в `.dma_buffer`, любой буфер SDMMC1 — в `.sd_dma_buffer`.**
 * Секции `.dma_buffer`, `.synth_arena` и `.axi_heap` (NOLOAD) не обнуляются startup-кодом и не получают начальных значений (объекты с инициализаторами в них терялись бы), а AXI SRAM защищена ECC (слово 64 бита): неполная запись в неинициализированное слово может вызвать ECC-ошибку. Поэтому `Platform/system/ram_init.c` до запуска C++-конструкторов (через `.preinit_array`) записывает нули 64-битными словами (`STRD`) во всю AXI SRAM и всю D2 SRAM (границы — символы линкер-скрипта), а объекты в арене создаются явно. Startup-файл CubeMX менять не нужно.
@@ -86,21 +80,46 @@ USB_HOST/, FATFS/     Настройки USB Host и FatFs (CubeMX)
 Drivers/, Middlewares/  HAL/CMSIS, USB Host Library, FatFs и сторонние библиотеки (подмодулей git нет)
 SoundFonts/           Примеры SoundFont-банков и скрипт sf2_shrink.py
 tests/                Хостовые тесты (CMake preset host-tests)
-docs/                 Документация по подсистемам
+docs/                 Документация (см. список в README)
+enclosure/            Файлы корпуса и чертежи плат
 tools/                Вспомогательные скрипты (openocd-run.cmd, check_firmware_size.sh, check_firmware_flags.sh)
 ```
 
-## Документация
+## Диагностические флаги сборки
 
-| Документ | О чём |
-| -------- | ----- |
-| [docs/ENGINES.md](ENGINES.md) | Звуковые движки, правила Program Change, общая громкость, программный интерфейс |
-| [docs/PLUCK_SYNTH.md](PLUCK_SYNTH.md) | Как устроена нейлоновая струна, параметры, измерения |
-| [docs/EPIANO_SYNTH.md](EPIANO_SYNTH.md) | FM-электропиано |
-| [docs/SOUNDFONT_QSPI_SYNTH.md](SOUNDFONT_QSPI_SYNTH.md) | Синтезатор SoundFont и QSPI Flash (XIP) |
-| [docs/SD_CARD_AND_QSPI.md](SD_CARD_AND_QSPI.md) | Обновление банка с SD-карты, настройка SDMMC1, диагностика |
-| [docs/ARCHITECTURE.md](ARCHITECTURE.md) | Путь MIDI-событий, DMA, D-Cache, карта памяти, арена голосов, общие компоненты |
-| [docs/BOARD_CHECKLIST.md](BOARD_CHECKLIST.md) | Что и как проверить на плате перед релизом (память, движки, нагрузка, перезапуск) |
-| [docs/WINDOWS_BUILD.md](WINDOWS_BUILD.md) | Сборка и запуск Windows-приложения |
-| [docs/USB_Enumeration_fix.md](USB_Enumeration_fix.md) | Исправление зависания энумерации USB |
-| [docs/PCM5102A_PINOUT.md](PCM5102A_PINOUT.md) | Подключение ЦАП PCM5102A |
+В обычном Release диагностика аудио выключена (нет периодических строк `[AUDIO]`). Для измерения времени рендера соберите отдельный
+Release; нужны оба флага (`main.c` на C, `soundfont_synth.cpp` на C++):
+
+```bash
+cmake --preset Release -B build/Release-diag -DCMAKE_C_FLAGS="-DAUDIO_DIAG_UART=1" -DCMAKE_CXX_FLAGS="-DAUDIO_DIAG_UART=1 -DSF2_DIAG_STATS=1"
+cmake --build build/Release-diag
+```
+
+Строки `[AUDIO] <движок>: fill last=… max=… us (NN% of 2666 us) >80%: … >100%: … shed=… late=…` появляются при росте максимума или
+нарушении порогов; `[AUDIO] RENDER OVERRUN` означает, что блок не уложился в бюджет. Расшифровка полей `[SF2]` — в
+[SOUNDFONT.md](SOUNDFONT.md#диагностика). Проверка размера прошивки: `bash tools/check_firmware_size.sh build/Release/purrmidi.elf`.
+
+Для отладки по SWD соберите с `-DPURRMIDI_FAULT_HALT=1`: `Error_Handler()` и обработчики сбоев остановятся в бесконечном цикле
+вместо перезапуска (по умолчанию `Error_Handler()` печатает отчёт, ждёт около секунды и перезапускает прибор).
+
+## USB Host: восстановление отключённого порта
+
+Некоторые USB MIDI-устройства (например, клавиатуры на чипах Jieli) вскоре после сброса порта хостом на мгновение отпускают и
+снова подтягивают D+. Ядро OTG видит `DISCINT + PCDET` и аппаратно сбрасывает `HPRT0.PENA`, порт отключён (нет SOF и SETUP), а
+стек USB Host продолжает считать устройство подключённым. Первый control-запрос энумерации никогда не завершается:
+
+```text
+GET_DEV_DESC_8 START
+GET_DEV_DESC_8 BUSY
+GET_DEV_DESC_8 BUSY
+...            (без HCINT/XFRC и URB_DONE)
+```
+
+`USB_PortLostRecover()` (`Platform/midi_usb/usb_port_recover.c`, вызывается из главного цикла `main.c`) ищет это состояние:
+`is_connected != 0`, стек находится между `HOST_ENUMERATION` и `HOST_CLASS`, а `HPRT0.PENA == 0`. Тогда выставляются
+`is_disconnected` и `is_ReEnumerated`, вызывается `USBH_Stop()`, и штатный путь `USBH_Process()` (деинициализация класса и
+конечного автомата, `USBH_Start()`) заново запускает сброс порта и энумерацию без физического переподключения. Перед этим
+делается блокирующая пауза 300 мс (редкое событие, сторожевой таймер её переживает). Счётчик срабатываний —
+`USB_PortLostRecoverCount()`.
+
+Если энумерация началась, но первый control-запрос вечно `BUSY`, сначала проверьте `HPRT0.PENA`.

@@ -323,7 +323,7 @@ int main(void)
          (unsigned long)(1000000UL * (AUDIO_BUFFER_FRAMES / 2U) / 48000UL), (unsigned)(AUDIO_BUFFER_FRAMES / 2U));
   /* SoundFont-банк хранится только в QSPI Flash и читается через XIP. SD-карта нужна лишь здесь, при запуске:
    * если на ней лежит новый/изменённый 0:/SNDFNT.SF2, он сначала переписывается во флеш (до ~минуты, прогресс на
-   * дисплее и в UART), после чего SD отключается. См. docs/SOUNDFONT_QSPI_SYNTH.md. */
+   * дисплее и в UART), после чего SD отключается. См. docs/SOUNDFONT.md. */
   printf("[SF2] Preparing SoundFont (QSPI XIP, SD is used only to update the bank)...\r\n");
   if (SoundFontSynth_InitSF2())
   {

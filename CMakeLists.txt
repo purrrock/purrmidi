@@ -156,7 +156,7 @@ set_source_files_properties(${PURRMIDI_AUDIO_HOT_SOURCES}
 # ---------------------------------------------------------------------------
 # SD-карта (SDMMC1 + FatFs) нужна только при запуске: если на карте лежит новый 0:/SNDFNT.SF2, загрузчик
 # перезаписывает им банк во флеше (Platform/qspi_xip/sf2_loader.c), после чего SD отключается.
-# Подробности: docs/SOUNDFONT_QSPI_SYNTH.md.
+# Подробности: docs/SOUNDFONT.md.
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Platform/sd/sd_storage.c
     Platform/qspi_xip/pm_crc32.c
