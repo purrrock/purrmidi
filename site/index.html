@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PurrMIDI — автономный MIDI-синтезатор на STM32</title>
-<meta name="description" content="Подключите USB MIDI-клавиатуру — звук создаёт сам прибор. Шесть звуковых движков, SoundFont, открытый код.">
+<meta name="description" content="Подключите USB MIDI-клавиатуру — и сразу играйте. DIY за вечер, открытый код.">
 <link rel="icon" href="logo.png">
 <link rel="alternate" hreflang="en" href="en/">
 <link rel="stylesheet" href="style.css">
@@ -49,9 +49,9 @@
     <p class="sub">Одновременно звучит один. Переключение — кнопкой на плате или Program Change с клавиатуры.</p>
     <div class="grid">
       <div class="card"><h3>E-Piano</h3><p>FM-электропиано в духе Rhodes. Звучит по умолчанию.</p></div>
-      <div class="card"><h3>Pluck</h3><p>Нейлоновая гитарная струна.</p></div>
-      <div class="card"><h3>Lead</h3><p>Аналоговый лид с фильтром.</p></div>
-      <div class="card"><h3>Organ</h3><p>Тонколесный орган с drawbars и хорусом.</p></div>
+      <div class="card"><h3>Pluck</h3><p>Гитара с нейлоновыми струнами.</p></div>
+      <div class="card"><h3>Lead</h3><p>Аналоговый синтезатор-лид.</p></div>
+      <div class="card"><h3>Organ</h3><p>Тонколесный орган.</p></div>
       <div class="card"><h3>Violin</h3><p>Скрипка: физическая модель смычковой струны.</p></div>
       <div class="card"><h3>SoundFont</h3><p>Любой банк SoundFont2 до 8 МБ: каждый пресет банка — отдельный инструмент.</p></div>
     </div>
@@ -61,12 +61,12 @@
 <section id="build">
   <div class="wrap">
     <h2>Собрать за вечер</h2>
-    <p class="sub">Понадобится немного деталей. Компилировать ничего не нужно.</p>
+    <p class="sub">Понадобится немного доступных деталей. Компилировать ничего не нужно. Паять тоже не обязательно, можно соединиить проводами DuPont.</p>
     <div class="grid" style="margin-bottom:24px">
       <div class="card"><h3>Плата</h3><p>WeAct STM32H743VIT6 Mini</p></div>
       <div class="card"><h3>ЦАП</h3><p>Модуль PCM5102A</p></div>
-      <div class="card"><h3>Клавиатура</h3><p>Любая USB MIDI-клавиатура. Проверены NTK-61 и SMK-25.</p></div>
-      <div class="card"><h3>Звук</h3><p>Наушники или усилитель; microSD — только для своего SoundFont.</p></div>
+      <div class="card"><h3>Клавиатура</h3><p>Любая USB MIDI-клавиатура. Проверены NUX NTK-61 и M-VAVE SMK-25 MINI.</p></div>
+      <div class="card"><h3>Звук</h3><p>Наушники или колонки; microSD — только для своего SoundFont.</p></div>
     </div>
     <ol class="steps">
       <li><strong>Прошейте плату.</strong> Скачайте <code>purrmidi.elf</code> со страницы <a href="https://github.com/purrrock/purrmidi/releases/latest">релизов</a> и загрузите его через STM32CubeProgrammer.</li>
