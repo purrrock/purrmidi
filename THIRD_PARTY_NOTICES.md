@@ -32,3 +32,15 @@
 Файлы, сгенерированные STM32CubeMX, содержат стандартную шапку ST («licensed under terms that can be found in the LICENSE file…
 If no LICENSE file comes with this software, it is provided AS-IS»). Сгенерированный ST код (init-функции, `stm32h7xx_it.c`,
 `usb_host.c` и т. п.) подпадает под лицензию ST; код PurrMidi, добавленный в секции `USER CODE`, — под лицензию проекта.
+
+## Звуковые банки SoundFont (`SoundFonts/`)
+
+Банки не входят в код прошивки: это отдельные файлы-примеры, которые пользователь может записать на карту microSD как `SNDFNT.SF2`.
+В релиз GitHub вместе с прошивкой кладётся только `Florestan/000_Florestan_Piano.sf2` (под именем `SNDFNT.SF2`).
+Пользователь вправе записывать на карту любой банк, права на который у него есть.
+
+| Банк | Сведения о лицензии | Статус |
+|---|---|---|
+| **Florestan** (`Florestan/`, кроме `070_Bassoon_Ethan-Nando.sf2`) — автор Nando Florestan | В заголовке каждого файла (поле `ICOP`) указано **Public Domain**. На странице автора ([архивная копия](https://web.archive.org/web/20251028045959/https://dev.nando.audio/pages/soundfonts.html), сам сайт недоступен) банки названы бесплатными (Free). | подтверждено, входит в релиз (`000_Florestan_Piano.sf2`) |
+| `Florestan/070_Bassoon_Ethan-Nando.sf2` | В заголовке: Copyright (c) 2000 Ethan Winer. This SoundFont may be freely distributed as long as the author name and copyright notice are not removed. | Подтверждено |
+
