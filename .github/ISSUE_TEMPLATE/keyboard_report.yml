@@ -1,0 +1,53 @@
+name: Отчёт о клавиатуре / Keyboard report
+description: Расскажите, работает ли ваша клавиатура с PurrMIDI. / Tell us whether your keyboard works.
+title: "[Клавиатура] "
+labels: ["keyboard"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Список проверенных клавиатур помогает другим людям выбрать устройство. Сейчас проверены: **NTK-61**, **SMK-25**.
+        Присылайте отчёты и об удачных, и о неудачных попытках.
+  - type: input
+    id: model
+    attributes:
+      label: Модель клавиатуры / Keyboard model
+      placeholder: Производитель и модель
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Результат / Result
+      options:
+        - Работает полностью / Works fully
+        - Работает с проблемами / Works with problems
+        - Не работает / Does not work
+    validations:
+      required: true
+  - type: dropdown
+    id: power
+    attributes:
+      label: Питание клавиатуры / Keyboard power
+      options:
+        - Y-разветвитель / Y-splitter
+        - Внешний источник на VBUS / External 5 V on VBUS
+        - Своя батарейка или блок питания / Own battery or PSU
+        - Другое / Other
+    validations:
+      required: true
+  - type: textarea
+    id: controls
+    attributes:
+      label: Что умеет отправлять / What it sends
+      description: Есть ли на клавиатуре кнопки Program Change, ручки громкости (CC7), колесо питча, колесо модуляции, педаль сустейна, aftertouch. Что из этого заработало.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Особенности / Notes
+      description: Что показывает дисплей (цвет точки, коды ошибок), сколько ждали подключения, нужно ли переподключать клавиатуру.
+  - type: input
+    id: version
+    attributes:
+      label: Версия прошивки / Firmware version
+      placeholder: v1.0.1

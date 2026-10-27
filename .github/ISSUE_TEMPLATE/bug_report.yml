@@ -1,0 +1,62 @@
+name: Проблема / Bug report
+description: Что-то не работает или работает не так. / Something does not work as expected.
+title: "[Проблема] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо, что рассказали о проблеме! Сначала загляните в [FAQ](https://github.com/purrrock/purrmidi/blob/main/docs/FAQ.md): там есть ответы на частые вопросы.
+        Заполните, пожалуйста, всё, что знаете. Если не знаете — пишите «не знаю», это нормально.
+  - type: textarea
+    id: what
+    attributes:
+      label: Что случилось / What happened
+      description: Что вы делали, что ожидали и что получилось.
+    validations:
+      required: true
+  - type: input
+    id: keyboard
+    attributes:
+      label: Клавиатура / Keyboard
+      description: Производитель и модель USB MIDI-клавиатуры.
+      placeholder: Например, NTK-61
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Версия прошивки / Firmware version
+      description: Номер релиза (например, v1.0.1) или коммит, если собирали сами.
+      placeholder: v1.0.1
+    validations:
+      required: true
+  - type: textarea
+    id: display
+    attributes:
+      label: Что показывает дисплей / What the display shows
+      description: Цвет точки в шапке (серая, жёлтая, зелёная), красная плашка с кодом ошибки (E01–E06), название инструмента. Можно приложить фото.
+  - type: textarea
+    id: dac
+    attributes:
+      label: ЦАП и его настройка / DAC and its setup
+      description: Модель модуля ЦАП и положение перемычек H1L–H4L и SCK.
+      placeholder: "PCM5102A; H1L → L, H2L → L, H3L → H, H4L → L, SCK замкнут"
+  - type: textarea
+    id: power
+    attributes:
+      label: Питание / Power
+      description: Как питаются плата и клавиатура (Y-разветвитель, внешний источник, батарейка на VBAT).
+  - type: textarea
+    id: uart
+    attributes:
+      label: Вывод UART (необязательно) / UART output (optional)
+      description: Если у вас есть USB-UART адаптер (115200, 8N1), вставьте сюда лог при загрузке и в момент проблемы.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Проверено
+      options:
+        - label: Я прочитал(а) FAQ и не нашёл(ла) ответа
+        - label: Прошивка скачана со страницы Releases или собрана из репозитория без изменений

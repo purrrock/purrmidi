@@ -1,0 +1,26 @@
+name: Идея / Feature request
+description: Предложите улучшение. / Suggest an improvement.
+title: "[Идея] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Загляните в [ROADMAP](https://github.com/purrrock/purrmidi/blob/main/ROADMAP.md): возможно, идея уже запланирована.
+        PurrMIDI должен оставаться простым в использовании для людей без опыта в электронике и музыкальной теории, учтите это в описании.
+  - type: textarea
+    id: idea
+    attributes:
+      label: Что предлагаете / What do you suggest
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Какую задачу это решает / What problem does it solve
+      description: Зачем это вам нужно, как вы сейчас обходитесь без этого.
+  - type: textarea
+    id: simple
+    attributes:
+      label: Как это должно быть просто для новичка / How to keep it simple
+      description: Что должен сделать человек без опыта, чтобы воспользоваться этим? Хорошо, если ничего.

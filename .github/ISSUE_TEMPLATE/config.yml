@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Частые вопросы / FAQ
+    url: https://github.com/purrrock/purrmidi/blob/main/docs/FAQ.md
+    about: Нет звука, клавиатура не определяется, как поменять SoundFont — ответы здесь.
+  - name: Как прошить плату / Flashing guide
+    url: https://github.com/purrrock/purrmidi/blob/main/docs/FLASHING.md
+    about: Пошаговая инструкция по загрузке прошивки через USB (DFU).

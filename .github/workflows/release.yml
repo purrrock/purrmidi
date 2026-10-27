@@ -1,0 +1,109 @@
+name: Release
+
+# Релиз публикуется при создании тега вида v1.2.3 (git tag v1.2.3 && git push origin v1.2.3).
+# В релиз попадают: purrmidi.elf (адрес загрузки записан внутри файла), SNDFNT.SF2 (банк по умолчанию)
+# и SHA256SUMS. Теги с pre / rc / beta в имени публикуются как предварительные версии.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  host-tests:
+    name: Host tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libasound2-dev libjack-jackd2-dev
+
+      - name: Build and run host tests
+        run: |
+          cmake --preset host-tests
+          cmake --build --preset host-tests
+          ctest --test-dir build/host-tests --output-on-failure --no-tests=error
+
+  firmware:
+    name: Build firmware and publish release
+    needs: host-tests
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      SF2_SOURCE: SoundFonts/Florestan/000_Florestan_Piano.sf2
+      SF2_MAX_BYTES: 8384512
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi
+
+      - name: Build firmware (Release)
+        run: |
+          cmake --preset Release -DPURRMIDI_WERROR=ON
+          cmake --build --preset Release
+          test -s build/Release/purrmidi.elf
+
+      - name: Check firmware size and compiler flags
+        run: |
+          bash tools/check_firmware_size.sh build/Release/purrmidi.elf
+          bash tools/check_firmware_flags.sh build/Release/compile_commands.json
+
+      - name: Check SoundFont fits into flash
+        run: |
+          size=$(stat -c%s "$SF2_SOURCE")
+          echo "SoundFont: $size bytes (limit $SF2_MAX_BYTES)"
+          test "$size" -le "$SF2_MAX_BYTES"
+
+      - name: Prepare release files
+        run: |
+          mkdir dist
+          cp build/Release/purrmidi.elf dist/purrmidi.elf
+          cp "$SF2_SOURCE" dist/SNDFNT.SF2
+          (cd dist && sha256sum purrmidi.elf SNDFNT.SF2 > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      - name: Write release notes
+        run: |
+          cat > notes.md <<'NOTES'
+          ## Как установить
+
+          1. Скачайте **purrmidi.elf** и прошейте плату по инструкции [docs/FLASHING.md](https://github.com/purrrock/purrmidi/blob/main/docs/FLASHING.md). Адрес вводить не нужно: он записан в файле.
+          2. Если нужен готовый звуковой банк, скопируйте **SNDFNT.SF2** в корень карты microSD (FAT32), вставьте карту и включите прибор. Запись банка занимает 30–60 секунд.
+
+          Проблемы и вопросы: [docs/FAQ.md](https://github.com/purrrock/purrmidi/blob/main/docs/FAQ.md).
+
+          ## Файлы
+
+          | Файл | Что это |
+          | ---- | ------- |
+          | `purrmidi.elf` | Прошивка для WeAct STM32H743 Mini |
+          | `SNDFNT.SF2` | Банк SoundFont по умолчанию (Florestan Piano). Лицензии — в [THIRD_PARTY_NOTICES.md](https://github.com/purrrock/purrmidi/blob/main/THIRD_PARTY_NOTICES.md) |
+          | `SHA256SUMS` | Контрольные суммы файлов |
+
+          ## English
+
+          Flash **purrmidi.elf** with STM32CubeProgrammer in USB (DFU) mode, no address needed (see [docs/FLASHING.md](https://github.com/purrrock/purrmidi/blob/main/docs/FLASHING.md), in Russian). Copy **SNDFNT.SF2** to the root of a FAT32 microSD card to load the default SoundFont.
+          NOTES
+
+      - name: Create or update GitHub Release
+        run: |
+          flags=""
+          case "$TAG" in
+            *pre*|*rc*|*beta*) flags="--prerelease" ;;
+          esac
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/purrmidi.elf dist/SNDFNT.SF2 dist/SHA256SUMS --clobber
+          else
+            gh release create "$TAG" dist/purrmidi.elf dist/SNDFNT.SF2 dist/SHA256SUMS \
+              --title "PurrMIDI $TAG" --notes-file notes.md --generate-notes --verify-tag $flags
+          fi
