@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PurrMIDI: a standalone MIDI synthesizer on STM32</title>
-<meta name="description" content="Plug in a USB MIDI keyboard and the board makes the sound. Six sound engines, SoundFont support, open source.">
+<meta name="description" content="Plug in a USB MIDI keyboard and start playing. DIY in an evening, open source.">
 <link rel="icon" href="../logo.png">
 <link rel="alternate" hreflang="ru" href="../">
 <link rel="stylesheet" href="../style.css">
@@ -49,9 +49,9 @@
     <p class="sub">One plays at a time. Switch with the button on the board or a Program Change from your keyboard.</p>
     <div class="grid">
       <div class="card"><h3>E-Piano</h3><p>Rhodes-style FM electric piano. The default sound.</p></div>
-      <div class="card"><h3>Pluck</h3><p>Nylon guitar string.</p></div>
-      <div class="card"><h3>Lead</h3><p>Analog lead with a filter.</p></div>
-      <div class="card"><h3>Organ</h3><p>Tonewheel organ with drawbars and chorus.</p></div>
+      <div class="card"><h3>Pluck</h3><p>Nylon-string guitar.</p></div>
+      <div class="card"><h3>Lead</h3><p>Analog synth lead.</p></div>
+      <div class="card"><h3>Organ</h3><p>Tonewheel organ.</p></div>
       <div class="card"><h3>Violin</h3><p>Physical model of a bowed string.</p></div>
       <div class="card"><h3>SoundFont</h3><p>Any SoundFont2 bank up to 8 MB: each preset in the bank becomes its own instrument.</p></div>
     </div>
@@ -61,17 +61,18 @@
 <section id="build">
   <div class="wrap">
     <h2>Build it in an evening</h2>
-    <p class="sub">You need only a few parts. Nothing to compile.</p>
+    <p class="sub">You need only a few easily available parts. Nothing to compile. Soldering is optional too: you can connect everything with DuPont wires.</p>
     <div class="grid" style="margin-bottom:24px">
-      <div class="card"><h3>Board</h3><p>WeAct STM32H743VIT6 Mini</p></div>
-      <div class="card"><h3>DAC</h3><p>PCM5102A module</p></div>
-      <div class="card"><h3>Keyboard</h3><p>Any USB MIDI keyboard. Tested: NTK-61 and SMK-25.</p></div>
-      <div class="card"><h3>Audio out</h3><p>Headphones or an amplifier; microSD only for your own SoundFont.</p></div>
+      <div class="card part"><a class="pic" href="https://aliexpress.ru/item/1005006632336183.html"><img src="../WeAct_STM32H743VIT6_mini.png" width="287" height="466" alt="WeAct STM32H743VIT6 Mini board: chip, display, microSD and USB-C connectors" loading="lazy"></a><h3>Board</h3><p><a href="https://aliexpress.ru/item/1005006632336183.html">WeAct STM32H743VIT6 Mini</a></p></div>
+      <div class="card part"><a class="pic" href="https://aliexpress.ru/item/1005009717341228.html"><img src="../PCM5102.webp" width="800" height="800" alt="PCM5102A DAC module, front and back" loading="lazy"></a><h3>DAC</h3><p><a href="https://aliexpress.ru/item/1005009717341228.html">PCM5102A module</a></p></div>
+      <div class="card part"><a class="pic" href="https://aliexpress.ru/item/1005008193444956.html"><img src="../y-conn.avif" width="640" height="640" alt="Right-angle USB adapter with an extra USB-C power port" loading="lazy"></a><h3>Keyboard power</h3><p><a href="https://aliexpress.ru/item/1005008193444956.html">USB splitter</a></p></div>
+      <div class="card"><h3>Keyboard</h3><p>Any USB MIDI keyboard. Tested: NUX NTK-61 and M-VAVE SMK-25 MINI.</p></div>
+      <div class="card"><h3>Audio out</h3><p>Headphones or speakers; microSD only for your own SoundFont.</p></div>
     </div>
     <ol class="steps">
       <li><strong>Flash the board.</strong> Download <code>purrmidi.elf</code> from the <a href="https://github.com/purrrock/purrmidi/releases/latest">releases page</a> and load it with STM32CubeProgrammer.</li>
       <li><strong>Wire the DAC</strong> to three board pins (PE4, PE5, PE6), power and ground. See the diagram in <a href="https://github.com/purrrock/purrmidi/blob/main/docs/HARDWARE.md">HARDWARE.md</a> (Russian).</li>
-      <li><strong>Plug in the keyboard</strong> to the board's USB connector. The board does not supply 5 V to the keyboard, so it needs external power (for example, via a Y-splitter cable).</li>
+      <li><strong>Plug in the keyboard</strong> to the board's USB connector. The board does not supply 5 V to the keyboard, so it needs external power (for example, <a href="https://aliexpress.ru/item/1005008193444956.html">via a Y-splitter</a>).</li>
       <li><strong>Power on and play.</strong> The display shows a green dot, the instrument name and the notes you press.</li>
     </ol>
     <p class="note"><strong>About soldering.</strong> The common purple PCM5102A module needs the H1L–H4L and SCK jumpers soldered. Finding a module that needs no soldering is on the project roadmap.</p>

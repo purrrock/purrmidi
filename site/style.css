@@ -79,6 +79,14 @@ h2 + p.sub { color: var(--ink-soft); margin: 0 0 24px; }
 .card h3 { margin: 0 0 4px; font-size: 1.1rem; }
 .card p { margin: 0; color: var(--ink-soft); font-size: .96rem; }
 
+/* Карточки деталей с фото */
+.card.part img {
+  display: block; width: 100%; height: 170px; object-fit: contain;
+  margin: 0 0 12px; padding: 8px; background: #fff;
+  border: 1px solid var(--line); border-radius: 12px;
+}
+.card.part a.pic { display: block; }
+
 /* Место под фото и видео */
 .media {
   display: grid; place-items: center; min-height: 220px;
