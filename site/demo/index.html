@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Веб-демо: попробовать звуки без железа — PurrMIDI</title>
+<meta name="description" content="Послушайте звуковые движки PurrMIDI прямо в браузере: экранная клавиатура, клавиши компьютера и MIDI-клавиатура. Тот же код, что в прошивке.">
+<link rel="icon" href="../logo.png">
+<link rel="alternate" hreflang="en" href="../en/demo/">
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="demo.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="../">PurrMIDI</a>
+    <nav>
+      <a href="../">Главная</a>
+      <a href="#player">Играть</a>
+      <a href="#how">Как играть</a>
+      <a href="#about">О демо</a>
+    </nav>
+    <a class="lang" href="../en/demo/">EN</a>
+  </div>
+  <div class="keys"><i></i><i></i><i></i><i></i></div>
+</header>
+
+<main>
+<section>
+  <div class="wrap">
+    <h1 style="font-size:clamp(1.8rem,5vw,2.4rem);line-height:1.2;margin:0 0 10px">Попробуйте звуки без железа</h1>
+    <p class="sub" style="color:var(--ink-soft);margin:0 0 24px;max-width:720px">Здесь играет тот же код звуковых движков, что и в приборе, собранный в WebAssembly. Нажмите «Включить звук» и играйте мышью, пальцем или клавишами компьютера. Есть USB MIDI-клавиатура? Подключите её к браузеру.</p>
+
+    <div class="player" id="player">
+      <div class="top-row">
+        <div class="screen" aria-label="Экран, как на плате: инструмент, ноты и аккорд">
+          <div class="scr-head"><i class="dot off" id="dot"></i><span id="scr-prog">01 E-Piano</span></div>
+          <div class="scr-notes" id="scr-notes"></div>
+          <div class="scr-chord" id="scr-chord"></div>
+        </div>
+        <div class="start-col">
+          <div class="row">
+            <button type="button" class="btn" id="start">Включить звук</button>
+            <label class="vol">Громкость <input type="range" id="vol" min="0" max="127" value="100"></label>
+          </div>
+          <p class="hint" id="status" role="status"></p>
+        </div>
+      </div>
+
+      <h3 class="cap" id="instr-cap">Инструмент</h3>
+      <div class="instr" id="instr" role="group" aria-labelledby="instr-cap"></div>
+      <p id="instr-desc"></p>
+
+      <div class="sfbox" id="sfbox" hidden>
+        <div class="row">
+          <label>Банк
+            <select id="bank-sel"></select>
+          </label>
+          <button type="button" class="btn alt small" id="bank-load">Загрузить банк</button>
+          <label class="btn small file-btn">или свой файл .sf2<input type="file" id="bank-file" accept=".sf2,.SF2"></label>
+        </div>
+        <progress id="bank-prog" max="1" value="0" hidden></progress>
+        <p class="hint" id="bank-status" role="status"></p>
+        <p class="hint" id="sf-hint"></p>
+        <label>Пресет
+          <select id="preset-sel" disabled></select>
+        </label>
+        <p class="hint">Свой файл остаётся в вашем браузере и никуда не отправляется.</p>
+      </div>
+
+      <details class="knobs-box" open>
+        <summary>Ручки инструмента</summary>
+        <p class="hint" id="knobs-none" hidden>У этого инструмента нет ручек, кроме колеса высоты тона.</p>
+        <div class="knobs" id="knobs"></div>
+        <button type="button" class="btn alt small" id="knobs-reset">Вернуть по умолчанию</button>
+      </details>
+
+      <div class="kb-bar">
+        <div class="seg" role="group" aria-label="Октава">
+          <span>Октава</span>
+          <button type="button" id="oct-down" aria-label="Октавой ниже">−</button>
+          <output id="oct-name">C3</output>
+          <button type="button" id="oct-up" aria-label="Октавой выше">+</button>
+        </div>
+        <div class="seg"><button type="button" id="sustain" aria-pressed="false">Сустейн</button></div>
+        <label class="wheel">Колесо высоты тона <input type="range" id="bend" min="-8192" max="8191" value="0"></label>
+        <label class="wheel" id="at-row" hidden>Нажим (aftertouch) <input type="range" id="at" min="0" max="127" value="0"></label>
+        <p class="hint" id="bend-note"></p>
+      </div>
+      <div class="piano-scroll" id="piano-scroll"><div class="piano" id="piano" role="group" aria-label="Клавиатура"></div></div>
+      <p class="hint">Ближе к нижнему краю клавиши ноты звучат громче (так задаётся velocity).</p>
+
+      <h3 class="cap">MIDI-клавиатура</h3>
+      <div class="row" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <button type="button" class="btn alt small" id="midi-btn">Подключить MIDI-клавиатуру</button>
+        <span class="hint" id="midi-status" style="margin:0"></span>
+      </div>
+    </div>
+
+    <div class="demo-notes" id="how">
+      <div class="card"><h3>Клавиши компьютера</h3>
+        <ul>
+          <li>Белые клавиши: ряд <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> <kbd>F</kbd> <kbd>G</kbd> <kbd>H</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd> (на русской раскладке <kbd>Ф</kbd> <kbd>Ы</kbd> <kbd>В</kbd> <kbd>А</kbd> …).</li>
+          <li>Чёрные клавиши: ряд над ним, <kbd>W</kbd> <kbd>E</kbd> <kbd>T</kbd> <kbd>Y</kbd> <kbd>U</kbd> <kbd>O</kbd> <kbd>P</kbd>.</li>
+          <li><kbd>Z</kbd> и <kbd>X</kbd> сдвигают октаву, пробел работает как педаль сустейна.</li>
+        </ul>
+      </div>
+      <div class="card"><h3>MIDI-клавиатура в браузере</h3>
+        <p>Нажмите «Подключить MIDI-клавиатуру» и разрешите доступ. Работают ноты, педаль, колесо высоты тона, ручки CC и Program Change (в том числе 127 — следующий инструмент). Web MIDI есть в Chrome и Edge.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="about" class="tint">
+  <div class="wrap">
+    <h2>Чем демо отличается от прибора</h2>
+    <p class="sub">Движки те же, остальное в браузере устроено иначе.</p>
+    <div class="two">
+      <div class="card yes"><h3>Совпадает</h3>
+        <ul>
+          <li>Код шести движков из <code>Engine/synth/</code>: он собран компилятором в <code>.wasm</code> без изменений.</li>
+          <li>Частота 48 кГц, те же голоса, ручки и значения по умолчанию.</li>
+          <li>Определение аккорда, как на дисплее платы.</li>
+        </ul>
+      </div>
+      <div class="card no"><h3>Отличается</h3>
+        <ul>
+          <li>Звук идёт через звуковую карту компьютера, а не через ЦАП PCM5102A. Задержку определяет браузер и система.</li>
+          <li>Регулятора нагрузки SoundFont, который на плате откладывает часть нот при перегрузке, здесь нет.</li>
+          <li>Банк SoundFont в демо может быть больше 8 МБ, на плату такой не поместится.</li>
+        </ul>
+      </div>
+    </div>
+    <h2 style="margin-top:36px">Вопросы</h2>
+    <div style="margin-top:20px">
+      <details><summary>Нет звука</summary>
+        <p>Нажмите «Включить звук»: браузер не запускает звук без вашего действия. Проверьте громкость и то, что вкладка не отключена. На iPhone выключите беззвучный режим переключателем сбоку.</p></details>
+      <details><summary>Звук отстаёт от нажатия</summary>
+        <p>Задержку добавляют браузер и звуковая карта. Попробуйте проводные наушники и закройте вкладки, которые сильно грузят процессор. В приборе звук идёт из микроконтроллера прямо в ЦАП через небольшой буфер (256 кадров, около 5 мс), поэтому задержка там меньше.</p></details>
+      <details><summary>MIDI-клавиатура не находится</summary>
+        <p>Подключите клавиатуру до нажатия на кнопку или сразу после: список обновляется сам. Если браузер не показал запрос на доступ, откройте Chrome или Edge: Safari Web MIDI не поддерживает. Клавиатуру может держать другая программа: закройте её.</p></details>
+      <details><summary>Как загрузить свой SoundFont</summary>
+        <p>Выберите инструмент SoundFont и нажмите «или свой файл .sf2». Файл не загружается на сервер. Если банк больше 8 384 512 байт, уменьшите его <a href="../sf2/">онлайн-инструментом</a>, чтобы он поместился в прибор.</p></details>
+    </div>
+    <div class="btns" style="justify-content:flex-start;margin-top:22px">
+      <a class="btn" href="../#build">Собрать прибор</a>
+      <a class="btn alt" href="https://github.com/purrrock/purrmidi">Проект на GitHub</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="keys"><i></i><i></i><i></i><i></i></div>
+  <div class="wrap" style="padding-top:20px">
+    PurrMIDI — открытый проект под лицензией MIT ·
+    <a href="https://github.com/purrrock/purrmidi">GitHub</a> ·
+    <a href="https://github.com/purrrock/purrmidi/blob/main/ROADMAP.md">Планы развития</a> ·
+    <a href="https://github.com/purrrock/purrmidi/blob/main/docs/ARCHITECTURE.md">Для разработчиков</a>
+  </div>
+</footer>
+
+<script src="demo.js"></script>
+</body>
+</html>

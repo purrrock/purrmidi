@@ -59,3 +59,7 @@ tests/data
 # STM32CubeMX makes .bak copies of generated files in Backup/ on every regeneration
 **/Backup/
 *.bak
+
+# Веб-демо: собирается в CI (Platform/web/build.sh); банки копируются при деплое
+site/demo/purrmidi.wasm
+site/demo/banks/

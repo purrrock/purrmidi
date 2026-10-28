@@ -6,6 +6,12 @@ on:
     paths:
       - 'site/**'
       - '.github/workflows/pages.yml'
+      # веб-демо собирается из исходников движков
+      - 'Platform/web/**'
+      - 'Engine/synth/**'
+      - 'Engine/midi/chord_detector.*'
+      - 'Middlewares/Third_Party/**'
+      - 'tests/web/wasm_smoke.mjs'
   workflow_dispatch:
 
 permissions:
@@ -25,6 +31,27 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+
+      # Веб-демо: движки из репозитория -> WebAssembly (Zig содержит clang, libc++ и wasi-libc)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build web demo (WebAssembly)
+        run: |
+          pip install ziglang==0.17.0
+          bash Platform/web/build.sh
+      - name: Smoke-test web demo
+        run: node tests/web/wasm_smoke.mjs
+      - name: Copy SoundFont banks for the demo
+        run: |
+          mkdir -p site/demo/banks
+          for f in 000_Florestan_Piano 040_Florestan_String_Quartet 068_Florestan_Woodwinds 052_Florestan_Ahh_Choir 014_Florestan_Tubular_Bells_and_glide; do
+            cp "SoundFonts/Florestan/$f.sf2" site/demo/banks/
+          done
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Web demo: try the sounds without hardware — PurrMIDI</title>
+<meta name="description" content="Hear the PurrMIDI sound engines right in your browser: on-screen keyboard, computer keys and a MIDI keyboard. The same code as in the firmware.">
+<link rel="icon" href="../../logo.png">
+<link rel="alternate" hreflang="ru" href="../../demo/">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../demo/demo.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="../">PurrMIDI</a>
+    <nav>
+      <a href="../">Home</a>
+      <a href="#player">Play</a>
+      <a href="#how">How to play</a>
+      <a href="#about">About the demo</a>
+    </nav>
+    <a class="lang" href="../../demo/">RU</a>
+  </div>
+  <div class="keys"><i></i><i></i><i></i><i></i></div>
+</header>
+
+<main>
+<section>
+  <div class="wrap">
+    <h1 style="font-size:clamp(1.8rem,5vw,2.4rem);line-height:1.2;margin:0 0 10px">Try the sounds without hardware</h1>
+    <p class="sub" style="color:var(--ink-soft);margin:0 0 24px;max-width:720px">This is the same sound-engine code as in the device, compiled to WebAssembly. Press “Turn sound on” and play with the mouse, your finger or the computer keyboard. Have a USB MIDI keyboard? Connect it to the browser.</p>
+
+    <div class="player" id="player">
+      <div class="top-row">
+        <div class="screen" aria-label="Screen like the board's: instrument, notes and chord">
+          <div class="scr-head"><i class="dot off" id="dot"></i><span id="scr-prog">01 E-Piano</span></div>
+          <div class="scr-notes" id="scr-notes"></div>
+          <div class="scr-chord" id="scr-chord"></div>
+        </div>
+        <div class="start-col">
+          <div class="row">
+            <button type="button" class="btn" id="start">Turn sound on</button>
+            <label class="vol">Volume <input type="range" id="vol" min="0" max="127" value="100"></label>
+          </div>
+          <p class="hint" id="status" role="status"></p>
+        </div>
+      </div>
+
+      <h3 class="cap" id="instr-cap">Instrument</h3>
+      <div class="instr" id="instr" role="group" aria-labelledby="instr-cap"></div>
+      <p id="instr-desc"></p>
+
+      <div class="sfbox" id="sfbox" hidden>
+        <div class="row">
+          <label>Bank
+            <select id="bank-sel"></select>
+          </label>
+          <button type="button" class="btn alt small" id="bank-load">Load bank</button>
+          <label class="btn small file-btn">or your own .sf2 file<input type="file" id="bank-file" accept=".sf2,.SF2"></label>
+        </div>
+        <progress id="bank-prog" max="1" value="0" hidden></progress>
+        <p class="hint" id="bank-status" role="status"></p>
+        <p class="hint" id="sf-hint"></p>
+        <label>Preset
+          <select id="preset-sel" disabled></select>
+        </label>
+        <p class="hint">Your own file stays in your browser and is never uploaded.</p>
+      </div>
+
+      <details class="knobs-box" open>
+        <summary>Instrument knobs</summary>
+        <p class="hint" id="knobs-none" hidden>This instrument has no knobs except the pitch wheel.</p>
+        <div class="knobs" id="knobs"></div>
+        <button type="button" class="btn alt small" id="knobs-reset">Reset to defaults</button>
+      </details>
+
+      <div class="kb-bar">
+        <div class="seg" role="group" aria-label="Octave">
+          <span>Octave</span>
+          <button type="button" id="oct-down" aria-label="One octave lower">−</button>
+          <output id="oct-name">C3</output>
+          <button type="button" id="oct-up" aria-label="One octave higher">+</button>
+        </div>
+        <div class="seg"><button type="button" id="sustain" aria-pressed="false">Sustain</button></div>
+        <label class="wheel">Pitch wheel <input type="range" id="bend" min="-8192" max="8191" value="0"></label>
+        <label class="wheel" id="at-row" hidden>Pressure (aftertouch) <input type="range" id="at" min="0" max="127" value="0"></label>
+        <p class="hint" id="bend-note"></p>
+      </div>
+      <div class="piano-scroll" id="piano-scroll"><div class="piano" id="piano" role="group" aria-label="Keyboard"></div></div>
+      <p class="hint">The closer to the bottom edge of a key you press, the louder the note (that sets the velocity).</p>
+
+      <h3 class="cap">MIDI keyboard</h3>
+      <div class="row" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <button type="button" class="btn alt small" id="midi-btn">Connect a MIDI keyboard</button>
+        <span class="hint" id="midi-status" style="margin:0"></span>
+      </div>
+    </div>
+
+    <div class="demo-notes" id="how">
+      <div class="card"><h3>Computer keys</h3>
+        <ul>
+          <li>White keys: the home row <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> <kbd>F</kbd> <kbd>G</kbd> <kbd>H</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd>. The positions are physical, so any keyboard layout works.</li>
+          <li>Black keys: the row above, <kbd>W</kbd> <kbd>E</kbd> <kbd>T</kbd> <kbd>Y</kbd> <kbd>U</kbd> <kbd>O</kbd> <kbd>P</kbd>.</li>
+          <li><kbd>Z</kbd> and <kbd>X</kbd> shift the octave; the space bar works as a sustain pedal.</li>
+        </ul>
+      </div>
+      <div class="card"><h3>A MIDI keyboard in the browser</h3>
+        <p>Press “Connect a MIDI keyboard” and allow access. Notes, the pedal, the pitch wheel, CC knobs and Program Change (including 127, the next instrument) all work. Web MIDI is available in Chrome and Edge.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="about" class="tint">
+  <div class="wrap">
+    <h2>How the demo differs from the device</h2>
+    <p class="sub">The engines are the same; the rest works differently in a browser.</p>
+    <div class="two">
+      <div class="card yes"><h3>The same</h3>
+        <ul>
+          <li>The code of all six engines from <code>Engine/synth/</code>, compiled to <code>.wasm</code> without changes.</li>
+          <li>48 kHz, the same voices, knobs and default values.</li>
+          <li>Chord detection, as on the board's display.</li>
+        </ul>
+      </div>
+      <div class="card no"><h3>Different</h3>
+        <ul>
+          <li>The sound goes through your computer's audio hardware, not the PCM5102A DAC. The latency depends on the browser and the system.</li>
+          <li>There is no SoundFont load governor, which on the board postpones some notes when it is overloaded.</li>
+          <li>A SoundFont bank in the demo can be larger than 8 MB; such a bank will not fit on the board.</li>
+        </ul>
+      </div>
+    </div>
+    <h2 style="margin-top:36px">Questions</h2>
+    <div style="margin-top:20px">
+      <details><summary>There is no sound</summary>
+        <p>Press “Turn sound on”: a browser does not start audio without an action from you. Check the volume and that the tab is not muted. On an iPhone, switch off silent mode with the side switch.</p></details>
+      <details><summary>The sound lags behind my key presses</summary>
+        <p>The browser and the sound card add latency. Try wired headphones and close tabs that load the processor heavily. In the device the sound goes from the microcontroller straight to the DAC through a small buffer (256 frames, about 5 ms), so its latency is lower.</p></details>
+      <details><summary>My MIDI keyboard is not found</summary>
+        <p>Plug the keyboard in before pressing the button or right after: the list updates by itself. If the browser showed no access prompt, use Chrome or Edge: Safari does not support Web MIDI. Another program may be holding the keyboard: close it.</p></details>
+      <details><summary>How do I load my own SoundFont?</summary>
+        <p>Pick the SoundFont instrument and press “or your own .sf2 file”. The file is not uploaded anywhere. If the bank is larger than 8,384,512 bytes, shrink it with the <a href="../sf2/">online tool</a> so that it fits the device.</p></details>
+    </div>
+    <div class="btns" style="justify-content:flex-start;margin-top:22px">
+      <a class="btn" href="../#build">Build the device</a>
+      <a class="btn alt" href="https://github.com/purrrock/purrmidi">Project on GitHub</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="keys"><i></i><i></i><i></i><i></i></div>
+  <div class="wrap" style="padding-top:20px">
+    PurrMIDI is open source under the MIT license ·
+    <a href="https://github.com/purrrock/purrmidi">GitHub</a> ·
+    <a href="https://github.com/purrrock/purrmidi/blob/main/ROADMAP.md">Roadmap</a> ·
+    <a href="https://github.com/purrrock/purrmidi/blob/main/docs/ARCHITECTURE.md">For developers</a>
+  </div>
+</footer>
+
+<script src="../../demo/demo.js"></script>
+</body>
+</html>
