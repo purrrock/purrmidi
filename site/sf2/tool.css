@@ -1,0 +1,63 @@
+/* Инструмент «Уменьшить SoundFont». Подключается после ../style.css и использует его переменные. */
+
+.tool { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); border-top: 8px solid var(--green); padding: 22px; }
+
+/* Зона выбора файла */
+.drop {
+  display: block; position: relative; cursor: pointer; text-align: center;
+  padding: 34px 18px; border: 2px dashed var(--pink-d); border-radius: var(--radius);
+  background: repeating-linear-gradient(45deg, #fff, #fff 14px, #fff7f1 14px, #fff7f1 28px);
+  color: var(--ink); font-weight: 600; overflow-wrap: anywhere;
+}
+.drop:hover, .drop.over { background: #fff3ec; border-color: var(--blue-d); }
+.drop.busy { cursor: progress; opacity: .6; }
+.drop input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: inherit; }
+.drop:focus-within { outline: 3px solid var(--blue-d); outline-offset: 3px; }
+
+/* Параметры */
+.opts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin: 20px 0 0; }
+.opts label.field { display: grid; gap: 4px; font-weight: 600; }
+.opts select, .opts input[type=number] {
+  font: inherit; padding: 9px 12px; border: 1.5px solid var(--line); border-radius: 12px;
+  background: #fff; color: var(--ink); max-width: 100%;
+}
+.opts select { width: 100%; }
+.opts input[type=number] { width: 10rem; }
+.opts select:focus-visible, .opts input:focus-visible, .btn:focus-visible, button.btn:focus-visible { outline: 3px solid var(--blue-d); outline-offset: 2px; }
+.opts .hint { font-weight: 400; color: var(--ink-soft); font-size: .9rem; }
+.opts details > div { display: grid; gap: 14px; margin-top: 12px; }
+.opts .check { display: flex; gap: 10px; align-items: flex-start; font-weight: 400; }
+.opts .check input { margin-top: 5px; width: 18px; height: 18px; accent-color: var(--pink-d); }
+
+/* Атрибут hidden должен побеждать display из .btn и т.п. */
+[hidden] { display: none !important; }
+
+/* Кнопки */
+button.btn { font: inherit; font-weight: 700; cursor: pointer; }
+button.btn:disabled { opacity: .45; cursor: not-allowed; }
+button.btn:disabled:hover { background: var(--pink); }
+.actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 20px; }
+
+/* Прогресс */
+.progress { margin-top: 18px; }
+progress { width: 100%; height: 14px; accent-color: var(--pink-d); }
+.progress p { margin: 6px 0 0; color: var(--ink-soft); font-size: .95rem; overflow-wrap: anywhere; }
+
+/* Результат и ошибка */
+.result { margin-top: 22px; padding: 18px 20px; border-radius: var(--radius); background: #fff; border: 1px solid var(--line); border-left: 10px solid var(--green); }
+.result.nofit { border-left-color: var(--orange); }
+.result h3 { margin: 0 0 6px; font-size: 1.25rem; }
+.result p { margin: 8px 0 0; }
+.result .small, .small { font-size: .9rem; color: var(--ink-soft); }
+.result .dl { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+.result .next { font-weight: 600; }
+.result details { margin: 12px 0 0; }
+.result details ul { padding-left: 20px; }
+.result .tall { max-height: 360px; overflow: auto; margin-top: 10px; }
+.result table { font-size: .88rem; }
+.result th { position: sticky; top: 0; }
+.result td, .result th { white-space: nowrap; }
+.errbox { margin-top: 22px; padding: 14px 18px; border-radius: 14px; background: #fff; border-left: 6px solid var(--pink-d); color: var(--ink); }
+
+.privacy { margin: 0 0 18px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }

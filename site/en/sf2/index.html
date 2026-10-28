@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shrink a SoundFont online — PurrMIDI</title>
+<meta name="description" content="Free tool: shrink an SF2 to the PurrMIDI 8 MB limit right in your browser. Your file is never uploaded.">
+<link rel="icon" href="../../logo.png">
+<link rel="alternate" hreflang="ru" href="../../sf2/">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../sf2/tool.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="../">PurrMIDI</a>
+    <nav>
+      <a href="../">Home</a>
+      <a href="#how">What it does</a>
+      <a href="#limits">Limits</a>
+    </nav>
+    <a class="lang" href="../../sf2/">RU</a>
+  </div>
+  <div class="keys"><i></i><i></i><i></i><i></i></div>
+</header>
+
+<main>
+<section>
+  <div class="wrap">
+    <h1 style="font-size:clamp(1.8rem,5vw,2.4rem);line-height:1.2;margin:0 0 10px">Shrink a SoundFont</h1>
+    <p class="sub" style="color:var(--ink-soft);margin:0 0 24px;max-width:700px">Pick an SF2 file and get a bank that fits the PurrMIDI flash (8,384,512 bytes or less). Nothing is uploaded: everything runs in your browser.</p>
+
+    <div class="tool">
+      <label class="drop" id="drop" for="file">
+        <span id="drop-text"></span>
+        <input type="file" id="file" accept=".sf2,.SF2,audio/x-soundfont">
+      </label>
+
+      <div class="opts">
+        <label class="field">Sample rate
+          <select id="rate">
+            <option value="auto" selected>Auto: 24 kHz, lower if it does not fit</option>
+            <option value="32000">32 kHz: better quality, larger</option>
+            <option value="24000">24 kHz: recommended</option>
+            <option value="22050">22.05 kHz</option>
+            <option value="16000">16 kHz: smaller, duller highs</option>
+          </select>
+        </label>
+        <details>
+          <summary>Advanced</summary>
+          <div>
+            <label class="field">Extra gain, dB
+              <input type="number" id="gain" value="0" step="0.5" min="-12" max="12" inputmode="decimal">
+              <span class="hint">0 keeps the loudness of the stereo pair.</span>
+            </label>
+            <label class="field">Max channel shift, samples (1–128)
+              <input type="number" id="maxlag" value="64" step="1" min="1" max="128" inputmode="numeric">
+            </label>
+            <label class="check"><input type="checkbox" id="align" checked><span>Align channels in time and polarity (recommended); otherwise some notes can partly cancel when mixed to mono.</span></label>
+          </div>
+        </details>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="btn" id="go" disabled>Shrink</button>
+        <button type="button" class="btn alt" id="cancel" hidden>Cancel</button>
+      </div>
+
+      <div class="progress" id="progress" hidden aria-live="polite">
+        <progress id="bar" max="1"></progress>
+        <p id="status"></p>
+      </div>
+      <div class="errbox" id="error" hidden role="alert"></div>
+      <div id="result" hidden aria-live="polite"></div>
+    </div>
+  </div>
+</section>
+
+<section id="how" class="tint">
+  <div class="wrap">
+    <h2>What happens to the bank</h2>
+    <ol class="steps" style="margin-top:20px">
+      <li><strong>Stereo becomes mono.</strong> The right channel is first aligned in time and polarity to the left, so notes do not cancel when summed, and loudness is normalised to keep the power of the pair.</li>
+      <li><strong>Resampling.</strong> Samples above the chosen rate are converted with a windowed-sinc filter. Samples already at a lower rate are left as they are.</li>
+      <li><strong>Loops stay seamless.</strong> The loop length at the new rate is a whole number of samples, and the tiny pitch shift (fractions of a cent) is compensated with the pitchCorrection field.</li>
+      <li><strong>Everything else is unchanged:</strong> presets, instruments, key and velocity ranges, root keys, envelopes. Output is 16-bit.</li>
+    </ol>
+    <p class="note">It is the same algorithm as the <a href="https://github.com/purrrock/purrmidi/blob/main/SoundFonts/sf2_shrink.py"><code>SoundFonts/sf2_shrink.py</code></a> script, and automated tests compare their output. The script is better for very large banks and batch work.</p>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="wrap">
+    <h2>Limits</h2>
+    <ul style="margin-top:14px;color:var(--ink-soft)">
+      <li>Banks whose zones use <strong>sample address offsets</strong> (start/end/loop address offsets) are not supported: they lose their meaning after resampling. Some Florestan banks are like this. For those, use Polyphone and delete unneeded presets and instruments.</li>
+      <li><strong>SF3</strong> banks (Ogg Vorbis) and banks with ROM samples are not supported.</li>
+      <li>The bank becomes <strong>mono</strong>: the stereo image is lost and the instrument sounds from the centre. 24-bit extensions (sm24) are dropped, so the output is 16-bit.</li>
+      <li>The file is processed entirely in browser memory. Very large banks (hundreds of MB) are better shrunk with the script.</li>
+    </ul>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="keys"><i></i><i></i><i></i><i></i></div>
+  <div class="wrap" style="padding-top:20px">
+    PurrMIDI is open source under the MIT license ·
+    <a href="https://github.com/purrrock/purrmidi">GitHub</a> ·
+    <a href="https://github.com/purrrock/purrmidi/blob/main/ROADMAP.md">Roadmap</a> ·
+    <a href="https://github.com/purrrock/purrmidi/blob/main/docs/ARCHITECTURE.md">For developers</a>
+  </div>
+</footer>
+
+<script src="../../sf2/app.js"></script>
+</body>
+</html>

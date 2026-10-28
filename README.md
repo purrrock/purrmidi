@@ -57,7 +57,7 @@ The instrument name and active notes are shown on the display. The selected inst
 The full list of controllers and ranges is in [docs/ENGINES.md](docs/ENGINES.md) (in Russian).
 
 **Custom SoundFont.** Put the bank file in the root of the microSD card named `SNDFNT.SF2`, insert the card and power the device on: the bank is automatically written to Flash memory (30–60 seconds, progress is shown on the display). After that the card is no longer needed. Details and troubleshooting are in [docs/SOUNDFONT.md](docs/SOUNDFONT.md) (in Russian).
-`SNDFNT.SF2` must not exceed 8 MB (8,384,512 bytes), otherwise it will not fit into Flash. You can try to reduce the file size with `/SoundFonts/sf2_shrink.py` or with the free Polyphone utility.
+`SNDFNT.SF2` must not exceed 8 MB (8,384,512 bytes), otherwise it will not fit into Flash. You can reduce the file size with the online tool on the project website, section “Your own SoundFont” (runs in the browser, nothing is uploaded), with `/SoundFonts/sf2_shrink.py` (the same algorithm as a CLI) or with the free Polyphone utility.
 The `/SoundFonts` directory contains several small instrument banks.
 
 ## Building

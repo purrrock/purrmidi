@@ -35,6 +35,24 @@ jobs:
           cmake --build build/host-tests-nodiag
           ctest --test-dir build/host-tests-nodiag --output-on-failure --no-tests=error
 
+  web-sf2-parity:
+    name: Web SF2 shrink tool (parity with sf2_shrink.py)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install numpy
+        run: python3 -m pip install numpy
+
+      # JS-порт в site/sf2/sf2shrink.js обязан давать тот же результат, что и SoundFonts/sf2_shrink.py.
+      - name: Compare JS port with sf2_shrink.py
+        run: node tests/web/sf2_parity.mjs
+
   host-tests-sanitizers:
     name: Host tests (ASan + UBSan)
     runs-on: ubuntu-latest

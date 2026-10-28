@@ -78,7 +78,8 @@ Platform/host/        Хост-реализация загрузчика SoundFo
 Platform/windows/     Windows-приложение для проверки движков на ПК
 USB_HOST/, FATFS/     Настройки USB Host и FatFs (CubeMX)
 Drivers/, Middlewares/  HAL/CMSIS, USB Host Library, FatFs и сторонние библиотеки (подмодулей git нет)
-SoundFonts/           Примеры SoundFont-банков и скрипт sf2_shrink.py
+SoundFonts/           Примеры SoundFont-банков и скрипт sf2_shrink.py (эталон алгоритма)
+site/                 Сайт (GitHub Pages) и онлайн-инструмент уменьшения SF2 (site/sf2/, порт sf2_shrink.py на JS)
 tests/                Хостовые тесты (CMake preset host-tests)
 docs/                 Документация (см. список в README)
 enclosure/            Файлы корпуса и чертежи плат
