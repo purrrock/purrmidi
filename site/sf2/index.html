@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Уменьшить SoundFont онлайн — PurrMIDI</title>
-<meta name="description" content="Бесплатный инструмент: уменьшите SF2 до лимита PurrMIDI (8 МБ) прямо в браузере. Файл никуда не загружается.">
+<title>Shrink a SoundFont online — PurrMIDI</title>
+<meta name="description" content="Free tool: shrink an SF2 to the PurrMIDI 8 MB limit right in your browser. Your file is never uploaded.">
 <link rel="icon" href="../logo.png">
-<link rel="alternate" hreflang="en" href="../en/sf2/">
+<link rel="alternate" hreflang="ru" href="../ru/sf2/">
 <link rel="stylesheet" href="../style.css">
 <link rel="stylesheet" href="../sf2/tool.css">
 </head>
@@ -16,11 +16,11 @@
   <div class="wrap">
     <a class="brand" href="../">PurrMIDI</a>
     <nav>
-      <a href="../">Главная</a>
-      <a href="#how">Что делает</a>
-      <a href="#limits">Ограничения</a>
+      <a href="../">Home</a>
+      <a href="#how">What it does</a>
+      <a href="#limits">Limits</a>
     </nav>
-    <a class="lang" href="../en/sf2/">EN</a>
+    <a class="lang" href="../ru/sf2/">RU</a>
   </div>
   <div class="keys"><i></i><i></i><i></i><i></i></div>
 </header>
@@ -28,8 +28,8 @@
 <main>
 <section>
   <div class="wrap">
-    <h1 style="font-size:clamp(1.8rem,5vw,2.4rem);line-height:1.2;margin:0 0 10px">Уменьшить SoundFont</h1>
-    <p class="sub" style="color:var(--ink-soft);margin:0 0 24px;max-width:700px">Выберите файл SF2 — получите банк, который поместится во флеш PurrMIDI (не более 8 384 512 байт). Файл не загружается на сервер: всё считается в вашем браузере.</p>
+    <h1 style="font-size:clamp(1.8rem,5vw,2.4rem);line-height:1.2;margin:0 0 10px">Shrink a SoundFont</h1>
+    <p class="sub" style="color:var(--ink-soft);margin:0 0 24px;max-width:700px">Pick an SF2 file and get a bank that fits the PurrMIDI flash (8,384,512 bytes or less). Nothing is uploaded: everything runs in your browser.</p>
 
     <div class="tool">
       <label class="drop" id="drop" for="file">
@@ -38,33 +38,33 @@
       </label>
 
       <div class="opts">
-        <label class="field">Частота дискретизации
+        <label class="field">Sample rate
           <select id="rate">
-            <option value="auto" selected>Авто: 24 кГц, а если не влезает — ниже</option>
-            <option value="32000">32 кГц — выше качество, больше размер</option>
-            <option value="24000">24 кГц — рекомендуется</option>
-            <option value="22050">22,05 кГц</option>
-            <option value="16000">16 кГц — меньше размер, глуше верха</option>
+            <option value="auto" selected>Auto: 24 kHz, lower if it does not fit</option>
+            <option value="32000">32 kHz: better quality, larger</option>
+            <option value="24000">24 kHz: recommended</option>
+            <option value="22050">22.05 kHz</option>
+            <option value="16000">16 kHz: smaller, duller highs</option>
           </select>
         </label>
         <details>
-          <summary>Дополнительно</summary>
+          <summary>Advanced</summary>
           <div>
-            <label class="field">Дополнительное усиление, дБ
+            <label class="field">Extra gain, dB
               <input type="number" id="gain" value="0" step="0.5" min="-12" max="12" inputmode="decimal">
-              <span class="hint">0 — громкость стереопары сохраняется.</span>
+              <span class="hint">0 keeps the loudness of the stereo pair.</span>
             </label>
-            <label class="field">Макс. сдвиг каналов, отсчётов (1–128)
+            <label class="field">Max channel shift, samples (1–128)
               <input type="number" id="maxlag" value="64" step="1" min="1" max="128" inputmode="numeric">
             </label>
-            <label class="check"><input type="checkbox" id="align" checked><span>Выравнивать каналы по времени и полярности (рекомендуется): иначе часть нот может «провалиться» при сведении в моно.</span></label>
+            <label class="check"><input type="checkbox" id="align" checked><span>Align channels in time and polarity (recommended); otherwise some notes can partly cancel when mixed to mono.</span></label>
           </div>
         </details>
       </div>
 
       <div class="actions">
-        <button type="button" class="btn" id="go" disabled>Уменьшить</button>
-        <button type="button" class="btn alt" id="cancel" hidden>Отмена</button>
+        <button type="button" class="btn" id="go" disabled>Shrink</button>
+        <button type="button" class="btn alt" id="cancel" hidden>Cancel</button>
       </div>
 
       <div class="progress" id="progress" hidden aria-live="polite">
@@ -79,25 +79,25 @@
 
 <section id="how" class="tint">
   <div class="wrap">
-    <h2>Что происходит с банком</h2>
+    <h2>What happens to the bank</h2>
     <ol class="steps" style="margin-top:20px">
-      <li><strong>Стерео превращается в моно.</strong> Правый канал сначала выравнивается по времени и полярности относительно левого, чтобы при сложении не пропадали ноты, а громкость нормируется так, чтобы мощность пары сохранилась.</li>
-      <li><strong>Передискретизация.</strong> Сэмплы выше выбранной частоты пересчитываются оконным sinc-фильтром. Сэмплы с более низкой частотой остаются как есть.</li>
-      <li><strong>Циклы остаются бесшовными.</strong> Длина цикла в новой частоте — целое число отсчётов, а крошечный сдвиг тона (доли цента) компенсируется полем pitchCorrection.</li>
-      <li><strong>Всё остальное не меняется:</strong> пресеты, инструменты, диапазоны нот и скорости, корневые ноты, огибающие. Выход — 16 бит.</li>
+      <li><strong>Stereo becomes mono.</strong> The right channel is first aligned in time and polarity to the left, so notes do not cancel when summed, and loudness is normalised to keep the power of the pair.</li>
+      <li><strong>Resampling.</strong> Samples above the chosen rate are converted with a windowed-sinc filter. Samples already at a lower rate are left as they are.</li>
+      <li><strong>Loops stay seamless.</strong> The loop length at the new rate is a whole number of samples, and the tiny pitch shift (fractions of a cent) is compensated with the pitchCorrection field.</li>
+      <li><strong>Everything else is unchanged:</strong> presets, instruments, key and velocity ranges, root keys, envelopes. Output is 16-bit.</li>
     </ol>
-    <p class="note">Это тот же алгоритм, что и в скрипте <a href="https://github.com/purrrock/purrmidi/blob/main/SoundFonts/sf2_shrink.py"><code>SoundFonts/sf2_shrink.py</code></a>; результаты сравниваются автоматическими тестами. Скрипт удобнее для больших банков и пакетной обработки.</p>
+    <p class="note">It is the same algorithm as the <a href="https://github.com/purrrock/purrmidi/blob/main/SoundFonts/sf2_shrink.py"><code>SoundFonts/sf2_shrink.py</code></a> script, and automated tests compare their output. The script is better for very large banks and batch work.</p>
   </div>
 </section>
 
 <section id="limits">
   <div class="wrap">
-    <h2>Ограничения</h2>
+    <h2>Limits</h2>
     <ul style="margin-top:14px;color:var(--ink-soft)">
-      <li>Банки, в зонах которых заданы <strong>смещения адресов сэмпла</strong> (start/end/loop address offset), не поддерживаются: после передискретизации эти смещения теряют смысл. Такие банки встречаются, например, среди Florestan. Для них остаётся Polyphone: удалите лишние пресеты и инструменты.</li>
-      <li>Сжатые банки <strong>SF3</strong> (Ogg Vorbis) и банки с ROM-сэмплами не поддерживаются.</li>
-      <li>Звук банка становится <strong>моно</strong>: стереообраз теряется, инструмент звучит по центру. 24-битные расширения (sm24) отбрасываются, на выходе 16 бит.</li>
-      <li>Файл обрабатывается целиком в памяти браузера. Очень большие банки (сотни МБ) лучше уменьшать скриптом.</li>
+      <li>Banks whose zones use <strong>sample address offsets</strong> (start/end/loop address offsets) are not supported: they lose their meaning after resampling. Some Florestan banks are like this. For those, use Polyphone and delete unneeded presets and instruments.</li>
+      <li><strong>SF3</strong> banks (Ogg Vorbis) and banks with ROM samples are not supported.</li>
+      <li>The bank becomes <strong>mono</strong>: the stereo image is lost and the instrument sounds from the centre. 24-bit extensions (sm24) are dropped, so the output is 16-bit.</li>
+      <li>The file is processed entirely in browser memory. Very large banks (hundreds of MB) are better shrunk with the script.</li>
     </ul>
   </div>
 </section>
@@ -106,10 +106,10 @@
 <footer>
   <div class="keys"><i></i><i></i><i></i><i></i></div>
   <div class="wrap" style="padding-top:20px">
-    PurrMIDI — открытый проект под лицензией MIT ·
+    PurrMIDI is open source under the MIT license ·
     <a href="https://github.com/purrrock/purrmidi">GitHub</a> ·
-    <a href="https://github.com/purrrock/purrmidi/blob/main/ROADMAP.md">Планы развития</a> ·
-    <a href="https://github.com/purrrock/purrmidi/blob/main/docs/ARCHITECTURE.md">Для разработчиков</a>
+    <a href="https://github.com/purrrock/purrmidi/blob/main/ROADMAP.md">Roadmap</a> ·
+    <a href="https://github.com/purrrock/purrmidi/blob/main/docs/ARCHITECTURE.md">For developers</a>
   </div>
 </footer>
 

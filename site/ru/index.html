@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PurrMIDI — автономный MIDI-синтезатор на STM32</title>
+<meta name="description" content="Подключите USB MIDI-клавиатуру — и сразу играйте. DIY за вечер, открытый код.">
+<link rel="icon" href="../logo.png">
+<link rel="alternate" hreflang="en" href="../">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#">PurrMIDI</a>
+    <nav>
+      <a href="#sounds">Звуки</a>
+      <a href="demo/">Демо</a>
+      <a href="#build">Сборка</a>
+      <a href="#play">Игра</a>
+      <a href="#soundfont">SoundFont</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <a class="lang" href="../">EN</a>
+  </div>
+  <div class="keys"><i></i><i></i><i></i><i></i></div>
+</header>
+
+<main>
+<div class="wrap hero">
+  <img class="logo" src="../logo.png" alt="PurrMIDI: чёрный кот за разноцветными клавишами">
+  <h1>Подключите клавиатуру — и играйте</h1>
+  <p class="lead">PurrMIDI — автономный MIDI-синтезатор. USB MIDI-клавиатура подключается к плате, звук создаёт микроконтроллер STM32, а выводит его аудио ЦАП. Компьютер не нужен.</p>
+  <div class="btns">
+    <a class="btn" href="https://github.com/purrrock/purrmidi/releases/latest">Скачать прошивку</a>
+    <a class="btn alt" href="demo/">Попробовать в браузере</a>
+    <a class="btn alt" href="https://github.com/purrrock/purrmidi">Проект на GitHub</a>
+  </div>
+</div>
+
+<div class="wrap" style="padding-bottom:40px">
+  <div class="media">
+    <div><strong>Здесь будет фото и видео</strong><br>Подключение и первый звук</div>
+  </div>
+</div>
+
+<section id="sounds" class="tint">
+  <div class="wrap">
+    <h2>Шесть звуковых движков</h2>
+    <p class="sub">Одновременно звучит один. Переключение — кнопкой на плате или Program Change с клавиатуры. Послушать можно прямо сейчас: <a href="demo/">веб-демо</a> играет без платы и клавиатуры.</p>
+    <div class="grid">
+      <div class="card"><h3>E-Piano</h3><p>FM-электропиано в духе Rhodes. Звучит по умолчанию.</p></div>
+      <div class="card"><h3>Pluck</h3><p>Гитара с нейлоновыми струнами.</p></div>
+      <div class="card"><h3>Lead</h3><p>Аналоговый синтезатор-лид.</p></div>
+      <div class="card"><h3>Organ</h3><p>Тонколесный орган.</p></div>
+      <div class="card"><h3>Violin</h3><p>Скрипка: физическая модель смычковой струны.</p></div>
+      <div class="card"><h3>SoundFont</h3><p>Любой банк SoundFont2 до 8 МБ: каждый пресет банка — отдельный инструмент.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="build">
+  <div class="wrap">
+    <h2>Собрать за вечер</h2>
+    <p class="sub">Понадобится немного доступных деталей. Компилировать ничего не нужно. Паять тоже не обязательно, можно соединить проводами DuPont.</p>
+    <div class="grid" style="margin-bottom:24px">
+      <div class="card part"><a class="pic" href="https://aliexpress.ru/item/1005006632336183.html"><img src="../WeAct_STM32H743VIT6_mini.png" width="287" height="466" alt="Плата WeAct STM32H743VIT6 Mini: чип, дисплей, разъёмы microSD и USB-C" loading="lazy"></a><h3>Плата</h3><p><a href="https://aliexpress.ru/item/1005006632336183.html">WeAct STM32H743VIT6 Mini</a></p></div>
+      <div class="card part"><a class="pic" href="https://aliexpress.ru/item/1005009717341228.html"><img src="../PCM5102.webp" width="800" height="800" alt="Модуль ЦАП PCM5102A, вид спереди и сзади" loading="lazy"></a><h3>ЦАП</h3><p><a href="https://aliexpress.ru/item/1005009717341228.html">Модуль PCM5102A</a></p></div>
+      <div class="card part"><a class="pic" href="https://aliexpress.ru/item/1005008193444956.html"><img src="../y-conn.avif" width="640" height="640" alt="Угловой USB-переходник с дополнительным портом питания USB-C" loading="lazy"></a><h3>Питание клавиатуры</h3><p><a href="https://aliexpress.ru/item/1005008193444956.html">USB-разветвитель</a></p></div>
+      <div class="card"><h3>Клавиатура</h3><p>Любая USB MIDI-клавиатура. Проверены NUX NTK-61 и M-VAVE SMK-25 MINI.</p></div>
+      <div class="card"><h3>Звук</h3><p>Наушники или колонки; microSD — только для своего SoundFont.</p></div>
+    </div>
+    <ol class="steps">
+      <li><strong>Прошейте плату.</strong> Скачайте <code>purrmidi.elf</code> со страницы <a href="https://github.com/purrrock/purrmidi/releases/latest">релизов</a> и загрузите его через STM32CubeProgrammer.</li>
+      <li><strong>Подключите ЦАП</strong> к трём выводам платы (PE4, PE5, PE6), питанию и земле. Схема — в <a href="https://github.com/purrrock/purrmidi/blob/main/docs/HARDWARE.md">HARDWARE.md</a>.</li>
+      <li><strong>Подключите клавиатуру</strong> к USB-разъёму платы. Плата не подаёт 5 В на клавиатуру, поэтому ей нужно внешнее питание (например, <a href="https://aliexpress.ru/item/1005008193444956.html">через Y-разветвитель</a>).</li>
+      <li><strong>Включите питание и играйте.</strong> На дисплее появится зелёная точка, название инструмента и нажатые ноты.</li>
+    </ol>
+    <p class="note"><strong>Честно о пайке.</strong> У популярного фиолетового модуля PCM5102A нужно замкнуть перемычки H1L–H4L и SCK. Подбор модуля, не требующего пайки, — в планах проекта.</p>
+  </div>
+</section>
+
+<section id="play" class="tint">
+  <div class="wrap">
+    <h2>Как играть</h2>
+    <p class="sub">Инструмент выбирается кнопкой K1 на плате или сообщением Program Change.</p>
+    <div class="scroll">
+    <table>
+      <tr><th>Program Change</th><th>Инструмент</th></tr>
+      <tr><td><code>0</code></td><td>E-Piano</td></tr>
+      <tr><td><code>1</code></td><td>Pluck</td></tr>
+      <tr><td><code>2</code></td><td>Lead</td></tr>
+      <tr><td><code>3</code></td><td>Organ</td></tr>
+      <tr><td><code>4</code></td><td>Violin</td></tr>
+      <tr><td><code>5</code>, <code>6</code>, …</td><td>Пресеты SoundFont по порядку</td></tr>
+      <tr><td><code>127</code></td><td>Следующий инструмент (то же делает K1)</td></tr>
+    </table>
+    </div>
+    <p style="margin-top:18px">Громкость — ручка CC7, сустейн — педаль CC64. Остальные контроллеры зависят от инструмента, полный список — в <a href="https://github.com/purrrock/purrmidi/blob/main/docs/ENGINES.md">ENGINES.md</a>. Выбранный инструмент и громкость запоминаются; после отключения питания они сохраняются только при батарейке 3 В на выводе VBAT.</p>
+  </div>
+</section>
+
+<section id="soundfont">
+  <div class="wrap">
+    <h2>Свой SoundFont</h2>
+    <ol class="steps">
+      <li>Назовите файл <code>SNDFNT.SF2</code> и положите в корень карты microSD (FAT32).</li>
+      <li>Размер файла — не более 8 384 512 байт. Если больше, уменьшите его <a href="sf2/">онлайн-инструментом</a> (файл остаётся в вашем браузере), скриптом <code>SoundFonts/sf2_shrink.py</code> или программой Polyphone.</li>
+      <li>Вставьте карту и включите прибор. Запись во флеш занимает 30–60 секунд, ход виден на дисплее.</li>
+      <li>Карту можно вынуть: во время игры она не нужна.</li>
+    </ol>
+    <p><a class="btn alt" href="sf2/">Уменьшить SoundFont онлайн</a></p>
+    <p class="note">Готовые небольшие банки лежат в каталоге <a href="https://github.com/purrrock/purrmidi/tree/main/SoundFonts">SoundFonts</a>.</p>
+  </div>
+</section>
+
+<section class="tint">
+  <div class="wrap">
+    <h2>Что умеет и чего нет</h2>
+    <div class="two" style="margin-top:20px">
+      <div class="card yes"><h3>Умеет</h3>
+        <ul>
+          <li>Работать как USB Host с MIDI-клавиатурой</li>
+          <li>Шесть движков и банки SoundFont</li>
+          <li>Показывать ноты, аккорды и инструмент на дисплее</li>
+          <li>Помнить инструмент и громкость</li>
+        </ul>
+      </div>
+      <div class="card no"><h3>Не умеет (пока)</h3>
+        <ul>
+          <li>USB-MIDI в сторону ПК</li>
+          <li>Вход MIDI DIN</li>
+          <li>Запись игры</li>
+          <li>Питать клавиатуру по USB</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <h2>Вопросы и ответы</h2>
+    <div style="margin-top:20px">
+      <details><summary>Клавиатура не определяется</summary>
+        <p>Плата не подаёт 5 В на разъём, поэтому клавиатуре нужно внешнее питание. Если плата и клавиатура питаются от одного источника, используйте Y-разветвитель. Точка в шапке дисплея: серая — клавиатуры нет, жёлтая — идёт определение, зелёная — готово.</p></details>
+      <details><summary>Нет звука</summary>
+        <p>На модуле PCM5102A должна быть замкнута перемычка H3L на H (иначе ЦАП в режиме Mute) и перемычка SCK на лицевой стороне. Проверьте также пайку и подключение выводов PE4, PE5, PE6.</p></details>
+      <details><summary>Звук искажён или громко шумит</summary>
+        <p>Скорее всего, перемычка H4L (FMT) замкнута на H. Для формата I2S она должна быть на L.</p></details>
+      <details><summary>Как поменять SoundFont</summary>
+        <p>Положите новый <code>SNDFNT.SF2</code> на карту microSD, вставьте карту и включите прибор. Банк перезапишется автоматически.</p></details>
+    </div>
+    <p class="note">Не нашли ответ? Расскажите о проблеме в <a href="https://github.com/purrrock/purrmidi/issues">Issues</a>: какая клавиатура, что на дисплее и что выводит UART.</p>
+  </div>
+</section>
+<section id="poll" class="tint">
+  <div class="wrap">
+    <h2>Нужен ли вариант проще?</h2>
+    <p class="sub">Спрашиваем у вас, что важнее: простота сборки или качество звука.</p>
+    <p>ЦАП PCM5102A даёт чистый 16-битный звук. Но мы думаем о варианте <strong>без модуля ЦАП</strong>: звук выводит встроенный ЦАП микроконтроллера, а подключить нужно только <strong>гнездо 3,5 мм и конденсатор</strong>. Дополнительный модуль не нужен.</p>
+    <p>Цена такого упрощения: встроенный ЦАП 12-битный, поэтому тихие ноты будут звучать шумнее, и возможный фон от питания платы. Выход линейный, для активных колонок или усилителя, а не для наушников напрямую.</p>
+    <div class="btns" style="justify-content:flex-start;margin-top:18px">
+      <a class="btn" href="https://github.com/purrrock/purrmidi/issues/new?template=audio_poll.yml">Проголосовать</a>
+    </div>
+    <p class="note">Голосование проходит на GitHub: нужна учётная запись. Выбор варианта займёт меньше минуты.</p>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="keys"><i></i><i></i><i></i><i></i></div>
+  <div class="wrap" style="padding-top:20px">
+    PurrMIDI — открытый проект под лицензией MIT ·
+    <a href="https://github.com/purrrock/purrmidi">GitHub</a> ·
+    <a href="https://github.com/purrrock/purrmidi/blob/main/ROADMAP.md">Планы развития</a> ·
+    <a href="https://github.com/purrrock/purrmidi/blob/main/docs/ARCHITECTURE.md">Для разработчиков</a>
+  </div>
+</footer>
+
+</body>
+</html>

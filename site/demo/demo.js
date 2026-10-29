@@ -1,5 +1,5 @@
 // Веб-демо PurrMIDI: звуковые движки прошивки (WebAssembly) в AudioWorklet + экранная клавиатура,
-// клавиши компьютера и Web MIDI. Страницы: demo/index.html (ru) и en/demo/index.html (en).
+// клавиши компьютера и Web MIDI. Страницы: demo/index.html (en, по умолчанию) и ru/demo/index.html (ru).
 (function () {
   "use strict";
 
