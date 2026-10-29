@@ -48,6 +48,7 @@
 #include "audio_halves.h"
 #include "watchdog.h"
 #include "backup.h"
+#include "version.h"   /* PURRMIDI_VERSION_STRING: заставка дисплея и строка в UART */
 
 /* Статистика кучи malloc (Core/Src/sysmem.c) */
 void Sysmem_GetHeapStats(uint32_t *used_bytes, uint32_t *total_bytes);
@@ -249,6 +250,41 @@ static void Settings_Restore(void)
            (unsigned)SynthEngine_GetProgram(), SynthEngine_GetName(), (unsigned)SynthEngine_GetMasterVolume());
 }
 
+/* ---- Приветствие при включении ----
+ * Заставка (логотип + версия) на ~0,5 с и короткий аккорд Cmaj7 (до-ми-соль-си, мягкий "перебор" снизу вверх).
+ * Запускается в конце инициализации, когда уже идёт вывод звука: аккорд сразу показывает, что ЦАП и перемычки
+ * в порядке, ещё до подключения клавиатуры. Звучит текущим инструментом с сохранённой громкостью. Ноты подаются
+ * прямо в синтезатор (минуя очередь MIDI), поэтому не попадают на экран как сыгранный аккорд. */
+#define GREETING_DURATION_MS   500U   /* сколько держится заставка; в конце ноты отпускаются */
+#define GREETING_STRUM_MS       30U   /* задержка между нотами аккорда */
+#define GREETING_VELOCITY       80U
+
+static void Startup_Greeting(void)
+{
+    static const uint8_t notes[] = { 60U, 64U, 67U, 71U };
+    const uint32_t count = (uint32_t)(sizeof(notes) / sizeof(notes[0]));
+
+    Display_ShowSplash();    /* заставка могла быть закрыта экраном прогресса SoundFont: рисуем заново */
+
+    const uint32_t t0 = HAL_GetTick();
+    uint32_t next = 0U;
+    while ((HAL_GetTick() - t0) < GREETING_DURATION_MS)
+    {
+        if (next < count && (HAL_GetTick() - t0) >= next * GREETING_STRUM_MS)
+        {
+            SynthEngine_NoteOn(notes[next], (uint8_t)GREETING_VELOCITY);
+            next++;
+        }
+        Watchdog_Kick();     /* загрузочный таймаут ~8 с: ждать 0,5 с безопасно, но кормим для единообразия */
+    }
+
+    for (uint32_t i = 0U; i < next; i++)
+    {
+        SynthEngine_NoteOff(notes[i]);
+    }
+    Display_EndSplash();     /* убирает заставку и рисует обычный экран */
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -299,6 +335,7 @@ int main(void)
   MX_SPI4_Init();
   MX_QUADSPI_Init();
   /* USER CODE BEGIN 2 */
+  printf("\r\n[SYS] PurrMIDI firmware v%s\r\n", PURRMIDI_VERSION_STRING);
   Backup_Init();                                  /* резервные регистры RTC (VBAT); без батарейки - пустой блок */
   Backup_NoteReset(Watchdog_GetResetFlags());
   Watchdog_ReportResetCause();
@@ -353,6 +390,8 @@ int main(void)
   {
     Error_Handler();
   }
+  Startup_Greeting();     /* заставка + приветственный аккорд (~0,5 с) */
+  Watchdog_Kick();
   printf("Waiting for USB device to be attached...\r\n");
   HAL_GPIO_WritePin(DEBUG_LED_GPIO_Port, DEBUG_LED_Pin, GPIO_PIN_RESET);
   Watchdog_EnterRuntime();    /* инициализация закончена: рабочий таймаут ~1,5 с */

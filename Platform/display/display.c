@@ -6,6 +6,8 @@
 
 #include "st7735.h"
 #include "font_ascii.h"
+#include "splash_logo.h"   /* логотип заставки (tools/gen_splash_logo.py) */
+#include "version.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -39,6 +41,7 @@ extern SPI_HandleTypeDef hspi4;
 static ST7735_Object_t st7735;
 static ST7735_Ctx_t st7735_ctx;
 static bool display_ready = false;   /* true только после успешной инициализации */
+static bool splash_active = false;   /* заставка на экране: Display_Task() не рисует интерфейс поверх неё */
 
 /* ------------------------------------------------------------------------- */
 /* Layout / palette                                                          */
@@ -76,6 +79,13 @@ static bool display_ready = false;   /* true только после успеш�
 #define C_RED       RGB565(225,  45,  45)
 #define C_GREEN     RGB565( 40, 220,  80)
 #define C_YELLOW    RGB565(240, 210,  40)
+
+/* Заставка (логотип слева, версия справа). Логотип - SPLASH_LOGO_W x SPLASH_LOGO_H, цвет фона задан генератором. */
+#define C_SPLASH_BG    RGB565(SPLASH_BG_R, SPLASH_BG_G, SPLASH_BG_B)
+#define C_SPLASH_TEXT  RGB565( 24,  24,  24)
+#define SPLASH_LOGO_X  6U
+#define SPLASH_LOGO_Y  ((DISPLAY_HEIGHT - SPLASH_LOGO_H) / 2U)
+#define SPLASH_TEXT_X0 (SPLASH_LOGO_X + SPLASH_LOGO_W + 4U)   /* правая область: от логотипа до края экрана */
 
 /* Поля, которые можно перерисовать независимо */
 #define F_HEADER    (1U << 0)
@@ -677,6 +687,85 @@ static bool Draw_NextField(void)
 }
 
 /* ------------------------------------------------------------------------- */
+/* Splash screen                                                             */
+/* ------------------------------------------------------------------------- */
+
+/* Одна горизонтальная полоса заставки (canvas вмещает до CANVAS_MAX_H строк): логотип, версия и четыре цветные
+ * "клавиши" под ней (цвета клавиш логотипа). y0 - первая строка полосы на экране. */
+static void Splash_DrawStrip(uint16_t y0, uint16_t h, const char *text, uint8_t font,
+                             int text_x, int text_y)
+{
+    static const uint16_t key_colors[4] =
+    {
+        RGB565(255, 107, 157), RGB565(255, 184,  77), RGB565( 77, 214, 166), RGB565(110, 142, 255)
+    };
+
+    Canvas_Begin(DISPLAY_WIDTH, h, C_SPLASH_BG);
+
+    for (uint16_t row = 0; row < h; row++)
+    {
+        const int ly = (int)(y0 + row) - (int)SPLASH_LOGO_Y;
+        if (ly < 0 || ly >= (int)SPLASH_LOGO_H) { continue; }
+
+        const uint16_t *src = &splash_logo[(uint32_t)ly * SPLASH_LOGO_W];
+        uint16_t       *dst = &canvas[(uint32_t)row * DISPLAY_WIDTH + SPLASH_LOGO_X];
+        for (uint16_t x = 0; x < SPLASH_LOGO_W; x++)
+        {
+            dst[x] = Swap16(src[x]);
+        }
+    }
+
+    Canvas_Text(text_x, text_y - (int)y0, text, font, 1, C_SPLASH_TEXT);
+    for (int i = 0; i < 4; i++)
+    {
+        Canvas_Rect(text_x + 12 * i, text_y + (int)font + 4 - (int)y0, 10, 4, key_colors[i]);
+    }
+
+    Canvas_Flush(0, y0);
+}
+
+void Display_ShowSplash(void)
+{
+    splash_active = true;
+    if (!display_ready) { return; }
+
+    char text[16];
+    snprintf(text, sizeof(text), "v%s", PURRMIDI_VERSION_STRING);
+
+    /* Версия крупным шрифтом (8 px на символ); длинная (например, "v1.0.3-dev") - мелким (6 px), чтобы поместиться */
+    const int avail = (int)DISPLAY_WIDTH - (int)SPLASH_TEXT_X0 - 4;
+    uint8_t   font  = 16U;
+    int       width = (int)strlen(text) * (font / 2);
+    if (width > avail)
+    {
+        font  = 12U;
+        width = (int)strlen(text) * (font / 2);
+    }
+    const int text_x = (int)SPLASH_TEXT_X0 + (avail - width) / 2;
+    const int text_y = ((int)DISPLAY_HEIGHT - ((int)font + 8)) / 2;   /* текст + зазор + полоска клавиш */
+
+    for (uint16_t y0 = 0; y0 < DISPLAY_HEIGHT; y0 += CANVAS_MAX_H)
+    {
+        const uint16_t h = (DISPLAY_HEIGHT - y0 < CANVAS_MAX_H) ? (uint16_t)(DISPLAY_HEIGHT - y0) : CANVAS_MAX_H;
+        Splash_DrawStrip(y0, h, text, font, text_x, text_y);
+    }
+}
+
+void Display_EndSplash(void)
+{
+    splash_active = false;
+    if (!display_ready) { return; }
+
+    Display_WaitIdle();
+    ST7735_FillRect(&st7735, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, C_BLACK);
+
+    /* Интерфейс рисуется сразу целиком, без ожидания Display_Task() */
+    MarkDirty(F_ALL);
+    while (Draw_NextField()) { }
+    ui.last_draw_tick = HAL_GetTick();
+}
+
+/* ------------------------------------------------------------------------- */
 /* Public API: lifecycle                                                     */
 /* ------------------------------------------------------------------------- */
 
@@ -708,9 +797,10 @@ void Display_Init(void)
     /* Единственная полная очистка экрана, дальше поля перекрывают друг друга сами */
     ST7735_FillRect(&st7735, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, C_BLACK);
 
-    /* Первая отрисовка - синхронно, без ограничения по частоте */
+    /* Вместо интерфейса при включении - заставка с логотипом и версией (main.c убирает её через Display_EndSplash()).
+     * Поля интерфейса помечены грязными (F_ALL) и нарисуются при её снятии. */
     MarkDirty(F_ALL);
-    while (Draw_NextField()) { }
+    Display_ShowSplash();
     ui.last_draw_tick = HAL_GetTick();
 
     ST7735_DisplayOn(&st7735);
@@ -741,7 +831,7 @@ void Display_EndBootProgress(void)
 
 void Display_Task(void)
 {
-    if (!display_ready) { return; }
+    if (!display_ready || splash_active) { return; }
 
     const uint32_t now = HAL_GetTick();
 

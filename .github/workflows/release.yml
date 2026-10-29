@@ -42,6 +42,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check tag matches firmware version
+        run: |
+          # Номер на заставке прибора берётся из Core/Inc/version.h; тег v1.2.3 (или v1.2.3-rc1) должен ему соответствовать.
+          field() { sed -n "s/^#define PURRMIDI_VERSION_$1[[:space:]]*\([0-9][0-9]*\).*/\1/p" Core/Inc/version.h; }
+          fw="$(field MAJOR).$(field MINOR).$(field PATCH)"
+          tag_ver="$(printf '%s' "${TAG#v}" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || true)"
+          echo "tag: $TAG, version.h: $fw"
+          if [ "$tag_ver" != "$fw" ]; then
+            echo "::error::Тег $TAG не совпадает с версией $fw в Core/Inc/version.h. Поднимите номер в version.h и пересоздайте тег."
+            exit 1
+          fi
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
