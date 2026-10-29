@@ -151,6 +151,10 @@ int _write(int file, char *ptr, int len) {
 }
 
 /* Обработка кнопки K1 (PC13) с неблокирующим программным дребезгом (50 ms) */
+/* K1 был зажат в момент включения питания (опрашивается один раз в начале main, см. Boot_SampleK1). Включает приветственную
+ * мелодию; пока кнопку не отпустят, Button_K1_Process() её игнорирует, иначе удержание переключило бы инструмент. */
+static bool k1_held_at_boot = false;
+
 static void Button_K1_Process(void)
 {
     static bool button_debounced_state = false;
@@ -159,6 +163,12 @@ static void Button_K1_Process(void)
 
     bool raw_state = (HAL_GPIO_ReadPin(USER_KEY_K1_GPIO_Port, USER_KEY_K1_Pin) == GPIO_PIN_SET);
     uint32_t now = HAL_GetTick();
+
+    if (k1_held_at_boot)
+    {
+        if (!raw_state) { k1_held_at_boot = false; }   /* отпустили: дальше обычная работа */
+        return;
+    }
 
     if (raw_state != button_last_raw)
     {
@@ -251,36 +261,89 @@ static void Settings_Restore(void)
 }
 
 /* ---- Приветствие при включении ----
- * Заставка (логотип + версия) на ~0,5 с и короткий аккорд Cmaj7 (до-ми-соль-си, мягкий "перебор" снизу вверх).
- * Запускается в конце инициализации, когда уже идёт вывод звука: аккорд сразу показывает, что ЦАП и перемычки
- * в порядке, ещё до подключения клавиатуры. Звучит текущим инструментом с сохранённой громкостью. Ноты подаются
- * прямо в синтезатор (минуя очередь MIDI), поэтому не попадают на экран как сыгранный аккорд. */
-#define GREETING_DURATION_MS   500U   /* сколько держится заставка; в конце ноты отпускаются */
-#define GREETING_STRUM_MS       30U   /* задержка между нотами аккорда */
-#define GREETING_VELOCITY       80U
+ * Заставка (логотип + версия) всегда держится не меньше GREETING_MIN_SPLASH_MS. Если прибор включён с зажатой кнопкой K1,
+ * на заставке звучит приветственная мелодия (аккорды Am, Dm/A, G, C/G, F, Bdim/F, E, Am/E), и заставка остаётся,
+ * пока она не закончится. Без K1 при запуске тишина. Мелодия сразу показывает, что ЦАП и перемычки в порядке, ещё до
+ * подключения клавиатуры. Звучит текущим инструментом с сохранённой громкостью. Ноты подаются прямо в синтезатор
+ * (минуя очередь MIDI), поэтому не попадают на экран как сыгранный аккорд. */
+#define GREETING_MIN_SPLASH_MS 1000U  /* минимальное время заставки (и без мелодии) */
+#define GREETING_CHORD_MS       200U  /* длительность каждого аккорда, кроме последнего */
+#define GREETING_LAST_CHORD_MS  500U  /* последний аккорд звучит дольше */
+#define GREETING_STRUM_MS        15U  /* задержка между нотами аккорда (мягкий "перебор" снизу вверх) */
+#define GREETING_VELOCITY        80U
+
+typedef struct { uint8_t count; uint8_t notes[4]; } GreetingChord;   /* первая нота - бас */
+
+static const GreetingChord greeting_melody[] =
+{
+    { 4U, { 45U, 57U, 60U, 64U } },   /* Am    : A2 | A3 C4 E4  */
+    { 4U, { 45U, 57U, 62U, 65U } },   /* Dm/A  : A2 | A3 D4 F4  */
+    { 4U, { 43U, 55U, 59U, 62U } },   /* G     : G2 | G3 B3 D4  */
+    { 4U, { 43U, 55U, 60U, 64U } },   /* C/G   : G2 | G3 C4 E4  */
+    { 4U, { 41U, 57U, 60U, 65U } },   /* F     : F2 | A3 C4 F4  */
+    { 4U, { 41U, 53U, 59U, 62U } },   /* Bdim/F: F2 | F3 B3 D4  */
+    { 4U, { 40U, 56U, 59U, 64U } },   /* E     : E2 | G#3 B3 E4 */
+    { 4U, { 40U, 57U, 60U, 64U } },   /* Am/E  : E2 | A3 C4 E4  */
+};
+#define GREETING_CHORDS ((uint32_t)(sizeof(greeting_melody) / sizeof(greeting_melody[0])))
+
+static void Boot_SampleK1(void)
+{
+    /* Кнопка активна высоким уровнем (как в Button_K1_Process). Дважды с паузой: отсекает случайный всплеск. */
+    const bool first = (HAL_GPIO_ReadPin(USER_KEY_K1_GPIO_Port, USER_KEY_K1_Pin) == GPIO_PIN_SET);
+    HAL_Delay(10U);
+    const bool second = (HAL_GPIO_ReadPin(USER_KEY_K1_GPIO_Port, USER_KEY_K1_Pin) == GPIO_PIN_SET);
+    k1_held_at_boot = first && second;
+}
+
+static void Greeting_ReleaseChord(uint32_t index, uint32_t sounded)
+{
+    for (uint32_t i = 0U; i < sounded; i++)
+    {
+        SynthEngine_NoteOff(greeting_melody[index].notes[i]);
+    }
+}
 
 static void Startup_Greeting(void)
 {
-    static const uint8_t notes[] = { 60U, 64U, 67U, 71U };
-    const uint32_t count = (uint32_t)(sizeof(notes) / sizeof(notes[0]));
+    const bool melody = k1_held_at_boot;
+    const uint32_t total_ms = melody ? ((GREETING_CHORDS - 1U) * GREETING_CHORD_MS + GREETING_LAST_CHORD_MS)
+                                     : GREETING_MIN_SPLASH_MS;
 
     Display_ShowSplash();    /* заставка могла быть закрыта экраном прогресса SoundFont: рисуем заново */
 
     const uint32_t t0 = HAL_GetTick();
-    uint32_t next = 0U;
-    while ((HAL_GetTick() - t0) < GREETING_DURATION_MS)
+    uint32_t chord = 0U;          /* текущий аккорд мелодии */
+    uint32_t sounded = 0U;        /* сколько нот текущего аккорда уже взято */
+    uint32_t elapsed;
+
+    while ((elapsed = HAL_GetTick() - t0) < total_ms)
     {
-        if (next < count && (HAL_GetTick() - t0) >= next * GREETING_STRUM_MS)
+        if (melody)
         {
-            SynthEngine_NoteOn(notes[next], (uint8_t)GREETING_VELOCITY);
-            next++;
+            uint32_t want = elapsed / GREETING_CHORD_MS;
+            if (want >= GREETING_CHORDS) { want = GREETING_CHORDS - 1U; }
+
+            if (want != chord)    /* смена аккорда: отпускаем прежний */
+            {
+                Greeting_ReleaseChord(chord, sounded);
+                chord = want;
+                sounded = 0U;
+            }
+
+            const uint32_t into_chord = elapsed - chord * GREETING_CHORD_MS;
+            while (sounded < greeting_melody[chord].count && into_chord >= sounded * GREETING_STRUM_MS)
+            {
+                SynthEngine_NoteOn(greeting_melody[chord].notes[sounded], (uint8_t)GREETING_VELOCITY);
+                sounded++;
+            }
         }
-        Watchdog_Kick();     /* загрузочный таймаут ~8 с: ждать 0,5 с безопасно, но кормим для единообразия */
+        Watchdog_Kick();     /* загрузочный таймаут ~8 с: ожидание безопасно, но кормим для единообразия */
     }
 
-    for (uint32_t i = 0U; i < next; i++)
+    if (melody)
     {
-        SynthEngine_NoteOff(notes[i]);
+        Greeting_ReleaseChord(chord, sounded);
     }
     Display_EndSplash();     /* убирает заставку и рисует обычный экран */
 }
@@ -336,6 +399,11 @@ int main(void)
   MX_QUADSPI_Init();
   /* USER CODE BEGIN 2 */
   printf("\r\n[SYS] PurrMIDI firmware v%s\r\n", PURRMIDI_VERSION_STRING);
+  Boot_SampleK1();
+  if (k1_held_at_boot)
+  {
+    printf("[SYS] K1 held at power-on: greeting melody enabled\r\n");
+  }
   Backup_Init();                                  /* резервные регистры RTC (VBAT); без батарейки - пустой блок */
   Backup_NoteReset(Watchdog_GetResetFlags());
   Watchdog_ReportResetCause();
@@ -390,7 +458,7 @@ int main(void)
   {
     Error_Handler();
   }
-  Startup_Greeting();     /* заставка + приветственный аккорд (~0,5 с) */
+  Startup_Greeting();     /* заставка (>= 1 с); с зажатой при включении K1 - ещё и мелодия */
   Watchdog_Kick();
   printf("Waiting for USB device to be attached...\r\n");
   HAL_GPIO_WritePin(DEBUG_LED_GPIO_Port, DEBUG_LED_Pin, GPIO_PIN_RESET);
