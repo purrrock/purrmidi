@@ -4,6 +4,8 @@
 
 # PurrMidi
 
+https://purrrock.github.io/purrmidi/
+
 [Русская версия: README_RU.md](README_RU.md)
 
 > **Note:** the technical documentation in `docs/` and the code comments are written in Russian only.

@@ -4,6 +4,8 @@
 
 # PurrMidi
 
+https://purrrock.github.io/purrmidi/
+
 [English version](README.md)
 
 **PurrMidi** — автономный MIDI-синтезатор на базе STM32: подключаете USB MIDI-клавиатуру, звук генерирует микроконтроллер и выводит его через аудио ЦАП.
