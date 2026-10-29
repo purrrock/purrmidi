@@ -87,6 +87,14 @@ h2 + p.sub { color: var(--ink-soft); margin: 0 0 24px; }
 }
 .card.part a.pic { display: block; }
 
+/* Фото сборки */
+figure.photo { margin: 0; }
+figure.photo img {
+  display: block; width: 100%; height: auto;
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+figure.photo figcaption { margin-top: 10px; text-align: center; color: var(--ink-soft); font-size: .92rem; }
+
 /* Место под фото и видео */
 .media {
   display: grid; place-items: center; min-height: 220px;
