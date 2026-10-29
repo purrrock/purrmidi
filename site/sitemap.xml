@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://purrrock.github.io/purrmidi/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://purrrock.github.io/purrmidi/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://purrrock.github.io/purrmidi/ru/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://purrrock.github.io/purrmidi/"/>
+    <lastmod>2026-10-29</lastmod>
+  </url>
+  <url>
+    <loc>https://purrrock.github.io/purrmidi/ru/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://purrrock.github.io/purrmidi/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://purrrock.github.io/purrmidi/ru/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://purrrock.github.io/purrmidi/"/>
+    <lastmod>2026-10-29</lastmod>
+  </url>
+  <url>
+    <loc>https://purrrock.github.io/purrmidi/demo/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://purrrock.github.io/purrmidi/demo/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://purrrock.github.io/purrmidi/ru/demo/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://purrrock.github.io/purrmidi/demo/"/>
+    <lastmod>2026-10-29</lastmod>
+  </url>
+  <url>
+    <loc>https://purrrock.github.io/purrmidi/ru/demo/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://purrrock.github.io/purrmidi/demo/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://purrrock.github.io/purrmidi/ru/demo/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://purrrock.github.io/purrmidi/demo/"/>
+    <lastmod>2026-10-29</lastmod>
+  </url>
+  <url>
+    <loc>https://purrrock.github.io/purrmidi/sf2/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://purrrock.github.io/purrmidi/sf2/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://purrrock.github.io/purrmidi/ru/sf2/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://purrrock.github.io/purrmidi/sf2/"/>
+    <lastmod>2026-10-29</lastmod>
+  </url>
+  <url>
+    <loc>https://purrrock.github.io/purrmidi/ru/sf2/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://purrrock.github.io/purrmidi/sf2/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://purrrock.github.io/purrmidi/ru/sf2/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://purrrock.github.io/purrmidi/sf2/"/>
+    <lastmod>2026-10-29</lastmod>
+  </url>
+</urlset>
