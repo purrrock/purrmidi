@@ -30,6 +30,7 @@ Connections and pinout: [docs/HARDWARE.md](docs/HARDWARE.md) (in Russian).
 
 **Connecting.** Plug the USB MIDI keyboard into the board's USB OTG connector (the device works as a USB Host) and connect the PCM5102A audio output to an amplifier or headphones. Power it on: the E-Piano starts.
 If the board is powered through the same USB connector that the MIDI keyboard uses (yes, this is possible!), you will need a Y-splitter cable.
+By default, the device is silent upon startup. To test the sound (DAC, jumpers, headphones, or amplifier), **turn on the device while holding down the K1 button**: a short welcome melody will play.
 
 **Selecting an instrument.** Use a Program Change message from the MIDI keyboard or the **K1** button on the board.
 
@@ -88,8 +89,9 @@ cmake --build --preset Release
 
 ### Flashing the board
 
-Prebuilt `purrmidi.elf`, `.bin` and `.hex` are available as the CI artifact `purrmidi-stm32h743-firmware`. Flash through an ST-Link:
-STM32CubeProgrammer with `purrmidi.bin` at `0x08000000`.
+Prebuilt `purrmidi.elf` are available as the CI artifact `purrmidi-stm32h743-firmware`. Flash through STM32CubeProgrammer.
+
+No programmer and no software to install: the [web flasher](https://purrrock.github.io/purrmidi/flash/) writes the firmware over the board's USB bootloader (DFU) straight from a Chromium-based browser (WebUSB). Step-by-step manual with STM32CubeProgrammer: [docs/FLASHING.md](docs/FLASHING.md) (Russian).
 
 ### Windows version
 

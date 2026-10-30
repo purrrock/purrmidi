@@ -53,6 +53,21 @@ jobs:
       - name: Compare JS port with sf2_shrink.py
         run: node tests/web/sf2_parity.mjs
 
+  web-flasher:
+    name: Web flasher (DfuSe protocol, ELF parser)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # site/flash/*.js против эмулятора USB-загрузчика STM32 (tests/web/fake_bootloader.mjs).
+      - name: Test DFU protocol and ELF parsing
+        run: node tests/web/dfuse_test.mjs
+
   host-tests-sanitizers:
     name: Host tests (ASan + UBSan)
     runs-on: ubuntu-latest
@@ -153,6 +168,15 @@ jobs:
           arm-none-eabi-objcopy -O binary build/Release/purrmidi.elf build/Release/purrmidi.bin
           arm-none-eabi-objcopy -O ihex build/Release/purrmidi.elf build/Release/purrmidi.hex
           ls -l build/Release/purrmidi.elf build/Release/purrmidi.bin build/Release/purrmidi.hex
+
+      # Образ, который соберёт веб-прошивальщик из настоящего ELF, должен совпасть с objcopy (кроме зазоров: там 0xFF)
+      # и без ошибок пройти через эмулятор загрузчика.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Web flasher accepts the real firmware ELF
+        run: node tests/web/dfuse_test.mjs build/Release/purrmidi.elf build/Release/purrmidi.bin
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4

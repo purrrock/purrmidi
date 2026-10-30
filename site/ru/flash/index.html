@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Веб-прошивальщик PurrMIDI: прошивка платы из браузера</title>
+<meta name="description" content="Прошейте PurrMIDI в плату WeAct STM32H743 по USB прямо из браузера (WebUSB DFU). Ничего устанавливать не нужно, файл не покидает ваш компьютер.">
+<link rel="icon" href="../../logo.png">
+<link rel="canonical" href="https://purrrock.github.io/purrmidi/ru/flash/">
+<link rel="alternate" hreflang="en" href="https://purrrock.github.io/purrmidi/flash/">
+<link rel="alternate" hreflang="ru" href="https://purrrock.github.io/purrmidi/ru/flash/">
+<link rel="alternate" hreflang="x-default" href="https://purrrock.github.io/purrmidi/flash/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="PurrMIDI">
+<meta property="og:title" content="Веб-прошивальщик PurrMIDI">
+<meta property="og:description" content="Прошейте PurrMIDI в плату WeAct STM32H743 по USB прямо из браузера (WebUSB DFU). Ничего устанавливать не нужно, файл не покидает ваш компьютер.">
+<meta property="og:url" content="https://purrrock.github.io/purrmidi/ru/flash/">
+<meta property="og:image" content="https://purrrock.github.io/purrmidi/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="PurrMIDI logo: a cat behind piano keys">
+<meta property="og:locale" content="ru_RU">
+<meta property="og:locale:alternate" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Веб-прошивальщик PurrMIDI">
+<meta name="twitter:description" content="Прошейте PurrMIDI в плату WeAct STM32H743 по USB прямо из браузера (WebUSB DFU). Ничего устанавливать не нужно, файл не покидает ваш компьютер.">
+<meta name="twitter:image" content="https://purrrock.github.io/purrmidi/og-image.png">
+<script type="application/ld+json">[{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "PurrMIDI", "item": "https://purrrock.github.io/purrmidi/ru/"}, {"@type": "ListItem", "position": 2, "name": "Веб-прошивальщик PurrMIDI", "item": "https://purrrock.github.io/purrmidi/ru/flash/"}]}]</script>
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../sf2/tool.css">
+<link rel="stylesheet" href="../../flash/flash.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="../">PurrMIDI</a>
+    <nav>
+      <a href="../">Главная</a>
+      <a href="#requirements">Требования</a>
+      <a href="#trouble">Если не работает</a>
+    </nav>
+    <a class="lang" href="../../flash/">EN</a>
+  </div>
+  <div class="keys"><i></i><i></i><i></i><i></i></div>
+</header>
+
+<main class="flash">
+<section>
+  <div class="wrap">
+    <h1 style="font-size:clamp(1.8rem,5vw,2.4rem);line-height:1.2;margin:0 0 10px">Веб-прошивальщик</h1>
+    <p class="sub" style="color:var(--ink-soft);margin:0 0 24px;max-width:700px">Прошейте PurrMIDI в плату <strong>WeAct STM32H743 Mini</strong> по USB прямо из браузера: без STM32CubeProgrammer и ST-Link. Файл прошивки читается и записывается локально и никуда не загружается.</p>
+
+    <div class="errbox unsupported" id="unsupported" hidden role="alert"></div>
+
+    <div class="tool">
+      <div class="step">
+        <h2><i>1</i> Выберите прошивку</h2>
+        <div class="src">
+          <label class="pick" id="latest-row" hidden>
+            <input type="radio" name="src" id="src-latest" value="latest">
+            <span id="lbl-latest"></span>
+          </label>
+          <label class="pick">
+            <input type="radio" name="src" id="src-file" value="file" checked>
+            <span>Свой файл (<code>.elf</code> или <code>.bin</code>)<br>
+              <input type="file" id="file" accept=".elf,.bin,application/octet-stream"></span>
+          </label>
+        </div>
+        <label class="addr-row" id="addr-row" for="addr" hidden>Начальный адрес для сырого файла .bin
+          <input type="text" id="addr" value="0x08000000" inputmode="text" autocomplete="off" spellcheck="false">
+        </label>
+        <p class="fw-info" id="fw-info" aria-live="polite"></p>
+        <div class="opts-line">
+          <label class="check"><input type="checkbox" id="opt-verify" checked><span>Прочитать flash обратно и сравнить с файлом (рекомендуется, добавляет несколько секунд).</span></label>
+          <label class="check"><input type="checkbox" id="opt-leave" checked><span>Запустить прошивку сразу после записи.</span></label>
+        </div>
+      </div>
+
+      <div class="step">
+        <h2><i>2</i> Переведите плату в режим загрузчика</h2>
+        <ol class="mini">
+          <li>Отключите от платы USB MIDI-клавиатуру и внешнее питание.</li>
+          <li>Зажмите кнопку <strong>B0</strong> (BOOT0): она средняя из трёх у верхнего края платы.</li>
+          <li>Подключите плату к компьютеру кабелем USB-C <strong>для передачи данных</strong>.</li>
+          <li>Отпустите B0. Дисплей остаётся тёмным.</li>
+        </ol>
+        <figure class="board"><img src="../../flash/stm32h7xx_keys.webp" width="260" alt="Плата WeAct STM32H743 Mini: кнопка B0 (BOOT0) между кнопками NR и K1"></figure>
+      </div>
+
+      <div class="step">
+        <h2><i>3</i> Прошейте</h2>
+        <div class="actions" style="margin-top:0">
+          <button type="button" class="btn" id="go" disabled>Подключиться и прошить</button>
+        </div>
+        <p class="small" style="margin:10px 0 0">Браузер попросит выбрать устройство: выберите <strong>STM32 BOOTLOADER</strong>. Не отключайте плату, пока не появится результат.</p>
+
+        <div class="progress" id="progress" hidden aria-live="polite">
+          <progress id="bar" max="1" value="0"></progress>
+          <p id="status"></p>
+        </div>
+        <details class="log-box" id="log-box" hidden>
+          <summary>Журнал</summary>
+          <pre id="log"></pre>
+        </details>
+        <div class="errbox" id="error" hidden role="alert"></div>
+        <div class="result" id="result" hidden aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="requirements" class="tint">
+  <div class="wrap">
+    <h2>Требования</h2>
+    <p class="sub">Прошивальщик использует <strong>WebUSB</strong>, он есть только в браузерах на Chromium: Chrome, Edge, Opera, Brave и других, на компьютере и на Android. Firefox и Safari его не поддерживают, там используйте <a href="https://github.com/purrrock/purrmidi/blob/main/docs/FLASHING.md">STM32CubeProgrammer</a>.</p>
+    <div class="req">
+      <div class="card">
+        <h3>Windows</h3>
+        <p>Chrome работает с USB-устройством только через драйвер <strong>WinUSB</strong>. Стандартный драйвер ST (он ставится вместе с STM32CubeProgrammer) ему мешает.</p>
+        <ul>
+          <li>Переведите плату в режим загрузчика.</li>
+          <li>Запустите <a href="https://zadig.akeo.ie/">Zadig</a>, в меню <em>Options → List All Devices</em> выберите <em>STM32 BOOTLOADER</em> (ID 0483 DF11).</li>
+          <li>В качестве нового драйвера укажите <em>WinUSB</em> и нажмите <em>Replace Driver</em>.</li>
+        </ul>
+        <p class="small" style="margin-top:8px">После этого STM32CubeProgrammer не увидит плату, пока вы не вернёте драйвер в диспетчере устройств (<em>Откатить драйвер</em> либо удалить устройство вместе с драйвером и переподключить плату).</p>
+      </div>
+      <div class="card">
+        <h3>Linux</h3>
+        <p>Браузеру нужно разрешение открывать устройство. Создайте файл <code>/etc/udev/rules.d/50-stm32-dfu.rules</code>:</p>
+<pre>SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="df11", MODE="0660", TAG+="uaccess"</pre>
+        <p class="small" style="margin-top:8px">Затем выполните <code>sudo udevadm control --reload-rules</code> и снова подключите плату в режиме загрузчика.</p>
+      </div>
+      <div class="card">
+        <h3>macOS, ChromeOS, Android</h3>
+        <p>Драйверы не нужны. На Android понадобится OTG-переходник или кабель USB-C — USB-C и браузер Chrome.</p>
+        <p class="small" style="margin-top:8px">Страница должна открываться по HTTPS (этот сайт так и открывается).</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="trouble">
+  <div class="wrap">
+    <h2>Если не работает</h2>
+    <ul style="margin-top:14px;color:var(--ink-soft)">
+      <li><strong>Список устройств пуст.</strong> Плата не в режиме загрузчика: BOOT0 нужно держать <em>до и во время</em> подключения кабеля. Попробуйте также другой кабель (с передачей данных) и другой USB-порт.</li>
+      <li><strong>«Access denied» или браузер не может открыть устройство.</strong> В Windows установите драйвер WinUSB (см. выше), в Linux добавьте правило udev. Устройство может быть занято другой программой (STM32CubeProgrammer, dfu-util): закройте её.</li>
+      <li><strong>Связь пропала во время прошивки.</strong> Возьмите короткий кабель без хаба, снова войдите в режим загрузчика и повторите. Прерванная запись безопасна: загрузчик находится в ПЗУ микроконтроллера и затереть его нельзя, так что прошить можно всегда.</li>
+      <li><strong>После прошивки дисплей тёмный.</strong> Убедитесь, что BOOT0 отпущена, и нажмите NRST (см. <a href="https://github.com/purrrock/purrmidi/blob/main/docs/FLASHING.md">инструкцию</a>).</li>
+      <li>Остальное — в <a href="https://github.com/purrrock/purrmidi/blob/main/docs/FAQ.md">FAQ</a>. Если прошивальщик ведёт себя странно, создайте <a href="https://github.com/purrrock/purrmidi/issues/new/choose">Issue</a>: приложите журнал со страницы, браузер и систему.</li>
+    </ul>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="keys"><i></i><i></i><i></i><i></i></div>
+  <div class="wrap" style="padding-top:20px">
+    PurrMIDI — открытый проект под лицензией MIT ·
+    <a href="https://github.com/purrrock/purrmidi">GitHub</a> ·
+    <a href="https://github.com/purrrock/purrmidi/blob/main/ROADMAP.md">Планы развития</a> ·
+    <a href="https://github.com/purrrock/purrmidi/blob/main/docs/FLASHING.md">Инструкция по прошивке</a>
+  </div>
+</footer>
+
+<script type="module" src="../../flash/flasher.js"></script>
+</body>
+</html>

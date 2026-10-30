@@ -63,3 +63,6 @@ tests/data
 # Веб-демо: собирается в CI (Platform/web/build.sh); банки копируются при деплое
 site/demo/purrmidi.wasm
 site/demo/banks/
+
+# Веб-прошивальщик: последний релиз копируется при деплое (pages.yml)
+site/flash/firmware/

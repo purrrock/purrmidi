@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Web flasher for PurrMIDI: flash the firmware from your browser</title>
+<meta name="description" content="Flash PurrMIDI firmware onto a WeAct STM32H743 board over USB straight from the browser (WebUSB DFU). No programs to install, the file never leaves your computer.">
+<link rel="icon" href="../logo.png">
+<link rel="canonical" href="https://purrrock.github.io/purrmidi/flash/">
+<link rel="alternate" hreflang="en" href="https://purrrock.github.io/purrmidi/flash/">
+<link rel="alternate" hreflang="ru" href="https://purrrock.github.io/purrmidi/ru/flash/">
+<link rel="alternate" hreflang="x-default" href="https://purrrock.github.io/purrmidi/flash/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="PurrMIDI">
+<meta property="og:title" content="PurrMIDI web flasher">
+<meta property="og:description" content="Flash PurrMIDI firmware onto a WeAct STM32H743 board over USB straight from the browser (WebUSB DFU). No programs to install, the file never leaves your computer.">
+<meta property="og:url" content="https://purrrock.github.io/purrmidi/flash/">
+<meta property="og:image" content="https://purrrock.github.io/purrmidi/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="PurrMIDI logo: a cat behind piano keys">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="ru_RU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="PurrMIDI web flasher">
+<meta name="twitter:description" content="Flash PurrMIDI firmware onto a WeAct STM32H743 board over USB straight from the browser (WebUSB DFU). No programs to install, the file never leaves your computer.">
+<meta name="twitter:image" content="https://purrrock.github.io/purrmidi/og-image.png">
+<script type="application/ld+json">[{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "PurrMIDI", "item": "https://purrrock.github.io/purrmidi/"}, {"@type": "ListItem", "position": 2, "name": "PurrMIDI web flasher", "item": "https://purrrock.github.io/purrmidi/flash/"}]}]</script>
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="../sf2/tool.css">
+<link rel="stylesheet" href="../flash/flash.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="../">PurrMIDI</a>
+    <nav>
+      <a href="../">Home</a>
+      <a href="#requirements">Requirements</a>
+      <a href="#trouble">Troubleshooting</a>
+    </nav>
+    <a class="lang" href="../ru/flash/">RU</a>
+  </div>
+  <div class="keys"><i></i><i></i><i></i><i></i></div>
+</header>
+
+<main class="flash">
+<section>
+  <div class="wrap">
+    <h1 style="font-size:clamp(1.8rem,5vw,2.4rem);line-height:1.2;margin:0 0 10px">Web flasher</h1>
+    <p class="sub" style="color:var(--ink-soft);margin:0 0 24px;max-width:700px">Flash PurrMIDI onto a <strong>WeAct STM32H743 Mini</strong> over USB straight from the browser: no STM32CubeProgrammer, no ST-Link. The firmware file is read and written locally and is never uploaded anywhere.</p>
+
+    <div class="errbox unsupported" id="unsupported" hidden role="alert"></div>
+
+    <div class="tool">
+      <div class="step">
+        <h2><i>1</i> Choose the firmware</h2>
+        <div class="src">
+          <label class="pick" id="latest-row" hidden>
+            <input type="radio" name="src" id="src-latest" value="latest">
+            <span id="lbl-latest"></span>
+          </label>
+          <label class="pick">
+            <input type="radio" name="src" id="src-file" value="file" checked>
+            <span>My own file (<code>.elf</code> or <code>.bin</code>)<br>
+              <input type="file" id="file" accept=".elf,.bin,application/octet-stream"></span>
+          </label>
+        </div>
+        <label class="addr-row" id="addr-row" for="addr" hidden>Start address for a raw .bin file
+          <input type="text" id="addr" value="0x08000000" inputmode="text" autocomplete="off" spellcheck="false">
+        </label>
+        <p class="fw-info" id="fw-info" aria-live="polite"></p>
+        <div class="opts-line">
+          <label class="check"><input type="checkbox" id="opt-verify" checked><span>Read the flash back and compare it with the file (recommended, adds a few seconds).</span></label>
+          <label class="check"><input type="checkbox" id="opt-leave" checked><span>Start the firmware right after writing.</span></label>
+        </div>
+      </div>
+
+      <div class="step">
+        <h2><i>2</i> Put the board into bootloader mode</h2>
+        <ol class="mini">
+          <li>Unplug the USB MIDI keyboard and any other power from the board.</li>
+          <li>Hold the <strong>B0</strong> (BOOT0) button, the middle one of the three at the top edge.</li>
+          <li>Plug the board into the computer with a <strong>data</strong> USB-C cable.</li>
+          <li>Release B0. The display stays dark.</li>
+        </ol>
+        <figure class="board"><img src="stm32h7xx_keys.webp" width="260" alt="WeAct STM32H743 Mini board: the B0 (BOOT0) button between NR and K1"></figure>
+      </div>
+
+      <div class="step">
+        <h2><i>3</i> Flash</h2>
+        <div class="actions" style="margin-top:0">
+          <button type="button" class="btn" id="go" disabled>Connect and flash</button>
+        </div>
+        <p class="small" style="margin:10px 0 0">The browser will ask you to pick a device: choose <strong>STM32 BOOTLOADER</strong>. Do not unplug the board until the result appears.</p>
+
+        <div class="progress" id="progress" hidden aria-live="polite">
+          <progress id="bar" max="1" value="0"></progress>
+          <p id="status"></p>
+        </div>
+        <details class="log-box" id="log-box" hidden>
+          <summary>Log</summary>
+          <pre id="log"></pre>
+        </details>
+        <div class="errbox" id="error" hidden role="alert"></div>
+        <div class="result" id="result" hidden aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="requirements" class="tint">
+  <div class="wrap">
+    <h2>Requirements</h2>
+    <p class="sub">The flasher uses <strong>WebUSB</strong>, which exists only in Chromium-based browsers: Chrome, Edge, Opera, Brave and others, on desktop and on Android. Firefox and Safari do not support it; use <a href="https://github.com/purrrock/purrmidi/blob/main/docs/FLASHING.md">STM32CubeProgrammer</a> there.</p>
+    <div class="req">
+      <div class="card">
+        <h3>Windows</h3>
+        <p>Chrome can use a USB device only through the <strong>WinUSB</strong> driver. The standard ST driver (it is installed together with STM32CubeProgrammer) blocks it.</p>
+        <ul>
+          <li>Put the board into bootloader mode.</li>
+          <li>Run <a href="https://zadig.akeo.ie/">Zadig</a>, choose <em>Options → List All Devices</em> and select <em>STM32 BOOTLOADER</em> (ID 0483 DF11).</li>
+          <li>Pick <em>WinUSB</em> as the target driver and press <em>Replace Driver</em>.</li>
+        </ul>
+        <p class="small" style="margin-top:8px">After this STM32CubeProgrammer will not see the board until you roll the driver back in Device Manager (<em>Roll Back Driver</em> or <em>Uninstall device</em> with the driver, then replug).</p>
+      </div>
+      <div class="card">
+        <h3>Linux</h3>
+        <p>The browser needs permission to open the device. Create the file <code>/etc/udev/rules.d/50-stm32-dfu.rules</code>:</p>
+<pre>SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="df11", MODE="0660", TAG+="uaccess"</pre>
+        <p class="small" style="margin-top:8px">Then run <code>sudo udevadm control --reload-rules</code> and replug the board in bootloader mode.</p>
+      </div>
+      <div class="card">
+        <h3>macOS, ChromeOS, Android</h3>
+        <p>No drivers needed. On Android you need an OTG adapter or a USB-C to USB-C cable, and Chrome.</p>
+        <p class="small" style="margin-top:8px">The page must be opened over HTTPS (this site is).</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="trouble">
+  <div class="wrap">
+    <h2>Troubleshooting</h2>
+    <ul style="margin-top:14px;color:var(--ink-soft)">
+      <li><strong>The device list is empty.</strong> The board is not in bootloader mode: BOOT0 must be held <em>before and while</em> the cable is plugged in. Also try another cable (a data one) and another USB port.</li>
+      <li><strong>“Access denied” or the browser cannot open the device.</strong> On Windows install the WinUSB driver (see above); on Linux add the udev rule. Another program (STM32CubeProgrammer, dfu-util) may be holding the device: close it.</li>
+      <li><strong>Connection lost during flashing.</strong> Use a short cable without a hub, enter bootloader mode again and retry. An interrupted write is safe: the bootloader is in ROM and cannot be erased, so you can always flash again.</li>
+      <li><strong>Display is dark after flashing.</strong> Make sure BOOT0 is released and press NRST (see <a href="https://github.com/purrrock/purrmidi/blob/main/docs/FLASHING.md">the manual</a>).</li>
+      <li>Everything else is in the <a href="https://github.com/purrrock/purrmidi/blob/main/docs/FAQ.md">FAQ</a>. If the flasher misbehaves, open an <a href="https://github.com/purrrock/purrmidi/issues/new/choose">issue</a> with the log from the page and your browser and OS.</li>
+    </ul>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="keys"><i></i><i></i><i></i><i></i></div>
+  <div class="wrap" style="padding-top:20px">
+    PurrMIDI is open source under the MIT license ·
+    <a href="https://github.com/purrrock/purrmidi">GitHub</a> ·
+    <a href="https://github.com/purrrock/purrmidi/blob/main/ROADMAP.md">Roadmap</a> ·
+    <a href="https://github.com/purrrock/purrmidi/blob/main/docs/FLASHING.md">Flashing manual</a>
+  </div>
+</footer>
+
+<script type="module" src="flasher.js"></script>
+</body>
+</html>

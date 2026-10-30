@@ -45,6 +45,32 @@ jobs:
           bash Platform/web/build.sh
       - name: Smoke-test web demo
         run: node tests/web/wasm_smoke.mjs
+      # Веб-прошивальщик (site/flash): протокол DfuSe проверяется на эмуляторе загрузчика.
+      - name: Test web flasher (DFU protocol, ELF parser)
+        run: node tests/web/dfuse_test.mjs
+
+      # Веб-прошивальщик предлагает последний релиз. Файл кладётся рядом со страницей (тот же origin),
+      # потому что браузер не даст скачать вложение релиза с github.com из-за CORS.
+      # Релиза ещё нет - не ошибка: страница тогда принимает только файл пользователя.
+      - name: Fetch latest release firmware for the web flasher
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh api "repos/${{ github.repository }}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          if [ -z "$tag" ]; then
+            echo "::notice::Релизов пока нет: веб-прошивальщик примет только файл пользователя."
+            exit 0
+          fi
+          dir=site/flash/firmware
+          mkdir -p "$dir"
+          gh release download "$tag" --repo "${{ github.repository }}" --pattern purrmidi.elf --pattern SHA256SUMS --dir "$dir"
+          (cd "$dir" && grep ' purrmidi.elf$' SHA256SUMS | sha256sum -c -)
+          rm "$dir/SHA256SUMS"
+          printf '{"tag":"%s","file":"purrmidi.elf"}\n' "$tag" > "$dir/manifest.json"
+          cat "$dir/manifest.json"
+          ls -l "$dir"
+
       - name: Copy SoundFont banks for the demo
         run: |
           mkdir -p site/demo/banks

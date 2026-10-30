@@ -13,6 +13,8 @@
 
 Инструкция проверена на реальной плате (прошивка по USB DFU).
 
+> **Не хотите ставить программу?** Прошить плату можно прямо из браузера Chrome или Edge: [веб-прошивальщик](https://purrrock.github.io/purrmidi/ru/flash/). Плату нужно так же перевести в режим загрузчика (шаг 3 ниже). В Windows для него понадобится драйвер WinUSB, подробности на странице прошивальщика.
+
 ## 1. Скачайте прошивку
 
 На странице [Releases](https://github.com/purrrock/purrmidi/releases/latest) скачайте файл **`purrmidi.elf`**.
@@ -88,6 +90,7 @@
 
 Для тех, у кого есть опыт или программатор.
 
+* **Веб-прошивальщик (WebUSB).** [purrrock.github.io/purrmidi/ru/flash/](https://purrrock.github.io/purrmidi/ru/flash/): тот же USB-загрузчик, но из браузера на Chromium (Chrome, Edge, Opera, в том числе на Android). Принимает `purrmidi.elf` (адрес берёт из файла) и сырой `.bin` (адрес вводится вручную), сам стирает нужные сектора, записывает, сверяет и запускает прошивку. Код: `site/flash/`.
 * **ST-Link (SWD).** В STM32CubeProgrammer выберите подключение **ST-LINK**, откройте `purrmidi.elf` и загрузите его так же, как в шаге 4. BOOT0 при этом трогать не нужно.
 * **dfu-util.** Утилита принимает не `.elf`, а двоичный файл, поэтому понадобится `purrmidi.bin`. Его можно взять из артефактов CI (`purrmidi-stm32h743-firmware`) или получить командой `arm-none-eabi-objcopy -O binary purrmidi.elf purrmidi.bin`. Затем, когда плата в режиме загрузчика: `dfu-util -a 0 -s 0x08000000:leave -D purrmidi.bin`.
 * **OpenOCD.** См. `tools/openocd-run.cmd` в репозитории.

@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  actions: write   # запуск деплоя сайта после публикации (см. последний шаг)
 
 jobs:
   host-tests:
@@ -119,3 +120,10 @@ jobs:
             gh release create "$TAG" dist/purrmidi.elf dist/SNDFNT.SF2 dist/SHA256SUMS \
               --title "PurrMIDI $TAG" --notes-file notes.md --generate-notes --verify-tag $flags
           fi
+
+      # Событие release от GITHUB_TOKEN не запускает другие workflow, поэтому сайт пересобираем явно:
+      # веб-прошивальщик берёт последний релиз при деплое (pages.yml). Сбой здесь не отменяет релиз.
+      - name: Redeploy site (web flasher picks up the new release)
+        run: |
+          gh workflow run pages.yml --ref "${{ github.event.repository.default_branch }}" \
+            || echo "::warning::Не удалось запустить деплой сайта. Запустите workflow «Deploy site to GitHub Pages» вручную."

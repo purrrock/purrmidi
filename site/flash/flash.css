@@ -1,0 +1,52 @@
+/* Веб-прошивальщик. Подключается после ../style.css и ../sf2/tool.css. */
+
+.flash .tool { border-top-color: var(--blue); }
+.flash .step { margin: 0 0 26px; }
+.flash .step > h2 { font-size: 1.25rem; margin: 0 0 10px; display: flex; gap: 10px; align-items: center; }
+.flash .step > h2 i {
+  font-style: normal; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 1rem; background: var(--green);
+}
+.flash .step:nth-of-type(2) > h2 i { background: var(--orange); }
+.flash .step:nth-of-type(3) > h2 i { background: var(--blue); }
+
+.flash .src { display: grid; gap: 10px; }
+.flash .src label.pick {
+  display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px;
+  border: 1.5px solid var(--line); border-radius: 14px; background: #fff; cursor: pointer;
+}
+.flash .src label.pick:has(input:checked) { border-color: var(--blue-d); background: #f6f8ff; }
+.flash .src input[type=radio] { margin-top: 5px; width: 18px; height: 18px; accent-color: var(--pink-d); }
+.flash .src input[type=file] { font: inherit; max-width: 100%; margin-top: 6px; }
+.flash .src input[type=text] {
+  font: inherit; padding: 8px 12px; border: 1.5px solid var(--line); border-radius: 12px; width: 12rem; max-width: 100%;
+}
+.flash .src input:focus-visible { outline: 3px solid var(--blue-d); outline-offset: 2px; }
+.flash .fw-info { margin: 10px 0 0; color: var(--ink-soft); font-size: .95rem; min-height: 1.4em; overflow-wrap: anywhere; }
+.flash .addr-row { margin-top: 10px; display: grid; gap: 4px; font-weight: 600; }
+
+.flash .opts-line { display: grid; gap: 8px; margin-top: 14px; }
+.flash .opts-line .check { display: flex; gap: 10px; align-items: flex-start; }
+.flash .opts-line input { margin-top: 5px; width: 18px; height: 18px; accent-color: var(--pink-d); }
+
+.flash ol.mini { margin: 0; padding-left: 22px; }
+.flash ol.mini li { margin: 4px 0; }
+.flash figure.board { margin: 14px 0 0; text-align: center; }
+.flash figure.board img { width: 260px; max-width: 100%; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+
+.flash .log-box { margin-top: 14px; }
+.flash .log-box summary { cursor: pointer; color: var(--ink-soft); font-size: .92rem; }
+.flash pre#log {
+  margin: 8px 0 0; padding: 10px 12px; max-height: 220px; overflow: auto; font-size: .85rem; line-height: 1.45;
+  background: #fff; border: 1px solid var(--line); border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+.flash .unsupported { margin: 0 0 18px; border-left-color: var(--orange); }
+
+.flash .req { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 18px; }
+.flash .req .card p, .flash .req .card li { font-size: .95rem; }
+.flash .req pre {
+  margin: 8px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 12px;
+  font-size: .82rem; overflow-x: auto;
+}
+.flash .req ul { margin: 6px 0 0; padding-left: 20px; color: var(--ink-soft); }

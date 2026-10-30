@@ -47,4 +47,19 @@
     <xhtml:link rel="alternate" hreflang="x-default" href="https://purrrock.github.io/purrmidi/sf2/"/>
     <lastmod>2026-10-29</lastmod>
   </url>
+  
+  <url>
+    <loc>https://purrrock.github.io/purrmidi/flash/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://purrrock.github.io/purrmidi/flash/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://purrrock.github.io/purrmidi/ru/flash/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://purrrock.github.io/purrmidi/flash/"/>
+    <lastmod>2026-10-30</lastmod>
+  </url>
+  <url>
+    <loc>https://purrrock.github.io/purrmidi/ru/flash/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://purrrock.github.io/purrmidi/flash/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://purrrock.github.io/purrmidi/ru/flash/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://purrrock.github.io/purrmidi/flash/"/>
+    <lastmod>2026-10-30</lastmod>
+  </url>
 </urlset>
