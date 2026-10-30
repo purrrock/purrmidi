@@ -262,7 +262,7 @@ static void Settings_Restore(void)
 
 /* ---- Приветствие при включении ----
  * Заставка (логотип + версия) всегда держится не меньше GREETING_MIN_SPLASH_MS. Если прибор включён с зажатой кнопкой K1,
- * на заставке звучит приветственная мелодия (аккорды Am, Dm/A, G, C/G, F, Bdim/F, E, Am/E), и заставка остаётся,
+ * на заставке звучит приветственная мелодия, и заставка остаётся,
  * пока она не закончится. Без K1 при запуске тишина. Мелодия сразу показывает, что ЦАП и перемычки в порядке, ещё до
  * подключения клавиатуры. Звучит текущим инструментом с сохранённой громкостью. Ноты подаются прямо в синтезатор
  * (минуя очередь MIDI), поэтому не попадают на экран как сыгранный аккорд. */
@@ -426,9 +426,7 @@ int main(void)
   printf("[SYS] SYSCLK=%lu Hz, I-cache %s, audio budget %lu us per %u frames\r\n",
          (unsigned long)SystemCoreClock, ENABLE_ICACHE ? "ON" : "off",
          (unsigned long)(1000000UL * (AUDIO_BUFFER_FRAMES / 2U) / 48000UL), (unsigned)(AUDIO_BUFFER_FRAMES / 2U));
-  /* SoundFont-банк хранится только в QSPI Flash и читается через XIP. SD-карта нужна лишь здесь, при запуске:
-   * если на ней лежит новый/изменённый 0:/SNDFNT.SF2, он сначала переписывается во флеш (до ~минуты, прогресс на
-   * дисплее и в UART), после чего SD отключается. См. docs/SOUNDFONT.md. */
+  /* SoundFont-банк хранится только в QSPI Flash и читается через XIP. */
   printf("[SF2] Preparing SoundFont (QSPI XIP, SD is used only to update the bank)...\r\n");
   if (SoundFontSynth_InitSF2())
   {
@@ -480,8 +478,7 @@ int main(void)
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
-    /* ВАЖНО: весь пользовательский код цикла - только внутри USER CODE, иначе CubeMX удалит его при
-     * перегенерации (так пропадал watchdog_service() и сторожевой таймер перезапускал прошивку). */
+
     watchdog_service();
     Diag_Flush();                       /* сообщения, отложенные из прерываний (см. diag.h) */
     Settings_Service();                 /* отложенная запись выбора/громкости в резервные регистры RTC */
