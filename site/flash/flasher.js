@@ -59,7 +59,7 @@ const T = {
     e_empty_image: 'The file is empty.',
     e_unknown: (m) => `Unexpected error: ${m}`,
     os: {
-      win: 'On Windows Chrome can use the device only with the WinUSB driver: install it with Zadig for “STM32 BOOTLOADER” (see Requirements below).',
+      win: 'On Windows another program may be holding the device: disconnect the board in STM32CubeProgrammer or close it, then retry (see Requirements below).',
       linux: 'On Linux add the udev rule from the Requirements section below and replug the board.',
       other: 'Check the Requirements section below.',
     },
@@ -115,7 +115,7 @@ const T = {
     e_empty_image: 'Файл пуст.',
     e_unknown: (m) => `Непредвиденная ошибка: ${m}`,
     os: {
-      win: 'В Windows Chrome может работать с устройством только через драйвер WinUSB: установите его программой Zadig для «STM32 BOOTLOADER» (см. «Требования» ниже).',
+      win: 'В Windows устройство может быть занято другой программой: отключитесь от платы в STM32CubeProgrammer или закройте его и повторите (см. «Требования» ниже).',
       linux: 'В Linux добавьте правило udev из раздела «Требования» ниже и переподключите плату.',
       other: 'Посмотрите раздел «Требования» ниже.',
     },

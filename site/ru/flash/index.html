@@ -117,13 +117,9 @@
     <div class="req">
       <div class="card">
         <h3>Windows</h3>
-        <p>Chrome работает с USB-устройством только через драйвер <strong>WinUSB</strong>. Стандартный драйвер ST (он ставится вместе с STM32CubeProgrammer) ему мешает.</p>
-        <ul>
-          <li>Переведите плату в режим загрузчика.</li>
-          <li>Запустите <a href="https://zadig.akeo.ie/">Zadig</a>, в меню <em>Options → List All Devices</em> выберите <em>STM32 BOOTLOADER</em> (ID 0483 DF11) или <em>DFU in FS Mode</em>.</li>
-          <li>В качестве нового драйвера укажите <em>WinUSB</em> и нажмите <em>Replace Driver</em> (или <em>Upgrade Driver</em>).</li>
-        </ul>
-        <p class="small" style="margin-top:8px">После этого STM32CubeProgrammer не увидит плату, пока вы не вернёте драйвер в диспетчере устройств (<em>Откатить драйвер</em> либо удалить устройство вместе с драйвером и переподключить плату).</p>
+        <p>Драйверы и дополнительные программы не нужны: Windows сам назначает загрузчику драйвер WinUSB. Проверено на Windows в Chrome.</p>
+        <p class="small" style="margin-top:8px">STM32CubeProgrammer после веб-прошивки продолжает видеть плату, можно пользоваться любым из двух способов. Устройство может занимать только одна программа: если браузер пишет, что не может его открыть, отключитесь от платы в STM32CubeProgrammer (или закройте его).</p>
+        <p class="small" style="margin-top:8px">Если устройство всё равно не открывается, проверьте в <a href="https://zadig.akeo.ie/">Zadig</a> (<em>Options → List All Devices</em>, <em>DFU in FS Mode</em>, ID 0483 DF11), что установлен драйвер <em>WinUSB</em>; если нет, поставьте его оттуда.</p>
       </div>
       <div class="card">
         <h3>Linux</h3>
@@ -134,7 +130,7 @@
       <div class="card">
         <h3>macOS, ChromeOS, Android</h3>
         <p>Драйверы не нужны. На Android понадобится OTG-переходник или кабель USB-C — USB-C и браузер Chrome.</p>
-        <p class="small" style="margin-top:8px">Страница должна открываться по HTTPS (этот сайт так и открывается).</p>
+        <p class="small" style="margin-top:8px">Страница должна открываться по HTTPS (этот сайт так и открывается). На Linux, macOS и Android на настоящей плате пока не пробовали: сообщения приветствуются в <a href="https://github.com/purrrock/purrmidi/issues/new/choose">Issues</a>.</p>
       </div>
     </div>
   </div>
@@ -145,7 +141,7 @@
     <h2>Если не работает</h2>
     <ul style="margin-top:14px;color:var(--ink-soft)">
       <li><strong>Список устройств пуст.</strong> Плата не в режиме загрузчика: BOOT0 нужно держать <em>до и во время</em> подключения кабеля. Попробуйте также другой кабель (с передачей данных) и другой USB-порт.</li>
-      <li><strong>«Access denied» или браузер не может открыть устройство.</strong> В Windows установите драйвер WinUSB (см. выше), в Linux добавьте правило udev. Устройство может быть занято другой программой (STM32CubeProgrammer, dfu-util): закройте её.</li>
+      <li><strong>«Access denied» или браузер не может открыть устройство.</strong> Чаще всего устройство занято другой программой (STM32CubeProgrammer, dfu-util): отключитесь в ней или закройте её. В Linux добавьте правило udev (см. выше), в Windows — см. заметки выше.</li>
       <li><strong>Связь пропала во время прошивки.</strong> Возьмите короткий кабель без хаба, снова войдите в режим загрузчика и повторите. Прерванная запись безопасна: загрузчик находится в ПЗУ микроконтроллера и затереть его нельзя, так что прошить можно всегда.</li>
       <li><strong>После прошивки дисплей тёмный.</strong> Убедитесь, что BOOT0 отпущена, и нажмите NRST (см. <a href="https://github.com/purrrock/purrmidi/blob/main/docs/FLASHING.md">инструкцию</a>).</li>
       <li>Остальное — в <a href="https://github.com/purrrock/purrmidi/blob/main/docs/FAQ.md">FAQ</a>. Если прошивальщик ведёт себя странно, создайте <a href="https://github.com/purrrock/purrmidi/issues/new/choose">Issue</a>: приложите журнал со страницы, браузер и систему.</li>

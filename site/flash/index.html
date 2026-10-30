@@ -117,13 +117,9 @@
     <div class="req">
       <div class="card">
         <h3>Windows</h3>
-        <p>Chrome can use a USB device only through the <strong>WinUSB</strong> driver. The standard ST driver (it is installed together with STM32CubeProgrammer) blocks it.</p>
-        <ul>
-          <li>Put the board into bootloader mode.</li>
-          <li>Run <a href="https://zadig.akeo.ie/">Zadig</a>, choose <em>Options → List All Devices</em> and select <em>STM32 BOOTLOADER</em> (ID 0483 DF11) or <em>DFU in FS Mode</em> .</li>
-          <li>Pick <em>WinUSB</em> as the target driver and press <em>Replace Driver</em> (or <em>Upgrade Driver</em>).</li>
-        </ul>
-        <p class="small" style="margin-top:8px">After this STM32CubeProgrammer will not see the board until you roll the driver back in Device Manager (<em>Roll Back Driver</em> or <em>Uninstall device</em> with the driver, then replug).</p>
+        <p>No drivers or extra programs needed: Windows binds the WinUSB driver to the bootloader by itself. Tested on Windows with Chrome.</p>
+        <p class="small" style="margin-top:8px">STM32CubeProgrammer keeps working with the board after web flashing, so you can use either tool. Only one program can hold the device at a time: if the browser says it cannot open it, disconnect the board in STM32CubeProgrammer (or close it).</p>
+        <p class="small" style="margin-top:8px">If the device still cannot be opened, check in <a href="https://zadig.akeo.ie/">Zadig</a> (<em>Options → List All Devices</em>, <em>DFU in FS Mode</em>, ID 0483 DF11) that the driver is <em>WinUSB</em>; if it is not, install it from there.</p>
       </div>
       <div class="card">
         <h3>Linux</h3>
@@ -134,7 +130,7 @@
       <div class="card">
         <h3>macOS, ChromeOS, Android</h3>
         <p>No drivers needed. On Android you need an OTG adapter or a USB-C to USB-C cable, and Chrome.</p>
-        <p class="small" style="margin-top:8px">The page must be opened over HTTPS (this site is).</p>
+        <p class="small" style="margin-top:8px">The page must be opened over HTTPS (this site is). Linux, macOS and Android have not been tried on a real board yet: reports are welcome in <a href="https://github.com/purrrock/purrmidi/issues/new/choose">Issues</a>.</p>
       </div>
     </div>
   </div>
@@ -145,7 +141,7 @@
     <h2>Troubleshooting</h2>
     <ul style="margin-top:14px;color:var(--ink-soft)">
       <li><strong>The device list is empty.</strong> The board is not in bootloader mode: BOOT0 must be held <em>before and while</em> the cable is plugged in. Also try another cable (a data one) and another USB port.</li>
-      <li><strong>“Access denied” or the browser cannot open the device.</strong> On Windows install the WinUSB driver (see above); on Linux add the udev rule. Another program (STM32CubeProgrammer, dfu-util) may be holding the device: close it.</li>
+      <li><strong>“Access denied” or the browser cannot open the device.</strong> The most common cause is another program holding the device (STM32CubeProgrammer, dfu-util): disconnect or close it. On Linux add the udev rule (see above); on Windows see the notes above.</li>
       <li><strong>Connection lost during flashing.</strong> Use a short cable without a hub, enter bootloader mode again and retry. An interrupted write is safe: the bootloader is in ROM and cannot be erased, so you can always flash again.</li>
       <li><strong>Display is dark after flashing.</strong> Make sure BOOT0 is released and press NRST (see <a href="https://github.com/purrrock/purrmidi/blob/main/docs/FLASHING.md">the manual</a>).</li>
       <li>Everything else is in the <a href="https://github.com/purrrock/purrmidi/blob/main/docs/FAQ.md">FAQ</a>. If the flasher misbehaves, open an <a href="https://github.com/purrrock/purrmidi/issues/new/choose">issue</a> with the log from the page and your browser and OS.</li>
