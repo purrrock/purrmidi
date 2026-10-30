@@ -258,6 +258,20 @@ await test('WebUSB: выбор интерфейса, wTransferSize из деск
   assert.equal(res.verified, true);
   assert.deepEqual(boot.flash.subarray(0, img.length), img);
 
+  // имя интерфейса не пришло (undefined / пусто / нераспознано): запасной вариант - alt 0 как внутренняя flash
+  for (const bad of [undefined, '', '@что-то странное']) {
+    const mk = (name) => ({ ...usb, configuration: { interfaces: [{ interfaceNumber: 0, alternates: [
+      { alternateSetting: 0, interfaceClass: 0xfe, interfaceSubclass: 1, interfaceProtocol: 2, interfaceName: name },
+      { alternateSetting: 1, interfaceClass: 0xfe, interfaceSubclass: 1, interfaceProtocol: 2, interfaceName: name }] }] } });
+    const r = await openWebUsbDfu(mk(bad), FLASH_BASE, { sleep: noSleep });
+    assert.equal(r.assumed, true);
+    assert.equal(r.dfu.map.segments[0].end, 0x08200000);
+  }
+  // а если имя есть, но flash там нет, фолбэк не включается и в ошибке есть список интерфейсов
+  const ob = { ...usb, configuration: { interfaces: [{ interfaceNumber: 0, alternates: [
+    { alternateSetting: 0, interfaceClass: 0xfe, interfaceSubclass: 1, interfaceProtocol: 2, interfaceName: '@Option Bytes  /0x5200201C/01*128 e' }] }] } };
+  await assert.rejects(openWebUsbDfu(ob), (e) => e.code === 'no_flash_interface' && e.params.alts.length === 1 && /Option Bytes/.test(e.params.alts[0]));
+
   // устройство не в режиме загрузчика (протокол 1 = runtime) -> понятный код
   const rt = { ...usb, configuration: { interfaces: [{ interfaceNumber: 0, alternates: [{ alternateSetting: 0, interfaceClass: 0xfe, interfaceSubclass: 1, interfaceProtocol: 1, interfaceName: '' }] }] } };
   await assert.rejects(openWebUsbDfu(rt), { code: 'runtime_mode' });

@@ -120,8 +120,8 @@
         <p>Chrome can use a USB device only through the <strong>WinUSB</strong> driver. The standard ST driver (it is installed together with STM32CubeProgrammer) blocks it.</p>
         <ul>
           <li>Put the board into bootloader mode.</li>
-          <li>Run <a href="https://zadig.akeo.ie/">Zadig</a>, choose <em>Options → List All Devices</em> and select <em>STM32 BOOTLOADER</em> (ID 0483 DF11).</li>
-          <li>Pick <em>WinUSB</em> as the target driver and press <em>Replace Driver</em>.</li>
+          <li>Run <a href="https://zadig.akeo.ie/">Zadig</a>, choose <em>Options → List All Devices</em> and select <em>STM32 BOOTLOADER</em> (ID 0483 DF11) or <em>DFU in FS Mode</em> .</li>
+          <li>Pick <em>WinUSB</em> as the target driver and press <em>Replace Driver</em> (or <em>Upgrade Driver</em>).</li>
         </ul>
         <p class="small" style="margin-top:8px">After this STM32CubeProgrammer will not see the board until you roll the driver back in Device Manager (<em>Roll Back Driver</em> or <em>Uninstall device</em> with the driver, then replug).</p>
       </div>

@@ -73,6 +73,8 @@ export function findSegment(map, address) {
 
 // ---------------------------------------------------------------- устройство
 
+const H743_FALLBACK = '@Internal Flash  /0x08000000/16*128Kg';
+
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class DfuseDevice {
@@ -336,8 +338,11 @@ export async function openWebUsbDfu(usbDevice, targetAddress = FLASH_BASE, opts 
     if (usbDevice.configuration === null) await usbDevice.selectConfiguration(1);
     let runtime = false;
     let found = null;
+    let fallback = null;   // DFU-интерфейс alt 0 без читаемого имени
+    const seen = [];       // для журнала: что именно отдал браузер
     for (const iface of usbDevice.configuration.interfaces) {
       for (const alt of iface.alternates) {
+        seen.push(`${iface.interfaceNumber}.${alt.alternateSetting} class=${alt.interfaceClass}/${alt.interfaceSubclass}/${alt.interfaceProtocol} name=${JSON.stringify(alt.interfaceName)}`);
         if (alt.interfaceClass !== 0xfe || alt.interfaceSubclass !== 0x01) continue;
         if (alt.interfaceProtocol !== 0x02) { runtime = true; continue; }
         const map = parseMemoryDescriptor(alt.interfaceName);
@@ -345,16 +350,22 @@ export async function openWebUsbDfu(usbDevice, targetAddress = FLASH_BASE, opts 
           found = { iface: iface.interfaceNumber, alt: alt.alternateSetting, name: alt.interfaceName, map };
           break;
         }
+        if (!map && alt.alternateSetting === 0 && !fallback) fallback = { iface: iface.interfaceNumber, alt: 0 };
       }
       if (found) break;
     }
-    if (!found) throw new FlashError(runtime ? 'runtime_mode' : 'no_flash_interface');
+    // Имя интерфейса не пришло или не разобралось (бывает в Chrome/Windows). У системного загрузчика STM32
+    // alt 0 - всегда внутренняя flash, поэтому берём её со встроенной картой H743.
+    if (!found && fallback && targetAddress >= FLASH_BASE && targetAddress < FLASH_BASE + 0x200000) {
+      found = { ...fallback, name: H743_FALLBACK, map: parseMemoryDescriptor(H743_FALLBACK), assumed: true };
+    }
+    if (!found) throw new FlashError(runtime ? 'runtime_mode' : 'no_flash_interface', { alts: seen });
 
     await usbDevice.claimInterface(found.iface);
     await usbDevice.selectAlternateInterface(found.iface, found.alt);
     const ts = (await readTransferSize(usbDevice)) || 1024;
     const io = new WebUsbIo(usbDevice, found.iface);
-    return { dfu: new DfuseDevice(io, found.map, { transferSize: ts, ...opts }), usb: usbDevice, altName: found.name, transferSize: ts };
+    return { dfu: new DfuseDevice(io, found.map, { transferSize: ts, ...opts }), usb: usbDevice, altName: found.name, assumed: !!found.assumed, transferSize: ts };
   } catch (e) {
     try { await usbDevice.close(); } catch (e2) { /* игнорируем */ }
     throw e;

@@ -120,8 +120,8 @@
         <p>Chrome работает с USB-устройством только через драйвер <strong>WinUSB</strong>. Стандартный драйвер ST (он ставится вместе с STM32CubeProgrammer) ему мешает.</p>
         <ul>
           <li>Переведите плату в режим загрузчика.</li>
-          <li>Запустите <a href="https://zadig.akeo.ie/">Zadig</a>, в меню <em>Options → List All Devices</em> выберите <em>STM32 BOOTLOADER</em> (ID 0483 DF11).</li>
-          <li>В качестве нового драйвера укажите <em>WinUSB</em> и нажмите <em>Replace Driver</em>.</li>
+          <li>Запустите <a href="https://zadig.akeo.ie/">Zadig</a>, в меню <em>Options → List All Devices</em> выберите <em>STM32 BOOTLOADER</em> (ID 0483 DF11) или <em>DFU in FS Mode</em>.</li>
+          <li>В качестве нового драйвера укажите <em>WinUSB</em> и нажмите <em>Replace Driver</em> (или <em>Upgrade Driver</em>).</li>
         </ul>
         <p class="small" style="margin-top:8px">После этого STM32CubeProgrammer не увидит плату, пока вы не вернёте драйвер в диспетчере устройств (<em>Откатить драйвер</em> либо удалить устройство вместе с драйвером и переподключить плату).</p>
       </div>

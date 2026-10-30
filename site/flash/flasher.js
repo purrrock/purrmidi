@@ -25,6 +25,7 @@ const T = {
     p_erase: (d, t) => `Erasing flash: sector ${Math.min(d + 1, t)} of ${t}…`,
     p_write: (d, t) => `Writing: ${kb(d)} of ${kb(t)}`,
     p_verify: (d, t) => `Verifying: ${kb(d)} of ${kb(t)}`,
+    assumed: 'The browser did not report the interface name; assuming alt 0 = internal flash (as in the ST bootloader).',
     p_leave: () => 'Starting the firmware…',
     logErase: (n) => `Erased ${n} flash sector(s)`,
     logWrite: (n) => `Written ${kb(n)}`,
@@ -80,6 +81,7 @@ const T = {
     p_erase: (d, t) => `Стирание flash: сектор ${Math.min(d + 1, t)} из ${t}…`,
     p_write: (d, t) => `Запись: ${kb(d)} из ${kb(t)}`,
     p_verify: (d, t) => `Проверка: ${kb(d)} из ${kb(t)}`,
+    assumed: 'Браузер не передал имя интерфейса; считаю, что alt 0 — внутренняя flash (так устроен загрузчик ST).',
     p_leave: () => 'Запуск прошивки…',
     logErase: (n) => `Стёрто секторов flash: ${n}`,
     logWrite: (n) => `Записано ${kb(n)}`,
@@ -276,8 +278,9 @@ async function flash() {
   let warned = false;
   try {
     log(T.connected(usb.productName || 'STM32 BOOTLOADER'));
-    const { dfu, altName, transferSize } = await openWebUsbDfu(usb, fw.ranges[0].address);
+    const { dfu, altName, assumed, transferSize } = await openWebUsbDfu(usb, fw.ranges[0].address);
     log(T.opened(altName.trim(), transferSize));
+    if (assumed) log(T.assumed);
     stage = 'flash';
     const res = await dfu.flash(fw.ranges, {
       verify, leave,
@@ -300,6 +303,7 @@ async function flash() {
     else if (!isUsbError(e)) msg = T.e_unknown((e && e.message) || String(e));
     else if (stage === 'open') msg = T.e_usb_access((e && e.message) || String(e));
     else msg = T.e_usb_lost((e && e.message) || String(e));
+    if (e && e.params && e.params.alts) for (const a of e.params.alts) log('  ' + a);
     log('✗ ' + msg);
     setError(msg);
     text(el.status, '');
