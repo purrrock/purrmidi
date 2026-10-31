@@ -56,6 +56,52 @@ for (const [prog, name] of [[0, "E-Piano"], [1, "Pluck"], [2, "Lead"], [3, "Orga
   peakOf(50);
 }
 
+// Единое поведение движков: Pitch Bend, All Sound Off (CC120) и All Notes Off (CC123) во всех движках.
+function render(blocks) {
+  const out = [];
+  for (let b = 0; b < blocks; b++) out.push(...new Int16Array(mem.buffer, x.pm_render(128), 256));
+  return out;
+}
+const peak = (a) => a.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+for (const [prog, name] of [[0, "E-Piano"], [1, "Pluck"], [2, "Lead"], [3, "Organ"], [4, "Violin"]]) {
+  x.pm_select_program(prog);
+  x.pm_note_on(57, 100);
+  render(100);
+  const plain = render(40);
+  x.pm_panic();
+  x.pm_select_program(prog);
+  x.pm_note_on(57, 100);
+  render(100);
+  x.pm_pitch_bend(8191);
+  render(60);
+  const bent = render(40);
+  let diff = 0;
+  for (let i = 0; i < plain.length; i++) diff += Math.abs(plain[i] - bent[i]);
+  check(diff > plain.length * 50, `${name}: колесо высоты тона меняет звук`);
+  x.pm_pitch_bend(0);
+  x.pm_panic();
+
+  x.pm_select_program(prog);
+  x.pm_note_on(60, 110);
+  x.pm_note_on(64, 110);
+  const before = peak(render(200));
+  x.pm_cc(120, 0);
+  render(60);
+  const afterKill = peak(render(20));
+  check(before > 1000 && afterKill * 20 < before, `${name}: CC120 быстро гасит звук (${before} -> ${afterKill})`);
+  x.pm_panic();
+
+  x.pm_select_program(prog);
+  x.pm_note_on(60, 110);
+  x.pm_note_on(64, 110);
+  const before2 = peak(render(200));
+  x.pm_cc(123, 0);
+  render(1500);
+  const afterOff = peak(render(20));
+  check(afterOff * 20 < before2, `${name}: CC123 отпускает удерживаемые ноты (${before2} -> ${afterOff})`);
+  x.pm_panic();
+}
+
 x.pm_select_program(0);
 [60, 64, 67].forEach((n) => x.pm_note_on(n, 100));
 check(str(x.pm_chord()) === "C", `аккорд C распознан: «${str(x.pm_chord())}»`);

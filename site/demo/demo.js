@@ -109,23 +109,24 @@
     {
       name: "E-Piano", bend: true,
       desc: LANG === "en" ? "FM electric piano in the Rhodes style. Plays by default." : "FM-электропиано в духе Rhodes. Звучит по умолчанию.",
-      knobs: [K(74, "Яркость", "Brightness", 64), K(72, "Отпускание", "Release", 41)]
+      knobs: [K(74, "Яркость", "Brightness", 64), K(72, "Отпускание", "Release", 41),
+              K(1, "Мод-колесо (добавляет яркость)", "Mod wheel (adds brightness)", 0)]
     },
     {
-      name: "Pluck", bend: false,
+      name: "Pluck", bend: true,
       desc: LANG === "en" ? "Nylon-string guitar." : "Гитара с нейлоновыми струнами.",
       knobs: [K(74, "Яркость", "Brightness", 42), K(72, "Длительность затухания", "Decay", 97),
               K(1, "Мод-колесо (добавляет яркость)", "Mod wheel (adds brightness)", 0)]
     },
     {
-      name: "Lead", bend: false,
+      name: "Lead", bend: true,
       desc: LANG === "en" ? "Analog-style lead synth." : "Аналоговый синтезатор-лид.",
       knobs: [K(74, "Срез фильтра", "Filter cutoff", 32), K(71, "Резонанс", "Resonance", 42),
-              K(1, "Глубина огибающей фильтра", "Filter envelope depth", 51),
+              K(1, "Мод-колесо (глубже огибающая фильтра)", "Mod wheel (deeper filter envelope)", 0),
               K(73, "Атака", "Attack", 0), K(72, "Отпускание", "Release", 15)]
     },
     {
-      name: "Organ", bend: false,
+      name: "Organ", bend: true,
       desc: LANG === "en" ? "Tonewheel organ." : "Тонколесный орган.",
       groups: true,
       knobs: [
@@ -135,6 +136,7 @@
         K(26, "1⅗′", "1⅗′", 127, { group: "drawbars" }), K(27, "1⅓′", "1⅓′", 127, { group: "drawbars" }),
         K(28, "1′", "1′", 127, { group: "drawbars" }),
         K(70, "Хорус", "Chorus", 0, { toggle: true }),
+        K(1, "Мод-колесо (≥ 64 включает хорус)", "Mod wheel (64 and up turns the chorus on)", 0),
         K(71, "Скорость хоруса", "Chorus speed", 8), K(72, "Глубина хоруса", "Chorus depth", 127),
         K(77, "Атака", "Attack", 20), K(78, "Отпускание", "Release", 20)
       ]
@@ -142,14 +144,14 @@
     {
       name: "Violin", bend: true, aftertouch: true,
       desc: LANG === "en" ? "Violin: a physical model of a bowed string." : "Скрипка: физическая модель смычковой струны.",
-      knobs: [K(1, "Вибрато", "Vibrato", 44), K(70, "Положение смычка", "Bow position", 48),
+      knobs: [K(1, "Мод-колесо (добавляет вибрато)", "Mod wheel (adds vibrato)", 0), K(70, "Положение смычка", "Bow position", 48),
               K(71, "Прижим смычка", "Bow pressure", 70), K(75, "Шум смычка", "Bow noise", 51),
               K(74, "Яркость", "Brightness", 70), K(73, "Атака", "Attack", 64), K(72, "Отпускание", "Release", 64)]
     },
     {
       name: "SoundFont", bend: true, sf: true,
       desc: LANG === "en" ? "Any SoundFont2 bank: every preset is a separate instrument." : "Любой банк SoundFont2: каждый пресет банка — отдельный инструмент.",
-      knobs: []
+      knobs: [K(1, "Мод-колесо (вибрато)", "Mod wheel (vibrato)", 0)]
     }
   ];
 
