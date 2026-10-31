@@ -45,6 +45,11 @@ using namespace daisysp;
 #define LEAD_MIN_RELEASE          0.020f
 #define LEAD_MAX_RELEASE          2.000f
 
+// Колесо высоты тона и All Sound Off
+#define LEAD_BEND_RANGE           2.0f    // полутонов в каждую сторону (как у остальных движков)
+#define LEAD_BEND_SMOOTH          0.10f   // сглаживание положения колеса за один control-rate тик (≈1,7 мс)
+#define LEAD_KILL_RELEASE_SEC     0.010f  // All Sound Off: быстрое гашение без щелчка
+
 #define LEAD_VELOCITY_MIN_GAIN    0.200f
 #define LEAD_VELOCITY_SCALE       0.800f
 
@@ -94,6 +99,8 @@ struct LeadVoice {
     uint32_t trigger_age{0};
     uint8_t press_count{0};
     float velocity_gain{1.0f};
+    float base_freq{440.0f};     // частота ноты без учёта колеса высоты тона
+    float applied_ratio{1.0f};   // множитель колеса, с которым последний раз задана частота осциллятора
     float applied_cutoff{-1.0f}; // последняя частота среза, отправленная в Svf (-1 = принудительно обновить)
     float applied_res{-1.0f};    // последнее значение резонанса, отправленное в Svf
     bool gate{false};
@@ -119,7 +126,18 @@ static const float kVoiceNorm[LEAD_VOICES + 1] = {
 // Параметры субтрактивного синтезатора (управляются через MIDI CC)
 static std::atomic<float> filter_cutoff_base{LEAD_DEFAULT_CUTOFF};
 static std::atomic<float> filter_res{LEAD_DEFAULT_RES};
-static std::atomic<float> filter_env_amount{LEAD_DEFAULT_ENV_AMT};
+// CC1 (мод-колесо) 0..1: раскрывает фильтр сильнее на атаке (глубина огибающей растёт от LEAD_DEFAULT_ENV_AMT до
+// LEAD_MAX_ENV_AMT). В нуле звук такой, как по умолчанию: колесо только добавляет яркости.
+static std::atomic<float> filter_mod{0.0f};
+
+// Колесо высоты тона: «последнее значение» без очереди (пишет main, читает аудио)
+static std::atomic<int16_t> user_bend{0};
+static float bend_semitones = 0.0f;   // сглаженное положение колеса (только аудио-контекст)
+static float bend_ratio     = 1.0f;   // множитель частоты всех голосов (только аудио-контекст)
+
+static inline float effective_env_amount(float mod) {
+    return LEAD_DEFAULT_ENV_AMT + (LEAD_MAX_ENV_AMT - LEAD_DEFAULT_ENV_AMT) * mod;
+}
 
 // Параметры огибающей
 static std::atomic<float> env_attack_sec{LEAD_DEFAULT_ATTACK};
@@ -154,7 +172,10 @@ void LeadSynth_Init(void) {
 
     filter_cutoff_base.store(LEAD_DEFAULT_CUTOFF, std::memory_order_relaxed);
     filter_res.store(LEAD_DEFAULT_RES, std::memory_order_relaxed);
-    filter_env_amount.store(LEAD_DEFAULT_ENV_AMT, std::memory_order_relaxed);
+    filter_mod.store(0.0f, std::memory_order_relaxed);
+    user_bend.store(0, std::memory_order_relaxed);
+    bend_semitones = 0.0f;
+    bend_ratio = 1.0f;
 
     env_attack_sec.store(LEAD_DEFAULT_ATTACK, std::memory_order_relaxed);
     env_decay_sec.store(LEAD_DEFAULT_DECAY, std::memory_order_relaxed);
@@ -187,6 +208,8 @@ void LeadSynth_Init(void) {
         v.trigger_age = 0;
         v.press_count = 0;
         v.velocity_gain = 1.0f;
+        v.base_freq = 440.0f;
+        v.applied_ratio = 1.0f;
         v.applied_cutoff = -1.0f;
         v.applied_res = -1.0f;
         v.gate = false;
@@ -230,6 +253,10 @@ void LeadSynth_NoteOff(uint8_t midi_note) {
     input.NoteOff(midi_note, event);
 }
 
+void LeadSynth_PitchBend(int16_t bend) {
+    user_bend.store(bend < -8192 ? (int16_t)-8192 : (bend > 8191 ? (int16_t)8191 : bend), std::memory_order_relaxed);
+}
+
 bool LeadSynth_IsNoteActive(uint8_t midi_note) {
     if (midi_note >= 128 || !SynthArena_IsOwner(&voices)) return false;
     for (int i = 0; i < LEAD_VOICES; i++) {
@@ -248,8 +275,8 @@ void LeadSynth_ControlChange(uint8_t control, uint8_t value) {
     float norm = (float)value * (1.0f / 127.0f);
 
     switch (control) {
-        case 1:  // CC 1: Modulation Wheel -> глубина огибающей фильтра (0..10000 Гц)
-            filter_env_amount.store(norm * LEAD_MAX_ENV_AMT, std::memory_order_relaxed);
+        case 1:  // CC 1: Modulation Wheel -> прибавка глубины огибающей фильтра (4000..10000 Гц); в нуле нейтрально
+            filter_mod.store(norm, std::memory_order_relaxed);
             break;
 
         case 71: // CC 71: Resonance (0.05..0.95)
@@ -268,6 +295,7 @@ void LeadSynth_ControlChange(uint8_t control, uint8_t value) {
             env_attack_sec.store(LEAD_MIN_ATTACK + norm * LEAD_MAX_ATTACK, std::memory_order_relaxed);
             break;
 
+        case 120: // CC 120: All Sound Off (критичное событие, как педаль)
         case 64: { // CC 64: Sustain Pedal
             LeadEvent event{};
             event.type = EVENT_CONTROL_CHANGE;
@@ -333,7 +361,9 @@ static int16_t LeadSynth_NextSample(void) {
             }
 
             LeadVoice& v = voices[target_voice];
-            v.osc.SetFreq(event.freq);
+            v.base_freq = event.freq;
+            v.applied_ratio = bend_ratio;
+            v.osc.SetFreq(bend_ratio == 1.0f ? event.freq : clamp_f(event.freq * bend_ratio, LEAD_MIN_FREQ, LEAD_MAX_FREQ));
             v.velocity_gain = event.velocity_gain;
             v.trigger_age = ++global_trigger_counter;
             if (is_retrigger) {
@@ -370,7 +400,7 @@ static int16_t LeadSynth_NextSample(void) {
             {
                 const float res_now = filter_res.load(std::memory_order_relaxed);
                 float cutoff_now = filter_cutoff_base.load(std::memory_order_relaxed)
-                                 + f_env_start * filter_env_amount.load(std::memory_order_relaxed);
+                                 + f_env_start * effective_env_amount(filter_mod.load(std::memory_order_relaxed));
                 cutoff_now = clamp_f(cutoff_now, LEAD_MIN_CUTOFF, LEAD_MAX_CUTOFF);
                 v.filter.SetRes(res_now);
                 v.filter.SetFreq(cutoff_now);
@@ -396,7 +426,17 @@ static int16_t LeadSynth_NextSample(void) {
                 }
             }
         } else if (event.type == EVENT_CONTROL_CHANGE) {
-            if (event.param1 == 64) {
+            if (event.param1 == 120) {
+                // All Sound Off: ноты отпускаются с коротким (10 мс) спадом независимо от клавиш и педали
+                audio_sustain_pedal = false;
+                for (int i = 0; i < LEAD_VOICES; i++) {
+                    voices[i].press_count = 0;
+                    voices[i].sustain_held = false;
+                    voices[i].gate = false;
+                    voices[i].amp_env.SetReleaseTime(LEAD_KILL_RELEASE_SEC);
+                    voices[i].filter_env.SetReleaseTime(LEAD_KILL_RELEASE_SEC);
+                }
+            } else if (event.param1 == 64) {
                 bool pedal_on = (event.param2 >= 64);
                 audio_sustain_pedal = pedal_on;
                 if (!pedal_on) {
@@ -418,7 +458,16 @@ static int16_t LeadSynth_NextSample(void) {
 
     const float base_cutoff = filter_cutoff_base.load(std::memory_order_relaxed);
     const float res_val     = filter_res.load(std::memory_order_relaxed);
-    const float env_amt     = filter_env_amount.load(std::memory_order_relaxed);
+    const float env_amt     = effective_env_amount(filter_mod.load(std::memory_order_relaxed));
+
+    // Колесо высоты тона: на control-rate тике сглаживаем положение (без «ступенек»), частоты осцилляторов обновляем
+    // только при изменении множителя. Фаза осциллятора не сбрасывается, поэтому щелчков нет.
+    if (ctrl_tick) {
+        const float target = (float)user_bend.load(std::memory_order_relaxed) * (LEAD_BEND_RANGE / 8192.0f);
+        bend_semitones += (target - bend_semitones) * LEAD_BEND_SMOOTH;
+        if (fabsf(target - bend_semitones) < 1e-4f) bend_semitones = target;   // точно в цель: центр = ровно 1.0
+        bend_ratio = (bend_semitones == 0.0f) ? 1.0f : exp2f(bend_semitones * (1.0f / 12.0f));
+    }
 
     for (int i = 0; i < LEAD_VOICES; i++) {
         LeadVoice& v = voices[i];
@@ -434,6 +483,11 @@ static int16_t LeadSynth_NextSample(void) {
                 v.sustain_held = false;
                 v.gate = false;
                 continue;
+            }
+
+            if (ctrl_tick && v.applied_ratio != bend_ratio) {
+                v.applied_ratio = bend_ratio;
+                v.osc.SetFreq(bend_ratio == 1.0f ? v.base_freq : clamp_f(v.base_freq * bend_ratio, LEAD_MIN_FREQ, LEAD_MAX_FREQ));
             }
 
             float raw_osc = v.osc.Process();

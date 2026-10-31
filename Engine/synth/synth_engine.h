@@ -83,6 +83,14 @@ void SynthEngine_Init(void);
 
 void SynthEngine_NoteOn(uint8_t midi_note, uint8_t velocity);   /* velocity 0 == NoteOff */
 void SynthEngine_NoteOff(uint8_t midi_note);
+/*
+ * Control Change. Одинаково для всех движков (подробно - docs/ENGINES.md, «Единое поведение движков»):
+ *   CC7   - общая громкость (в движки не передаётся);
+ *   CC120 - All Sound Off: движок быстро (10-20 мс) гасит все голоса, педаль сбрасывается;
+ *   CC123 - All Notes Off: выполняется здесь, в общем коде - Note Off по всем удерживаемым нотам и снятие педали;
+ *   CC1   - мод-колесо: «живее, ярче»; в нуле звук не отличается от звука без колеса.
+ * Остальные CC передаются активному движку.
+ */
 void SynthEngine_ControlChange(uint8_t control, uint8_t value);
 
 /**

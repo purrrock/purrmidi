@@ -27,6 +27,7 @@
 #define EPIANO_NOTE_ON_FIFO_LIMIT 56                    /* слоты для Note On и непрерывных CC; остальные - под Note Off/педаль */
 #define EPIANO_BLOCK            64                      /* размер внутреннего блока рендера */
 
+#define EPIANO_BRIGHT_MAX       2.1f    /* яркость при CC74 = 127 (0,7 + 1,4); предел для прибавки от CC1 */
 #define EPIANO_MASTER_GAIN      0.40f   /* общий уровень; запас под аккорды */
 #define EPIANO_TINE_RATIO       14.0f   /* частота модулятора "язычка" относительно ноты */
 
@@ -93,6 +94,7 @@ uint32_t       g_age_counter = 0;
 /* Состояние контроллеров — принадлежит аудиоконтексту */
 bool           g_sustain      = false;
 float          g_brightness   = 1.4f;
+float          g_mod          = 0.0f;   /* CC1 (мод-колесо) 0..1: добавка к яркости, в нуле тембр не меняется */
 float          g_volume       = 1.0f;
 float          g_release_coeff = 0.0f;
 float          g_kill_coeff   = 0.0f;
@@ -234,7 +236,9 @@ void start_voice(uint8_t note, uint8_t velocity)
     /* Индексы модуляции: растут с velocity (квадратично), падают к верхним нотам.
      * Значения в радианах, переводятся в "циклы" делением на 2*pi. */
     const float key_scale = clampf(1.15f - (nf - 48.0f) * 0.0125f, 0.20f, 1.20f);
-    const float bright    = g_brightness * key_scale;
+    /* Колесо добавляет яркость: от текущей до максимума CC74 (2,1). В нуле (колесо отпущено) ничего не меняется. */
+    const float base_br   = g_brightness + (EPIANO_BRIGHT_MAX - g_brightness) * g_mod;
+    const float bright    = base_br * key_scale;
     const float vv        = vel * vel;
 
     v->body_idx_floor = (0.25f + 0.35f * vv) * bright * (1.0f / EPIANO_TWO_PI);
@@ -243,7 +247,7 @@ void start_voice(uint8_t note, uint8_t velocity)
     /* "Звон" не должен создавать алиасинг: модулятор на частоте 14*f.
      * Плавно гасим его, когда 14*f приближается к 18 кГц. */
     const float tine_alias_fade = clampf((18000.0f - EPIANO_TINE_RATIO * freq) * (1.0f / 8000.0f), 0.0f, 1.0f);
-    v->tine_idx   = (0.10f + 1.30f * vv) * g_brightness * tine_alias_fade * (1.0f / EPIANO_TWO_PI);
+    v->tine_idx   = (0.10f + 1.30f * vv) * base_br * tine_alias_fade * (1.0f / EPIANO_TWO_PI);
     v->tine_level = (0.18f + 0.22f * vel) * tine_alias_fade;
 
     /* Динамика: velocity^1.5 с небольшим полом, чтобы pp не пропадали совсем */
@@ -280,7 +284,9 @@ void apply_cc(uint8_t control, uint8_t value)
     const float norm = (float)value * (1.0f / 127.0f);
 
     switch (control) {
-        case 1:
+        case 1:     /* мод-колесо: прибавка яркости (в нуле нейтрально) */
+            g_mod = norm;
+            break;
         case 71:
         case 74:
             g_brightness = 0.7f + 1.4f * norm;      /* 64 -> ~1.0 */
@@ -407,6 +413,7 @@ void EPianoSynth_Init(void)
 
     g_sustain       = false;
     g_brightness    = 1.4f;
+    g_mod           = 0.0f;
     g_volume        = 1.0f;
     g_release_coeff = t60_to_coeff(EPIANO_DEFAULT_REL_SEC);
     g_kill_coeff    = t60_to_coeff(0.02f);

@@ -48,6 +48,8 @@ namespace synth
 			{
 			oscillators = other.oscillators;
 			phase_counter = other.phase_counter;
+			phase_frac = other.phase_frac;
+			pitch_delta = other.pitch_delta;
 			voice_stamp = other.voice_stamp;
 			stamp_counter = other.stamp_counter;
 			fx = other.fx;
@@ -64,6 +66,8 @@ namespace synth
 					cc_drawbars.end(),
 					[](cc::value_t &vector_value){vector_value = 127;});
 		phase_counter = 0;
+		phase_frac = 0;
+		pitch_delta = 0;
 		voice_stamp.fill(0);
 		stamp_counter = 0;
 		reset_all();
@@ -94,6 +98,11 @@ namespace synth
 			{
 			osc.reset();
 			}
+		}
+
+	void synth_organ::set_pitch_delta(int32_t delta_q32)
+		{
+		pitch_delta = delta_q32;
 		}
 
 	void synth_organ::push_midi_cmd(const midi::command_t &cmd)
@@ -289,10 +298,29 @@ namespace synth
 				{
 				if(osc.voice::voice_organ::is_active())
 					{
-					osc.voice::voice_organ::render_block(acc,chunk,phase_counter);
+					if(pitch_delta == 0 && phase_frac == 0)
+						{
+						osc.voice::voice_organ::render_block(acc,chunk,phase_counter);
+						}
+					else
+						{
+						osc.voice::voice_organ::render_block_bent(acc,chunk,phase_counter,phase_frac,pitch_delta);
+						}
 					}
 				}
-			phase_counter += chunk;
+			if(pitch_delta == 0 && phase_frac == 0)
+				{
+				phase_counter += chunk;
+				}
+			else
+				{
+				// Time base with a fraction (Pitch Bend). The fraction is kept even when the bend returns to the
+				// center: dropping it would shift the phase of the tonewheels (a click).
+				uint64_t pos = (static_cast<uint64_t>(phase_counter) << 32) | phase_frac;
+				pos += static_cast<uint64_t>(chunk) * ((1ull << 32) + static_cast<uint64_t>(static_cast<int64_t>(pitch_delta)));
+				phase_counter = static_cast<uint32_t>(pos >> 32);
+				phase_frac = static_cast<uint32_t>(pos);
+				}
 			for(uint32_t i = 0; i < chunk; ++i)
 				{
 				out[i] = to_external_sample(fx.run_through(acc[i]));

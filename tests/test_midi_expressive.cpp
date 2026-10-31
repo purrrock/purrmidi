@@ -117,7 +117,8 @@ void test_bend_survives_engine_switch_and_panic()
     CHECK(std::fabs(after_panic - 440.0) < 5.0);
 }
 
-// Движки без поддержки Pitch Bend / Aftertouch игнорируют их: звук бит-в-бит такой же, как без этих сообщений.
+// Движки без поддержки Aftertouch игнорируют его: звук бит-в-бит такой же, как без этих сообщений. (Pitch Bend теперь
+// поддерживают все движки - он проверяется в test_engine_unified.)
 uint64_t run_scenario(uint8_t engine, bool with_messages)
 {
     SynthEngine_Select(SYNTH_ENGINE_EPIANO);
@@ -128,11 +129,9 @@ uint64_t run_scenario(uint8_t engine, bool with_messages)
     std::vector<int16_t> all;
     for (int i = 0; i < 20; ++i) {
         if (with_messages && i == 2) {
-            bend(16383);
             send(MIDI_STATUS_CHANNEL_PRESSURE, 100, 0);
             send(MIDI_STATUS_POLY_KEY_PRESSURE, 60, 90);
         }
-        if (with_messages && i == 10) bend(8192);
         auto b = render(128);
         all.insert(all.end(), b.begin(), b.end());
     }
@@ -142,7 +141,7 @@ uint64_t run_scenario(uint8_t engine, bool with_messages)
     return hash_of(all);
 }
 
-void test_unsupported_engines_ignore_messages()
+void test_unsupported_engines_ignore_aftertouch()
 {
     SynthEngine_Init();
     const SynthEngineId engines[] = { SYNTH_ENGINE_PLUCK, SYNTH_ENGINE_LEAD, SYNTH_ENGINE_ORGAN };
@@ -177,7 +176,7 @@ int main()
 {
     test_dispatch_pitch_bend_epiano();
     test_bend_survives_engine_switch_and_panic();
-    test_unsupported_engines_ignore_messages();
+    test_unsupported_engines_ignore_aftertouch();
     test_pressure_and_garbage_are_harmless();
     if (purrmidi_test::Failures() == 0) std::puts("test_midi_expressive passed");
     return purrmidi_test::Finish("test_midi_expressive");

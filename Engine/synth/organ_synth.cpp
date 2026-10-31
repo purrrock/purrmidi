@@ -3,6 +3,7 @@
 #include "synth_organ.hpp"
 
 #include <atomic>
+#include <cmath>
 #include <cstring>
 
 namespace {
@@ -42,6 +43,30 @@ std::atomic<uint32_t> g_dropped_events{0};
 std::atomic<bool>     g_overflow_occurred{false};
 
 synth::synth_organ    g_organ;
+
+/* Колесо высоты тона: «последнее значение» без очереди (пишет main, читает аудио). Диапазон ±2 полутона, как у остальных
+ * движков. Применяется ко всему органу сразу: общая временная ось тоновых колёс идёт с дробным шагом (см.
+ * synth_organ::set_pitch_delta), поэтому фаза колёс непрерывна и щелчков нет. */
+constexpr float       ORGAN_BEND_RANGE  = 2.0f;
+constexpr float       ORGAN_BEND_SMOOTH = 0.30f;   /* доля пути к цели за блок из 128 отсчётов (≈ 1 мс) */
+std::atomic<int16_t>  g_bend{0};
+float                 g_bend_semitones = 0.0f;     /* сглаженное положение колеса (только аудио-контекст) */
+
+/* Мод-колесо (CC1): как переключатель Leslie «быстро» - от 64 и выше включает хорус/вибрато (вместе с CC70: включено, если
+ * включено любым из двух). Хорус - единственный «живой» эффект органа; плавно менять его глубину на ходу нельзя
+ * (скачок длины линии задержки даёт щелчок), поэтому колесо работает как переключатель. Только аудио-контекст. */
+bool                  g_user_chorus = false;       /* CC70 */
+bool                  g_mod_chorus  = false;       /* CC1 >= 64 */
+
+void apply_chorus()
+{
+    midi::command_t cmd{};
+    cmd.channel = 0;
+    cmd.status  = midi::status_t::CONTROLLER_CHANGE;
+    cmd.data    = 70;
+    cmd.value   = (g_user_chorus || g_mod_chorus) ? 127 : 0;
+    g_organ.push_midi_cmd(cmd);
+}
 
 bool fifo_push(const Event& ev)
 {
@@ -98,6 +123,12 @@ void process_event(const Event& ev)
             } else if (ev.a == 123) {
                 // All Notes Off: notes go through their normal release (no click)
                 g_organ.deactivate_all();
+            } else if (ev.a == 1) {
+                g_mod_chorus = (ev.b >= 64);
+                apply_chorus();
+            } else if (ev.a == 70) {
+                g_user_chorus = (ev.b > 63);
+                apply_chorus();
             } else {
                 cmd.status = midi::status_t::CONTROLLER_CHANGE;
                 cmd.data   = ev.a;
@@ -143,6 +174,10 @@ void OrganSynth_Init(void)
 {
     g_organ.init();
     g_gain.Reset();
+    g_bend.store(0, std::memory_order_relaxed);
+    g_bend_semitones = 0.0f;
+    g_user_chorus = false;
+    g_mod_chorus  = false;
     g_fifo_head.store(0, std::memory_order_relaxed);
     g_fifo_tail.store(0, std::memory_order_relaxed);
     g_dropped_events.store(0, std::memory_order_relaxed);
@@ -176,6 +211,11 @@ void OrganSynth_NoteOff(uint8_t midi_note)
     fifo_push(ev);
 }
 
+void OrganSynth_PitchBend(int16_t bend)
+{
+    g_bend.store(bend < -8192 ? (int16_t)-8192 : (bend > 8191 ? (int16_t)8191 : bend), std::memory_order_relaxed);
+}
+
 void OrganSynth_ControlChange(uint8_t control, uint8_t value)
 {
     Event ev = { EV_CC, control, (uint8_t)(value > 127 ? 127 : value) };
@@ -192,6 +232,19 @@ void OrganSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
     uint32_t done = 0;
     while (done < num_frames) {
         const uint32_t n = (num_frames - done > kChunk) ? kChunk : (num_frames - done);
+
+        /* Колесо: сглаживаем положение и передаём органу отклонение шага времени от 1 (Q32). Центр = ровно 0. */
+        {
+            const float target = (float)g_bend.load(std::memory_order_relaxed) * (ORGAN_BEND_RANGE / 8192.0f);
+            g_bend_semitones += (target - g_bend_semitones) * ORGAN_BEND_SMOOTH;
+            if (std::fabs(target - g_bend_semitones) < 1e-4f) g_bend_semitones = target;
+            int32_t delta = 0;
+            if (g_bend_semitones != 0.0f) {
+                const double ratio = std::exp2((double)g_bend_semitones * (1.0 / 12.0));
+                delta = (int32_t)((ratio - 1.0) * 4294967296.0);
+            }
+            g_organ.set_pitch_delta(delta);
+        }
         g_organ.synthesize_block(mono, n);
         float scaled[kChunk];
         g_gain.Process(mono, scaled, n);

@@ -182,12 +182,13 @@ int main()
         CHECK(br[1] > br[0] * 1.2);
     }
 
-    // 8. Вибрато (CC1): при 127 частота заметно «плавает», при 0 - нет.
+    // 8. Вибрато (CC1 - мод-колесо ПРИБАВЛЯЕТ вибрато): в нуле - вибрато по умолчанию (как без CC1), при 127 - заметно
+    //    сильнее.
     {
-        double span[2];
-        for (int i = 0; i < 2; ++i) {
+        double span[3];
+        for (int i = 0; i < 3; ++i) {
             fresh();
-            ViolinSynth_ControlChange(1, i == 0 ? 0 : 127);
+            if (i < 2) ViolinSynth_ControlChange(1, i == 0 ? 0 : 127);   // i == 2: CC1 не трогаем
             ViolinSynth_NoteOn(64, 100);
             const auto b = render(SR * 3);
             double lo = 1e9, hi = -1e9;
@@ -198,9 +199,10 @@ int main()
             }
             span[i] = hi - lo;
         }
-        std::printf("  vibrato span: off %.1f, on %.1f cents\n", span[0], span[1]);
-        CHECK(span[0] < 8.0);
+        std::printf("  vibrato span: wheel 0 %.1f, wheel 127 %.1f, untouched %.1f cents\n", span[0], span[1], span[2]);
+        CHECK(span[0] == span[2]);          // колесо в нуле = колесо не трогали
         CHECK(span[1] > 25.0);
+        CHECK(span[1] > span[0] + 8.0);     // колесо вверх добавляет вибрато
     }
 
     // 9. Педаль сустейна удерживает ноту после Note Off; отпускание педали - затухание.

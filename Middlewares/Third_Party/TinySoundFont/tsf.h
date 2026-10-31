@@ -134,6 +134,10 @@ int tsf_shed_releasing_voices(struct tsf* f, int max_count);
 // затем самые затихшие (огибающая в фазе decay/sustain); ноты, которые ещё в атаке, не трогает. Возвращает число
 // затронутых голосов.
 int tsf_shed_sounding_voices(struct tsf* f, int max_notes);
+// PurrMidi: мгновенно (без спада) обрывает ВСЕ голоса. В отличие от tsf_reset() / tsf_channel_sounds_off_all(), которые лишь
+// запускают быстрый спад (голоса ещё звучат несколько миллисекунд), после этого не остаётся ничего: нужно при сбросе
+// движка (Panic, смена инструмента), чтобы хвост прежних нот не попадал в новый звук. Вызывать только когда рендер не идёт.
+void tsf_kill_all_voices(struct tsf* f);
 #ifdef __cplusplus
 }
 #endif
@@ -1411,6 +1415,13 @@ extern "C" {
 #endif
 unsigned int tsf_get_smpl_file_offset(const struct tsf* f) { return f ? f->smpl_file_offset : 0; }
 unsigned int tsf_get_smpl_sample_count(const struct tsf* f) { return f ? f->smpl_sample_count : 0; }
+void tsf_kill_all_voices(struct tsf* f)
+{
+	struct tsf_voice *v, *vEnd;
+	if (!f) return;
+	for (v = f->voices, vEnd = v + f->voiceNum; v != vEnd; v++) tsf_voice_kill(v);
+}
+
 int tsf_shed_releasing_voices(struct tsf* f, int max_count)
 {
 	int done = 0;

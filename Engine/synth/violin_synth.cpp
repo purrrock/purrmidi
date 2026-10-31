@@ -70,6 +70,8 @@ constexpr float    kRingReleaseK  = 0.8f;              /* затухание с�
 
 /* Вибрато: частота, максимальный размах (±кент) и задержка включения после начала ноты. */
 constexpr float    kVibratoHz     = 5.4f;
+constexpr float    kVibratoBase    = 0.35f;            /* глубина вибрато по умолчанию (мод-колесо в нуле) */
+constexpr float    kKillTime       = 0.020f;           /* All Sound Off: время спада, с */
 constexpr float    kVibratoMaxFrac = 0.0163f;          /* ≈ ±28 центов: 2^(28/1200) - 1 */
 constexpr float    kVibratoDelay  = 0.18f;             /* до начала вибрато, с */
 constexpr float    kVibratoRise   = 0.35f;             /* нарастание до полной глубины, с */
@@ -94,7 +96,7 @@ constexpr float    kOutGain       = 0.90f;
 /* ------------------------------------------------------------------------------------------------------------
  * События и параметры
  * ------------------------------------------------------------------------------------------------------------ */
-enum EventType : uint8_t { EV_NOTE_ON, EV_NOTE_OFF, EV_SUSTAIN };
+enum EventType : uint8_t { EV_NOTE_ON, EV_NOTE_OFF, EV_SUSTAIN, EV_KILL };
 
 struct ViolinEvent {
     EventType type;
@@ -104,7 +106,7 @@ struct ViolinEvent {
 };
 
 /* Параметры, меняющиеся с MIDI (main пишет, аудио читает). */
-std::atomic<float>   g_vibrato{0.35f};      /* CC1: глубина вибрато 0..1 */
+std::atomic<float>   g_vibrato{0.0f};       /* CC1 (мод-колесо) 0..1: прибавка вибрато к kVibratoBase, в нуле звук по умолчанию */
 std::atomic<float>   g_expression{1.0f};    /* CC2/CC11: экспрессия 0..1 */
 std::atomic<float>   g_bow_pos{0.38f};      /* CC70: положение смычка 0..1 (0.38 -> β ≈ 0.127) */
 std::atomic<float>   g_pressure{0.55f};     /* CC71: прижим 0..1 */
@@ -155,6 +157,7 @@ struct Voice {
     std::atomic<int32_t> note_state{-1};   /* -1 свободен, 0..127 — нота, которую держит голос */
     uint8_t  press_count;              /* сколько раз нажата нота (Note On без Note Off) */
     bool     gate;                     /* смычок на струне */
+    bool     kill;                     /* All Sound Off: быстрый спад независимо от клавиши и педали */
     bool     sustain_held;             /* нота удерживается педалью */
 };
 
@@ -287,6 +290,7 @@ void StartVoice(Voice &v, uint8_t note, float vel)
 
     v.fade_left = 0;
     v.gate = true;
+    v.kill = false;
     v.sustain_held = false;
     v.order = ++g_order_counter;
 }
@@ -338,6 +342,7 @@ void HandleNoteOn(const ViolinEvent &ev)
         /* Повторное нажатие той же ноты: струна продолжает звучать, смычок «берёт» заново (без обрыва). */
         if (v.press_count < 255) v.press_count++;
         v.gate = true;
+        v.kill = false;
         v.sustain_held = false;
         v.vel = ev.vel;
         v.bow_peak = 0.04f + 0.12f * ev.vel;
@@ -355,6 +360,7 @@ void HandleNoteOn(const ViolinEvent &ev)
         v.fade_left    = kFadeSamples;
         v.press_count  = 1;
         v.gate         = true;
+        v.kill         = false;
         v.sustain_held = false;
         v.order        = ++g_order_counter;
         v.note_state.store((int32_t)ev.note, std::memory_order_release);
@@ -384,6 +390,20 @@ void HandleNoteOff(uint8_t note)
     }
 }
 
+/* All Sound Off: смычок снимается со всех струн, педаль и удержания сбрасываются, спад ~20 мс (без щелчка). */
+void HandleKill()
+{
+    g_pedal = false;
+    for (int i = 0; i < kVoices; ++i) {
+        Voice &v = g_voices[i];
+        v.press_count = 0;
+        v.sustain_held = false;
+        v.gate = false;
+        v.kill = true;
+        v.fade_left = 0;
+    }
+}
+
 void HandleSustain(uint8_t value)
 {
     const bool on = (value >= 64);
@@ -407,6 +427,8 @@ struct ChunkCtx {
     float        vib_frac;      /* глубина вибрато (доля длины петли) */
     float        rel_coef;      /* коэффициент снятия смычка за отсчёт */
     float        ring_release;  /* постоянная затухания струны после отпускания, с */
+    float        kill_rel_coef; /* то же для All Sound Off (быстрый спад) */
+    float        kill_ring;
     const float *lfo;           /* значения LFO на подблок (-1..1) */
 };
 
@@ -445,7 +467,7 @@ bool RenderVoice(Voice &v, uint32_t n, const ChunkCtx &c, float *mix)
 
     /* Потери за период: после отпускания смычка струна быстро затухает (палец/смычок гасят её), пока смычок на
      * струне - потери малы. Постоянная времени от высоты не зависит. */
-    const float g_tgt = gate_on ? kSustainGain : std::exp(-1.0f / (f0 * c.ring_release));
+    const float g_tgt = gate_on ? kSustainGain : std::exp(-1.0f / (f0 * (v.kill ? c.kill_ring : c.ring_release)));
     v.loop_gain += (g_tgt - v.loop_gain) * 0.25f;
     const float g = v.loop_gain;
 
@@ -466,7 +488,7 @@ bool RenderVoice(Voice &v, uint32_t n, const ChunkCtx &c, float *mix)
     const float vib1 = vib_amount(v.age_samples + n) * c.vib_frac;
 
     const float env_target = gate_on ? 1.0f : 0.0f;
-    const float env_coef   = gate_on ? v.att_coef : c.rel_coef;
+    const float env_coef   = gate_on ? v.att_coef : (v.kill ? c.kill_rel_coef : c.rel_coef);
 
     /* Плавное гашение вытесняемого голоса. */
     const bool  fading = v.fade_left > 0;
@@ -587,7 +609,7 @@ void ViolinSynth_Init(void)
     g_prev_gain = 0.0f;
     g_snap = true;
 
-    g_vibrato.store(0.35f, std::memory_order_relaxed);
+    g_vibrato.store(0.0f, std::memory_order_relaxed);
     g_expression.store(1.0f, std::memory_order_relaxed);
     g_bow_pos.store(0.38f, std::memory_order_relaxed);
     g_pressure.store(0.55f, std::memory_order_relaxed);
@@ -634,7 +656,7 @@ void ViolinSynth_ControlChange(uint8_t control, uint8_t value)
     const float norm = (float)(value > 127 ? 127 : value) * (1.0f / 127.0f);
 
     switch (control) {
-        case 1:  g_vibrato.store(norm, std::memory_order_relaxed);     break;
+        case 1:  g_vibrato.store(norm, std::memory_order_relaxed);     break;   /* мод-колесо: прибавка к вибрато по умолчанию */
         case 2:
         case 11: g_expression.store(norm, std::memory_order_relaxed);  break;
         case 70: g_bow_pos.store(norm, std::memory_order_relaxed);     break;
@@ -643,6 +665,15 @@ void ViolinSynth_ControlChange(uint8_t control, uint8_t value)
         case 73: g_attack.store(norm, std::memory_order_relaxed);      break;
         case 74: g_bright.store(norm, std::memory_order_relaxed);      break;
         case 75: g_noise.store(norm, std::memory_order_relaxed);       break;
+        case 120: {   /* All Sound Off: критичное событие (потеря = залипшие ноты) */
+            ViolinEvent ev;
+            ev.type  = EV_KILL;
+            ev.note  = 0;
+            ev.value = 0;
+            ev.vel   = 0.0f;
+            g_input.Critical(ev);
+            break;
+        }
         case 64: {
             ViolinEvent ev;
             ev.type  = EV_SUSTAIN;
@@ -709,6 +740,7 @@ void ViolinSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
             case EV_NOTE_ON:  HandleNoteOn(ev);        break;
             case EV_NOTE_OFF: HandleNoteOff(ev.note);  break;
             case EV_SUSTAIN:  HandleSustain(ev.value); break;
+            case EV_KILL:     HandleKill();            break;
         }
     }
 
@@ -718,7 +750,8 @@ void ViolinSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
     const float tgt_press  = g_pressure.load(std::memory_order_relaxed);
     const float tgt_bright = g_bright.load(std::memory_order_relaxed);
     const float tgt_bend   = (float)g_bend.load(std::memory_order_relaxed) * (kBendSemitones / 8192.0f);
-    const float vib_depth  = g_vibrato.load(std::memory_order_relaxed);
+    const float vib_mod    = g_vibrato.load(std::memory_order_relaxed);
+    const float vib_depth  = kVibratoBase + (1.0f - kVibratoBase) * vib_mod;   /* колесо в нуле: kVibratoBase */
     const float noise      = g_noise.load(std::memory_order_relaxed);
     const float rel_scale  = std::exp2((g_release.load(std::memory_order_relaxed) - 0.5f) * 3.0f);
 
@@ -759,6 +792,8 @@ void ViolinSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
         c.vib_frac     = vib_depth * kVibratoMaxFrac;
         c.rel_coef     = 1.0f - std::exp(-3.0f / (kSampleRate * rel_time));
         c.ring_release = kRingReleaseK * rel_time;
+        c.kill_rel_coef = 1.0f - std::exp(-3.0f / (kSampleRate * kKillTime));
+        c.kill_ring     = kRingReleaseK * kKillTime;
         c.lfo          = lfo;
 
         float mix[kBlock];

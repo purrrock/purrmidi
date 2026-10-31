@@ -15,12 +15,15 @@
  *     - Огибающие ADSR (daisysp::Adsr) для управления амплитудой и частотой среза фильтра.
  *
  * Управление по MIDI Control Change:
- *     - CC 1:  Глубина модуляции фильтра огибающей (Filter Envelope Modulation Depth);
+ *     - CC 1:  Мод-колесо: ПРИБАВЛЯЕТ яркости (глубина огибающей фильтра растёт с 4000 до 10000 Гц); в нуле тембр не меняется;
  *     - CC 64: Педаль сустейна (Sustain Pedal);
  *     - CC 71: Резонанс фильтра (Filter Cutoff Resonance);
  *     - CC 72: Время затухания огибающей после отпускания клавиши (Release Time);
  *     - CC 73: Время атаки огибающей (Attack Time);
- *     - CC 74: Базовая частота среза фильтра (Filter Cutoff Frequency).
+ *     - CC 74: Базовая частота среза фильтра (Filter Cutoff Frequency);
+ *     - CC 120: All Sound Off (быстрое гашение всех голосов).
+ *
+ * Pitch Bend: LeadSynth_PitchBend(), ±2 полутона.
  *
  * Динамика микса:
  *   Сумма голосов нормируется по 1/sqrt(N) со сглаживанием (без скачков уровня при смене числа голосов),
@@ -63,6 +66,12 @@ void LeadSynth_NoteOff(uint8_t midi_note);
  * @param value   Значение контроллера (0..127).
  */
 void LeadSynth_ControlChange(uint8_t control, uint8_t value);
+
+/**
+ * @brief Колесо высоты тона: bend = -8192..+8191 (0 - центр), диапазон ±2 полутона (LEAD_BEND_RANGE).
+ * @details Хранится как «последнее значение» (без очереди), положение сглаживается: щелчков нет.
+ */
+void LeadSynth_PitchBend(int16_t bend);
 
 /**
  * @brief Генерация очередного блока стерео-сэмплов PCM (48 кГц, 16 бит).

@@ -55,13 +55,13 @@ const Engine kEngines[SYNTH_ENGINE_COUNT] = {
       EPianoSynth_ControlChange, EPianoSynth_FillStereoBuffer, EPianoSynth_PitchBend, nullptr, nullptr },
     /* SYNTH_ENGINE_PLUCK */
     { "pluck", PluckSynth_Init, PluckSynth_NoteOn, PluckSynth_NoteOff,
-      PluckSynth_ControlChange, PluckSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
+      PluckSynth_ControlChange, PluckSynth_FillStereoBuffer, PluckSynth_PitchBend, nullptr, nullptr },
     /* SYNTH_ENGINE_LEAD */
     { "lead", LeadSynth_Init, LeadSynth_NoteOn, LeadSynth_NoteOff,
-      LeadSynth_ControlChange, LeadSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
+      LeadSynth_ControlChange, LeadSynth_FillStereoBuffer, LeadSynth_PitchBend, nullptr, nullptr },
     /* SYNTH_ENGINE_ORGAN */
     { "organ", OrganSynth_Init, OrganSynth_NoteOn, OrganSynth_NoteOff,
-      OrganSynth_ControlChange, OrganSynth_FillStereoBuffer, nullptr, nullptr, nullptr },
+      OrganSynth_ControlChange, OrganSynth_FillStereoBuffer, OrganSynth_PitchBend, nullptr, nullptr },
     /* SYNTH_ENGINE_VIOLIN */
     { "violin", ViolinSynth_Init, ViolinSynth_NoteOn, ViolinSynth_NoteOff,
       ViolinSynth_ControlChange, ViolinSynth_FillStereoBuffer, ViolinSynth_PitchBend, ViolinSynth_ChannelPressure, nullptr },
@@ -102,6 +102,39 @@ uint32_t sf_slot_count()
  * не «отпускала» удерживаемое колесо. Пишется и читается только из main-контекста. */
 int16_t              g_pitch_bend = 0;
 
+/*
+ * Какие ноты сейчас удерживаются (число нажатий на ноту, по входящим Note On / Note Off). Нужно для All Notes Off (CC123):
+ * он выполняется здесь, в общем коде, одинаково для всех движков - как набор обычных Note Off по всем удерживаемым нотам.
+ * Так отпускание идёт через тот же проверенный путь (очередь событий, естественный релиз, педаль), что и у реальной
+ * клавиатуры, а не у каждого движка своим кодом. Пишется и читается только из main-контекста.
+ */
+uint8_t              g_held[128] = {};
+
+/* Сколько Note Off по одной ноте отправляем при All Notes Off (одна нота могла быть нажата несколько раз). */
+constexpr uint8_t    kMaxPressesReleased = 8;
+
+void held_clear()
+{
+    std::memset(g_held, 0, sizeof(g_held));
+}
+
+/* All Notes Off: отпустить все удерживаемые ноты и снять педаль (ноты, которые держала педаль, тоже затухают).
+ * Звучащие хвосты доигрывают естественным релизом; мгновенное гашение - CC120. */
+void all_notes_off(const Engine *e)
+{
+    for (uint32_t n = 0; n < 128U; ++n) {
+        uint8_t cnt = g_held[n];
+        if (cnt > kMaxPressesReleased) {
+            cnt = kMaxPressesReleased;
+        }
+        while (cnt--) {
+            e->note_off((uint8_t)n);
+        }
+    }
+    held_clear();
+    e->control_change(64, 0);
+}
+
 /* Уровень 0..127 -> линейный коэффициент. Квадратичная кривая ≈ естественная для слуха; 127 -> 1.0, 0 -> 0. */
 float volume_to_gain(uint8_t v)
 {
@@ -140,6 +173,7 @@ void activate(SynthEngineId id)
         /* ждём, пока аудио-поток (ПК) закончит текущий блок */
     }
     next->init();
+    held_clear();   /* новый движок стартует «с нуля»: ни одной удерживаемой ноты */
     if (id == SYNTH_ENGINE_SOUNDFONT) {
         SoundFontSynth_SelectPreset(g_sf_preset);   /* Init() ставит пресет 0: возвращаем выбранный */
     }
@@ -159,12 +193,14 @@ void SynthEngine_Init(void)
     g_master_vol.store(SYNTH_MASTER_VOLUME_DEFAULT, std::memory_order_relaxed);
     g_master_gain_applied = volume_to_gain(SYNTH_MASTER_VOLUME_DEFAULT);
     g_pitch_bend = 0;
+    held_clear();
     activate(SYNTH_ENGINE_DEFAULT);
 }
 
 void SynthEngine_Panic(void)
 {
-    g_pitch_bend = 0;   /* после отключения клавиатуры положение колеса неизвестно */
+    g_pitch_bend = 0;
+    held_clear();   /* после отключения клавиатуры положение колеса неизвестно */
     const Engine *cur = g_active.load(std::memory_order_relaxed);
     if (cur) {
         activate((SynthEngineId)(cur - kEngines));
@@ -302,8 +338,15 @@ const char *SynthEngine_GetName(void)
 
 void SynthEngine_NoteOn(uint8_t midi_note, uint8_t velocity)
 {
+    if (velocity == 0U) {
+        SynthEngine_NoteOff(midi_note);   /* velocity 0 == Note Off */
+        return;
+    }
     const Engine *e = g_active.load(std::memory_order_relaxed);
     if (e) {
+        if (midi_note < 128U && g_held[midi_note] < 255U) {
+            g_held[midi_note]++;
+        }
         e->note_on(midi_note, velocity);
     }
 }
@@ -312,6 +355,9 @@ void SynthEngine_NoteOff(uint8_t midi_note)
 {
     const Engine *e = g_active.load(std::memory_order_relaxed);
     if (e) {
+        if (midi_note < 128U && g_held[midi_note] > 0U) {
+            g_held[midi_note]--;
+        }
         e->note_off(midi_note);
     }
 }
@@ -325,9 +371,21 @@ void SynthEngine_ControlChange(uint8_t control, uint8_t value)
     }
 
     const Engine *e = g_active.load(std::memory_order_relaxed);
-    if (e) {
-        e->control_change(control, value);
+    if (!e) {
+        return;
     }
+
+    if (control == 123) {
+        /* All Notes Off: общий код для всех движков (см. all_notes_off). */
+        all_notes_off(e);
+        return;
+    }
+    if (control == 120) {
+        /* All Sound Off: каждый движок гасит свои голоса быстро и без щелчка и сбрасывает педаль; нажатые клавиши
+         * после этого считаются отпущенными. Остальные настройки (яркость, регистры органа и т.д.) не меняются. */
+        held_clear();
+    }
+    e->control_change(control, value);
 }
 
 void SynthEngine_PitchBend(int16_t bend)

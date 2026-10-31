@@ -136,6 +136,23 @@ target_link_libraries(test_engine_golden PRIVATE purrmidi_core Threads::Threads)
 target_compile_features(test_engine_golden PRIVATE cxx_std_17)
 add_test(NAME test_engine_golden COMMAND test_engine_golden)
 
+# Единое поведение движков: Pitch Bend, CC120/CC123, полный сброс (Panic / смена инструмента), CC1 - во всех движках.
+# Как и test_soundfont_host, запускается из корня репозитория: SoundFont-часть берёт tests/SNDFNT.SF2.
+add_executable(test_engine_unified
+    test_engine_unified.cpp
+)
+target_include_directories(test_engine_unified PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../Platform/host"
+    "${CMAKE_CURRENT_LIST_DIR}/../Platform/qspi_xip"
+)
+target_include_directories(test_engine_unified SYSTEM PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../Middlewares/Third_Party/TinySoundFont"
+)
+target_link_libraries(test_engine_unified PRIVATE purrmidi_synth_soundfont purrmidi_core Threads::Threads)
+target_compile_features(test_engine_unified PRIVATE cxx_std_17)
+add_test(NAME test_engine_unified COMMAND test_engine_unified
+         WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/..")
+
 add_executable(test_chord_detector
     test_chord_detector.cpp
 )

@@ -46,16 +46,16 @@ By default, the device is silent upon startup. To test the sound (DAC, jumpers, 
 
 The instrument name and active notes are shown on the display. The selected instrument and the volume are saved and restored after a restart. After power is removed they survive only if a 3V battery is connected to VBAT (see [docs/HARDWARE.md](docs/HARDWARE.md#батарейка-vbat-необязательно)); without it the device starts with the E-Piano.
 
-**Keyboard controls.** Master volume is CC7, sustain pedal is CC64 (all instruments).
+**Keyboard controls.** The same on all instruments: Pitch Bend (±2 semitones), master volume CC7, sustain pedal CC64 (not on the Organ), All Sound Off CC120, All Notes Off CC123, and the mod wheel CC1 always means “livelier / brighter” (at zero the sound is unchanged).
 
 | Instrument | MIDI |
 | ---------- | ---- |
-| E-Piano | CC1 / CC71 / CC74 brightness, CC72 release, Pitch Bend |
+| E-Piano | CC71 / CC74 brightness, CC72 release, CC1 adds brightness |
 | Pluck | CC71 / CC74 brightness, CC72 decay, CC1 (mod wheel) adds brightness |
-| Lead | CC74 filter cutoff, CC71 resonance, CC1 envelope depth, CC73 / CC72 attack / release |
-| Organ | CC20–28 drawbars, CC70 chorus on/off, CC71 / CC72 chorus speed / depth, CC77 / CC78 attack / release |
-| Violin | CC1 vibrato, CC70 / CC71 / CC75 bow position, pressure and noise, Pitch Bend, aftertouch |
-| SoundFont | Pitch Bend |
+| Lead | CC74 filter cutoff, CC71 resonance, CC1 adds filter envelope depth, CC73 / CC72 attack / release |
+| Organ | CC20–28 drawbars, CC70 chorus on/off (CC1 ≥ 64 also turns it on), CC71 / CC72 chorus speed / depth, CC77 / CC78 attack / release |
+| Violin | CC1 adds vibrato, CC70 / CC71 / CC75 bow position, pressure and noise, aftertouch |
+| SoundFont | CC1 vibrato (Pitch Bend range via RPN 0) |
 
 The full list of controllers and ranges is in [docs/ENGINES.md](docs/ENGINES.md) (in Russian).
 

@@ -71,6 +71,14 @@ namespace synth
 			*/
 			void render_block(int64_t *acc,uint32_t n,uint32_t counter0);
 
+			/**
+			* PurrMidi: the same as render_block(), but the shared time base has a fractional part (Pitch Bend).
+			* The time of sample i is  counter0 + frac0/2^32 + i*(1 + delta/2^32),  so all tonewheels are pitched by
+			* the same ratio and their phase stays continuous when the ratio changes. With frac0 == 0 and
+			* delta_q32 == 0 the result is bit-identical to render_block().
+			*/
+			void render_block_bent(int64_t *acc,uint32_t n,uint32_t counter0,uint32_t frac0,int32_t delta_q32);
+
 			voice_organ();
 
 			void set_attack(uint32_t value);

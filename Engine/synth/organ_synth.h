@@ -19,6 +19,7 @@
  *   CC 26 - Регистр Drawbar 1 3/5'
  *   CC 27 - Регистр Drawbar 1 1/3'
  *   CC 28 - Регистр Drawbar 1'
+ *   CC 1  - Мод-колесо: от 64 и выше включает хорус/вибрато (как CC70; хорус включён, если включён любым из двух)
  *   CC 70 - Хорус/Вибрато ВКЛ/ВЫКЛ (>63 ВКЛ, <=63 ВЫКЛ)
  *   CC 71 - Скорость хоруса
  *   CC 72 - Глубина хоруса
@@ -40,6 +41,12 @@ void OrganSynth_NoteOn(uint8_t midi_note, uint8_t velocity);
 
 /** Обработка события Note Off. */
 void OrganSynth_NoteOff(uint8_t midi_note);
+
+/**
+ * Колесо высоты тона: bend = -8192..+8191 (0 - центр), диапазон ±2 полутона. Сдвигается высота всех тоновых колёс сразу,
+ * фаза непрерывна (без щелчков). Хранится как «последнее значение» без очереди.
+ */
+void OrganSynth_PitchBend(int16_t bend);
 
 /** Обработка MIDI Control Change (drawbars, chorus, envelopes). */
 void OrganSynth_ControlChange(uint8_t control, uint8_t value);

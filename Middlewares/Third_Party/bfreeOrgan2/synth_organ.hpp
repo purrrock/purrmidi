@@ -92,6 +92,14 @@ namespace synth
 		void synthesize_block(synth::sample_t *out,uint32_t n);
 
 		/**
+		* PurrMidi: Pitch Bend of the whole organ. delta_q32 = (ratio - 1) * 2^32, where ratio is the frequency
+		* multiplier of every tonewheel (|delta| < 2^31). The shared time base advances by 1 + delta/2^32 samples per
+		* sample, so the phase of all tonewheels stays continuous when the ratio changes (no clicks). 0 = no bend.
+		* Used by synthesize_block() only (synthesize_sample() ignores it).
+		*/
+		void set_pitch_delta(int32_t delta_q32);
+
+		/**
 		* Constructor of the organ synthesizer class.
 		*/
 		synth_organ();
@@ -141,6 +149,12 @@ namespace synth
 		* The Phase Table.
 		*/
 		uint32_t phase_counter;
+		/**
+		* PurrMidi: fraction of the shared time base (units of 2^-32 sample) and its per-sample deviation from 1.
+		* Both are 0 until Pitch Bend is used.
+		*/
+		uint32_t phase_frac;
+		int32_t pitch_delta;
 		/**
 		* An effect unit.
 		*/

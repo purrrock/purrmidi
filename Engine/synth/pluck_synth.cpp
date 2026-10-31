@@ -38,6 +38,9 @@
 #define PLUCK_PICK_POSITION     0.17f   // Положение щипка вдоль струны (доля длины от моста)
 #define PLUCK_DECAY_DEFAULT     0.88f
 #define PLUCK_BRIGHT_DEFAULT    0.40f
+#define PLUCK_BEND_RANGE        2.0f    // Диапазон колеса высоты тона, полутонов в каждую сторону (как у остальных движков)
+#define PLUCK_BEND_TICK         16      // Перенастройка струн при изгибе - раз в столько сэмплов (степень двойки)
+#define PLUCK_KILL_TIME_SEC     0.02f   // All Sound Off: быстрое (без щелчка) гашение струны
 #define EVENT_FIFO_SIZE         32      // Буфер событий NoteOn, NoteOff, CC (степень двойки)
 #define NOTE_ON_FIFO_LIMIT      28      // Лимит слотов для Note On (оставляет резерв для Note Off и CC)
 
@@ -71,6 +74,7 @@ struct PluckVoice {
     float damp_offset{0.0f};
     float freq{440.0f};
     float damper_env{0.0f};
+    bool  kill{false};                         // All Sound Off: быстрое гашение независимо от клавиши и педали
     float level_ema{0.0f};
     uint32_t trigger_age{0};
     uint8_t press_count{0};                    // Счётчик удержаний нажатия клавиши для данной ноты
@@ -83,12 +87,19 @@ static PluckVoice* voices = nullptr;
 
 static uint32_t global_trigger_counter = 0;
 static float release_coeff = 0.0f;
+static float kill_coeff = 0.0f;
 static uint32_t noise_state = 0x1234567u;   // xorshift32; сбрасывается в Init(): звук воспроизводим бит-в-бит
 
 // Переменные состояния непрерывных контроллеров (MIDI CC)
 static std::atomic<float> user_decay{PLUCK_DECAY_DEFAULT};
 static std::atomic<float> user_damp{PLUCK_BRIGHT_DEFAULT};   // яркость 0..1 (выше - ярче)
 static std::atomic<float> user_mod{0.0f};                    // мод-колесо 0..1: прибавка яркости, в нуле нейтрально
+
+// Колесо высоты тона: «последнее значение» без очереди (возврат в центр не может потеряться). Пишет main, читает аудио.
+static std::atomic<int16_t> user_bend{0};
+static float    bend_semitones = 0.0f;    // сглаженное положение колеса, полутонов (только аудио-контекст)
+static float    bend_ratio     = 1.0f;    // множитель частоты всех струн (только аудио-контекст)
+static uint32_t bend_counter   = 0;
 
 // Параметры, с которыми последний раз пересчитывались коэффициенты звучащих голосов (только аудио-контекст)
 static float applied_decay = -1.0f, applied_damp = -1.0f, applied_mod = -1.0f;
@@ -185,6 +196,30 @@ static void update_loop(PluckVoice& v, float decay, float brightness) {
     v.loop_gain = (g > 0.99995f) ? 0.99995f : g;
 }
 
+// Настройка петли на частоту voice.freq * ratio: целая задержка и all-pass для дробной части. Используется при Note On и
+// при изгибе. Частота зажимается так, чтобы задержка не вышла за линию (низ) и за предел Найквиста (верх).
+static void tune_voice(PluckVoice& v, float ratio, bool running = false) {
+    const float min_freq = PLUCK_SAMPLE_RATE / (float)(PLUCK_BUFFER_SIZE - 4);
+    const float max_freq = PLUCK_SAMPLE_RATE * 0.45f;
+    const float f = clamp_f(v.freq * ratio, min_freq, max_freq);
+
+    // Настройка: период = SR/f; из него вычитаем задержку ФНЧ на низких частотах c/(1-c);
+    // остаток делим на целую часть и дробную d в [0.5, 1.5) - её отрабатывает all-pass
+    float total = PLUCK_SAMPLE_RATE / f - v.lp_coeff / (1.0f - v.lp_coeff);
+    total = clamp_f(total, 1.6f, (float)(PLUCK_BUFFER_SIZE - 4));
+    const int32_t old_delay = v.delay_int;
+    v.delay_int = (int32_t)(total - 0.5f);
+    const float d = total - (float)v.delay_int;
+    v.ap_coeff = (1.0f - d) / (1.0f + d);
+
+    // Струна уже звучит и целая часть задержки сменилась на ±1: поток входных отсчётов all-pass сдвинулся на отсчёт
+    // назад/вперёд, поэтому «предыдущий вход» тоже берём из линии на новой позиции чтения. Иначе состояние all-pass
+    // не согласовано с новым коэффициентом, и на каждом переходе слышен щелчок.
+    if (running && v.delay_int != old_delay) {
+        v.ap_x1 = v.line[(v.write_pos - (uint32_t)v.delay_int - 1U) & PLUCK_BUFFER_MASK];
+    }
+}
+
 // Возбуждение струны: мягкий щипок. Заполняет линию задержки и сбрасывает состояния фильтров петли.
 static void excite(PluckVoice& v, float amp, float norm_vel, float brightness) {
     const int32_t n = v.delay_int;
@@ -220,6 +255,10 @@ static void excite(PluckVoice& v, float amp, float norm_vel, float brightness) {
     const float scale = (rms > 1e-9f) ? (PLUCK_EXCITE_RMS * amp / rms) : 0.0f;
     for (int32_t i = 0; i < n; i++) e[i] *= scale;
 
+    // Остаток линии обнуляем: при изгибе вниз задержка удлиняется, и чтение заходит левее начала возбуждения - там не
+    // должно быть остатков предыдущей ноты этого голоса. Без изгиба эта область не читается, звук не меняется.
+    for (int32_t i = n; i < PLUCK_BUFFER_SIZE; i++) e[i] = 0.0f;
+
     v.write_pos = (uint32_t)n & PLUCK_BUFFER_MASK;   // первое чтение: line[0]
     v.ap_x1 = v.ap_y1 = 0.0f;
     v.lp_state = 0.0f;
@@ -247,6 +286,11 @@ void PluckSynth_Init(void) {
     voices = SynthArena_NewArray<PluckVoice, PLUCK_VOICES>(&voices);
 
     release_coeff = std::exp(-1.0f / (PLUCK_SAMPLE_RATE * PLUCK_RELEASE_TIME_SEC));
+    kill_coeff = std::exp(-1.0f / (PLUCK_SAMPLE_RATE * PLUCK_KILL_TIME_SEC));
+    user_bend.store(0, std::memory_order_relaxed);
+    bend_semitones = 0.0f;
+    bend_ratio = 1.0f;
+    bend_counter = 0;
     global_trigger_counter = 0;
     audio_sustain_pedal = false;
     noise_state = 0x1234567u;
@@ -267,6 +311,7 @@ void PluckSynth_Init(void) {
         voices[i].damp_offset  = 0.0f;
         voices[i].freq         = 440.0f;
         voices[i].damper_env   = 0.0f;
+        voices[i].kill         = false;
         voices[i].level_ema    = 0.0f;
         voices[i].trigger_age  = 0;
         voices[i].press_count  = 0;
@@ -330,6 +375,10 @@ void PluckSynth_SetDamp(float damp) {
     user_damp.store(clamp_f(damp, 0.0f, PLUCK_MAX_DAMP), std::memory_order_relaxed);
 }
 
+void PluckSynth_PitchBend(int16_t bend) {
+    user_bend.store(bend < -8192 ? (int16_t)-8192 : (bend > 8191 ? (int16_t)8191 : bend), std::memory_order_relaxed);
+}
+
 bool PluckSynth_IsNoteActive(uint8_t midi_note) {
     if (midi_note >= 128 || !SynthArena_IsOwner(&voices)) return false;
     for (int i = 0; i < PLUCK_VOICES; i++) {
@@ -361,7 +410,8 @@ void PluckSynth_ControlChange(uint8_t control, uint8_t value) {
             PluckSynth_SetDecay(0.50f + norm * 0.495f);
             break;
 
-        case 64: {
+        case 64:
+        case 120: {   // педаль и All Sound Off: потеря события = залипшие ноты, поэтому критичные
             PluckEvent event{};
             event.type   = EVENT_CONTROL_CHANGE;
             event.param1 = control;
@@ -437,6 +487,7 @@ int16_t PluckSynth_NextSample(void) {
             v.trigger_age  = ++global_trigger_counter;
             if (v.press_count < 255) v.press_count++;
             v.sustain_held = false;
+            v.kill         = false;
 
             const float ratio = PLUCK_REF_FREQ / v.freq;
             v.c_scale = std::pow(ratio, 0.8f);
@@ -447,13 +498,7 @@ int16_t PluckSynth_NextSample(void) {
                                                       user_mod.load(std::memory_order_relaxed), v.damp_offset);
             update_loop(v, cur_decay, bright);
 
-            // Настройка: период = SR/f; из него вычитаем задержку ФНЧ на низких частотах c/(1-c);
-            // остаток делим на целую часть и дробную d в [0.5, 1.5) - её отрабатывает all-pass
-            float total = PLUCK_SAMPLE_RATE / v.freq - v.lp_coeff / (1.0f - v.lp_coeff);
-            total = clamp_f(total, 1.6f, (float)(PLUCK_BUFFER_SIZE - 4));
-            v.delay_int = (int32_t)(total - 0.5f);
-            const float d = total - (float)v.delay_int;
-            v.ap_coeff = (1.0f - d) / (1.0f + d);
+            tune_voice(v, bend_ratio);   // новая нота сразу берётся с учётом положения колеса
 
             const float norm_vel = clamp_f((float)event.param2 * (1.0f / 127.0f), 0.0f, 1.0f);
             excite(v, event.amp, norm_vel, bright);
@@ -475,7 +520,15 @@ int16_t PluckSynth_NextSample(void) {
                 }
             }
         } else if (event.type == EVENT_CONTROL_CHANGE) {
-            if (event.param1 == 64) {
+            if (event.param1 == 120) {
+                // All Sound Off: все струны быстро (за ~20 мс, без щелчка) гасятся, педаль и удержания сбрасываются
+                audio_sustain_pedal = false;
+                for (int i = 0; i < PLUCK_VOICES; i++) {
+                    voices[i].press_count  = 0;
+                    voices[i].sustain_held = false;
+                    voices[i].kill         = true;
+                }
+            } else if (event.param1 == 64) {
                 bool pedal_on = (event.param2 >= 64);
                 audio_sustain_pedal = pedal_on;
                 if (!pedal_on) {
@@ -508,6 +561,22 @@ int16_t PluckSynth_NextSample(void) {
         }
     }
 
+    // Колесо высоты тона: раз в PLUCK_BEND_TICK сэмплов сглаживаем положение и перестраиваем звучащие струны.
+    if ((bend_counter++ & (PLUCK_BEND_TICK - 1U)) == 0U) {
+        const float target = (float)user_bend.load(std::memory_order_relaxed) * (PLUCK_BEND_RANGE / 8192.0f);
+        bend_semitones += (target - bend_semitones) * 0.25f;
+        if (std::abs(target - bend_semitones) < 1e-4f) bend_semitones = target;   // точно в цель: возврат в центр = ровно 1.0
+        const float ratio = (bend_semitones == 0.0f) ? 1.0f : std::exp2(bend_semitones * (1.0f / 12.0f));
+        if (ratio != bend_ratio) {
+            bend_ratio = ratio;
+            for (int i = 0; i < PLUCK_VOICES; i++) {
+                if (voices[i].voice_state.load(std::memory_order_relaxed) >= 0) {
+                    tune_voice(voices[i], bend_ratio, true);
+                }
+            }
+        }
+    }
+
     for (int i = 0; i < PLUCK_VOICES; i++) {
         PluckVoice& v = voices[i];
 
@@ -515,7 +584,9 @@ int16_t PluckSynth_NextSample(void) {
             float sample_f = process_voice(v);
 
             // Если клавиша отпущена И нота не удерживается педалью CC64, опускаем демпфер (damper decay)
-            if (v.press_count == 0 && !v.sustain_held) {
+            if (v.kill) {
+                v.damper_env *= kill_coeff;
+            } else if (v.press_count == 0 && !v.sustain_held) {
                 v.damper_env *= release_coeff;
             }
 

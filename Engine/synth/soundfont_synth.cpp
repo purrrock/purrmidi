@@ -40,6 +40,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
 #include <cstdio>
 
 /* 1 = collect per-block statistics (render time, voices, clipping) and print them from the main loop.
@@ -106,6 +107,12 @@ synth::LoadGovernor g_gov(SF2_EVENT_BUDGET_PCT, SF2_SHED_SOUNDING_PCT);
  * to centre can never be lost. Written by main, read by the audio context. */
 std::atomic<int> g_pitch_wheel{8192};
 int              g_pitch_applied = 8192;   /* audio context only */
+/* Мод-колесо (CC1): вибрато. SF2-банк по спецификации связывает CC1 с вибрато-LFO, но TinySoundFont модуляторов не
+ * поддерживает, поэтому вибрато делаем здесь: колесо высоты тона качается вокруг своего положения синусом ~5,5 Гц
+ * (глубина до ±SF2_VIBRATO_CENTS при CC1 = 127). В нуле колесо ничего не добавляет, звук не меняется. */
+std::atomic<uint8_t>  g_mod_wheel{0};
+float                 g_vib_phase = 0.0f;    /* аудио-контекст */
+bool                  g_vib_active = false;  /* вибрато сейчас применено к каналу (аудио-контекст) */
 std::atomic<uint32_t> g_preset_requested{0};   /* последний запрошенный из main индекс пресета */
 uint32_t         g_preset_applied = 0;     /* пресет, применённый в аудиоконтексте */
 
@@ -177,6 +184,38 @@ inline float soft_limit(float x)
 
 constexpr uint32_t kRenderChunkFrames = 128U;
 
+#ifndef SF2_VIBRATO_CENTS
+#define SF2_VIBRATO_CENTS 30.0f   /* глубина вибрато при CC1 = 127, центов в каждую сторону */
+#endif
+#ifndef SF2_VIBRATO_HZ
+#define SF2_VIBRATO_HZ 5.5f
+#endif
+
+/* Вибрато от мод-колеса: перед каждым куском рендера смещаем колесо высоты тона относительно положения, заданного
+ * пользователем (g_pitch_applied). Единицы колеса зависят от диапазона RPN 0: 16383 / (2 * диапазон в центах). */
+void apply_vibrato(uint32_t chunk_frames)
+{
+    const uint8_t mod = g_mod_wheel.load(std::memory_order_relaxed);
+    if (mod == 0U && !g_vib_active) {
+        return;   /* колесо в нуле и вибрато не применялось: ничего не делаем (путь без вибрато не меняется) */
+    }
+    int wheel = g_pitch_applied;
+    if (mod != 0U) {
+        const float range_semitones = tsf_channel_get_pitchrange(g_tsf, 0);
+        const float units_per_cent  = 16383.0f / (2.0f * range_semitones * 100.0f);
+        const float depth_cents     = SF2_VIBRATO_CENTS * ((float)mod * (1.0f / 127.0f));
+        wheel += (int)(std::sin(6.28318530717958647692f * g_vib_phase) * depth_cents * units_per_cent);
+        if (wheel < 0) wheel = 0;
+        if (wheel > 16383) wheel = 16383;
+        g_vib_phase += SF2_VIBRATO_HZ * (float)chunk_frames / 48000.0f;
+        if (g_vib_phase >= 1.0f) g_vib_phase -= 1.0f;
+        g_vib_active = true;
+    } else {
+        g_vib_active = false;   /* колесо вернули в ноль: возвращаем пользовательское положение */
+    }
+    tsf_channel_set_pitchwheel(g_tsf, 0, wheel);
+}
+
 /* Render num_frames of stereo audio as float, measure the mix, limit it, convert to int16. */
 void render_block(int16_t *out, uint32_t num_frames)
 {
@@ -184,6 +223,7 @@ void render_block(int16_t *out, uint32_t num_frames)
 
     while (num_frames) {
         const uint32_t n = (num_frames > kRenderChunkFrames) ? kRenderChunkFrames : num_frames;
+        apply_vibrato(n);
         tsf_render_float(g_tsf, mix, (int)n, 0);
 
         float peak = 0.0f;
@@ -374,6 +414,7 @@ void SoundFontSynth_Init(void)
 
     if (g_tsf) {
         tsf_reset(g_tsf);
+        tsf_kill_all_voices(g_tsf);   /* tsf_reset() только запускает быстрый спад: добиваем, чтобы хвоста прежних нот не было */
         tsf_channel_set_presetindex(g_tsf, 0, 0);
         g_preset_requested.store(0, std::memory_order_relaxed);
         g_preset_applied = 0;
@@ -383,6 +424,9 @@ void SoundFontSynth_Init(void)
     g_gov.ResetState();     /* оценки цены голоса сохраняются между выборами движка */
     g_pitch_wheel.store(8192, std::memory_order_relaxed);
     g_pitch_applied = 8192;
+    g_mod_wheel.store(0, std::memory_order_relaxed);
+    g_vib_phase = 0.0f;
+    g_vib_active = false;
 }
 
 void SoundFontSynth_NoteOn(uint8_t note, uint8_t velocity)
@@ -413,6 +457,12 @@ void SoundFontSynth_ControlChange(uint8_t control, uint8_t value)
 {
     if (!g_loaded || !g_tsf) return;
     if (control > 127) return;
+
+    if (control == 1) {
+        /* Мод-колесо: вибрато делается в SoundFontSynth_FillStereoBuffer(), в TinySoundFont событие не передаётся. */
+        g_mod_wheel.store(value > 127 ? (uint8_t)127 : value, std::memory_order_relaxed);
+        return;
+    }
 
     Event ev = { EV_CC, control, (uint8_t)(value > 127 ? 127 : value) };
     if (control == 64 || control == 120 || control == 123) {
