@@ -15,7 +15,14 @@ https://purrrock.github.io/purrmidi/
 The project includes STM32H743 firmware, a Windows application for testing the sound engines on a PC (it can run without a MIDI keyboard), and six sound engines (electric piano, guitar (nylon string), lead, organ, violin, SoundFont).
 Hardware and firmware of version 1.0 are complete.
 
-## Hardware
+* **[For building and playing](#for-building-and-playing)**: what to buy, how to flash the board and play. You do not need to compile anything or know electronics.
+* **[For developers](#for-developers)**: building from source, tests, how the firmware works.
+
+## For building and playing
+
+This part is for anyone who wants to build the device and play it. The firmware is prebuilt and the guides are step by step; no compiler is needed.
+
+### Hardware
 
 * **Microcontroller:** WeAct STM32H743VIT6 Mini (Cortex-M7).
 * **Audio DAC:** PCM5102A.
@@ -26,7 +33,7 @@ Hardware and firmware of version 1.0 are complete.
 
 Connections and pinout: [docs/HARDWARE.md](docs/HARDWARE.md) (in Russian).
 
-## Basic operation
+### Basic operation
 
 **Connecting.** Plug the USB MIDI keyboard into the board's USB OTG connector (the device works as a USB Host) and connect the PCM5102A audio output to an amplifier or headphones. Power it on: the E-Piano starts.
 If the board is powered through the same USB connector that the MIDI keyboard uses (yes, this is possible!), you will need a Y-splitter cable.
@@ -57,13 +64,33 @@ The instrument name and active notes are shown on the display. The selected inst
 | Violin | CC1 adds vibrato, CC70 / CC71 / CC75 bow position, pressure and noise, aftertouch |
 | SoundFont | CC1 vibrato (Pitch Bend range via RPN 0) |
 
-The full list of controllers and ranges is in [docs/ENGINES.md](docs/ENGINES.md) (in Russian).
+![What the keyboard's knobs and wheels do in PurrMidi](docs/controls_en.svg)
+
+Which knob changes what on each instrument is in the [controller table](docs/ENGINES.md#что-делают-ручки-и-колёса-вашей-клавиатуры) (in Russian); when you move a knob, its name and value appear on the display. The full list of controllers and ranges is in [docs/ENGINES.md](docs/ENGINES.md) (in Russian).
 
 **Custom SoundFont.** Put the bank file in the root of the microSD card named `SNDFNT.SF2`, insert the card and power the device on: the bank is automatically written to Flash memory (30–60 seconds, progress is shown on the display). After that the card is no longer needed. Details and troubleshooting are in [docs/SOUNDFONT.md](docs/SOUNDFONT.md) (in Russian).
 `SNDFNT.SF2` must not exceed 8 MB (8,384,512 bytes), otherwise it will not fit into Flash. You can reduce the file size with the online tool on the project website, section “Your own SoundFont” (runs in the browser, nothing is uploaded), with `/SoundFonts/sf2_shrink.py` (the same algorithm as a CLI) or with the free Polyphone utility.
 The `/SoundFonts` directory contains several small instrument banks.
 
-## Building
+### Flashing the board
+
+The prebuilt firmware is on the [Releases](https://github.com/purrrock/purrmidi/releases/latest) page; you do not need to build it yourself. Flash it with STM32CubeProgrammer.
+
+No programmer and no software to install: the [web flasher](https://purrrock.github.io/purrmidi/flash/) writes the firmware over the board's USB bootloader (DFU) straight from a Chromium-based browser (WebUSB). Step-by-step manual with STM32CubeProgrammer: [docs/FLASHING.md](docs/FLASHING.md) (Russian).
+
+### Documentation for users (in Russian)
+
+| Document | Contents |
+| -------- | -------- |
+| [docs/FLASHING.md](docs/FLASHING.md) | How to flash the board, step by step |
+| [docs/HARDWARE.md](docs/HARDWARE.md) | Pinout, DAC jumpers, UART, VBAT battery |
+| [docs/ENGINES.md](docs/ENGINES.md) | Sound engines, Program Change, volume, controller table |
+| [docs/FAQ.md](docs/FAQ.md) | FAQ: no sound, keyboard not detected, and so on |
+| [enclosure/](enclosure/README.md) | Enclosure |
+
+## For developers
+
+Building from source, tests and how the firmware works. Terms such as XIP, MPU, SAI and PendSV are only needed here and are explained in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### Getting the sources
 
@@ -73,7 +100,7 @@ git clone https://github.com/purrrock/purrmidi
 
 Everything needed for the build is in the repository itself (third-party code is in `Middlewares/Third_Party/` and `Platform/display/st7735/`).
 
-### STM32 firmware
+### STM32 firmware from source
 
 ```bash
 cmake --preset Debug
@@ -87,11 +114,7 @@ cmake --preset Release
 cmake --build --preset Release
 ```
 
-### Flashing the board
-
-Prebuilt `purrmidi.elf` are available as the CI artifact `purrmidi-stm32h743-firmware`. Flash through STM32CubeProgrammer.
-
-No programmer and no software to install: the [web flasher](https://purrrock.github.io/purrmidi/flash/) writes the firmware over the board's USB bootloader (DFU) straight from a Chromium-based browser (WebUSB). Step-by-step manual with STM32CubeProgrammer: [docs/FLASHING.md](docs/FLASHING.md) (Russian).
+The `purrmidi.elf` of every CI build is available as the artifact `purrmidi-stm32h743-firmware`.
 
 ### Windows version
 
@@ -104,16 +127,14 @@ cmake --build --preset win-msvc-release
 
 Command-line options, the virtual keyboard and tests: [docs/WINDOWS_BUILD.md](docs/WINDOWS_BUILD.md) (in Russian).
 
-## Documentation (in Russian)
+### Documentation for developers (in Russian)
 
 | Document | Contents |
 | -------- | -------- |
-| [docs/HARDWARE.md](docs/HARDWARE.md) | Pinout, DAC jumpers, UART, VBAT battery |
-| [docs/ENGINES.md](docs/ENGINES.md) | Sound engines, Program Change, volume, all CCs |
-| [docs/SOUNDFONT.md](docs/SOUNDFONT.md) | SoundFont bank, QSPI Flash (XIP), SD card, CubeMX settings, diagnostics |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | MIDI path, DMA, memory, repository layout, USB Host |
+| [docs/SOUNDFONT.md](docs/SOUNDFONT.md) | SoundFont bank, QSPI Flash (XIP), SD card, CubeMX settings, diagnostics |
 | [docs/WINDOWS_BUILD.md](docs/WINDOWS_BUILD.md) | Windows app and tests |
-| [enclosure/](enclosure/README.md) | Enclosure |
+| [ROADMAP.md](ROADMAP.md) | Development plans (in Russian) |
 
 ## Licenses
 

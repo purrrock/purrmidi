@@ -1,0 +1,1113 @@
+From 64a63c5dc39b36ab271047035ceaf7e17a4e9417 Mon Sep 17 00:00:00 2001
+From: purrmidi-dev <dev@example.invalid>
+Date: Sun, 1 Nov 2026 13:37:10 +0000
+Subject: [PATCH] docs: controller table and illustration, README split into
+ players/developers
+
+---
+ README.md                 |  51 +++++++++----
+ README_RU.md              |  51 +++++++++----
+ ROADMAP.md                |  10 +--
+ docs/ENGINES.md           |  35 +++++++++
+ docs/controls_en.svg      | 143 ++++++++++++++++++++++++++++++++++
+ docs/controls_ru.svg      | 141 ++++++++++++++++++++++++++++++++++
+ site/controls_en.svg      | 143 ++++++++++++++++++++++++++++++++++
+ site/controls_ru.svg      | 141 ++++++++++++++++++++++++++++++++++
+ site/index.html           |   3 +-
+ site/ru/index.html        |   3 +-
+ tools/gen_controls_svg.py | 157 ++++++++++++++++++++++++++++++++++++++
+ 11 files changed, 841 insertions(+), 37 deletions(-)
+ create mode 100644 docs/controls_en.svg
+ create mode 100644 docs/controls_ru.svg
+ create mode 100644 site/controls_en.svg
+ create mode 100644 site/controls_ru.svg
+ create mode 100644 tools/gen_controls_svg.py
+
+diff --git a/README.md b/README.md
+index f0e04fd..f7de89d 100644
+--- a/README.md
++++ b/README.md
+@@ -15,7 +15,14 @@ https://purrrock.github.io/purrmidi/
+ The project includes STM32H743 firmware, a Windows application for testing the sound engines on a PC (it can run without a MIDI keyboard), and six sound engines (electric piano, guitar (nylon string), lead, organ, violin, SoundFont).
+ Hardware and firmware of version 1.0 are complete.
+ 
+-## Hardware
++* **[For building and playing](#for-building-and-playing)**: what to buy, how to flash the board and play. You do not need to compile anything or know electronics.
++* **[For developers](#for-developers)**: building from source, tests, how the firmware works.
++
++## For building and playing
++
++This part is for anyone who wants to build the device and play it. The firmware is prebuilt and the guides are step by step; no compiler is needed.
++
++### Hardware
+ 
+ * **Microcontroller:** WeAct STM32H743VIT6 Mini (Cortex-M7).
+ * **Audio DAC:** PCM5102A.
+@@ -26,7 +33,7 @@ Hardware and firmware of version 1.0 are complete.
+ 
+ Connections and pinout: [docs/HARDWARE.md](docs/HARDWARE.md) (in Russian).
+ 
+-## Basic operation
++### Basic operation
+ 
+ **Connecting.** Plug the USB MIDI keyboard into the board's USB OTG connector (the device works as a USB Host) and connect the PCM5102A audio output to an amplifier or headphones. Power it on: the E-Piano starts.
+ If the board is powered through the same USB connector that the MIDI keyboard uses (yes, this is possible!), you will need a Y-splitter cable.
+@@ -57,13 +64,33 @@ The instrument name and active notes are shown on the display. The selected inst
+ | Violin | CC1 adds vibrato, CC70 / CC71 / CC75 bow position, pressure and noise, aftertouch |
+ | SoundFont | CC1 vibrato (Pitch Bend range via RPN 0) |
+ 
+-The full list of controllers and ranges is in [docs/ENGINES.md](docs/ENGINES.md) (in Russian).
++![What the keyboard's knobs and wheels do in PurrMidi](docs/controls_en.svg)
++
++Which knob changes what on each instrument is in the [controller table](docs/ENGINES.md#что-делают-ручки-и-колёса-вашей-клавиатуры) (in Russian); when you move a knob, its name and value appear on the display. The full list of controllers and ranges is in [docs/ENGINES.md](docs/ENGINES.md) (in Russian).
+ 
+ **Custom SoundFont.** Put the bank file in the root of the microSD card named `SNDFNT.SF2`, insert the card and power the device on: the bank is automatically written to Flash memory (30–60 seconds, progress is shown on the display). After that the card is no longer needed. Details and troubleshooting are in [docs/SOUNDFONT.md](docs/SOUNDFONT.md) (in Russian).
+ `SNDFNT.SF2` must not exceed 8 MB (8,384,512 bytes), otherwise it will not fit into Flash. You can reduce the file size with the online tool on the project website, section “Your own SoundFont” (runs in the browser, nothing is uploaded), with `/SoundFonts/sf2_shrink.py` (the same algorithm as a CLI) or with the free Polyphone utility.
+ The `/SoundFonts` directory contains several small instrument banks.
+ 
+-## Building
++### Flashing the board
++
++The prebuilt firmware is on the [Releases](https://github.com/purrrock/purrmidi/releases/latest) page; you do not need to build it yourself. Flash it with STM32CubeProgrammer.
++
++No programmer and no software to install: the [web flasher](https://purrrock.github.io/purrmidi/flash/) writes the firmware over the board's USB bootloader (DFU) straight from a Chromium-based browser (WebUSB). Step-by-step manual with STM32CubeProgrammer: [docs/FLASHING.md](docs/FLASHING.md) (Russian).
++
++### Documentation for users (in Russian)
++
++| Document | Contents |
++| -------- | -------- |
++| [docs/FLASHING.md](docs/FLASHING.md) | How to flash the board, step by step |
++| [docs/HARDWARE.md](docs/HARDWARE.md) | Pinout, DAC jumpers, UART, VBAT battery |
++| [docs/ENGINES.md](docs/ENGINES.md) | Sound engines, Program Change, volume, controller table |
++| [docs/FAQ.md](docs/FAQ.md) | FAQ: no sound, keyboard not detected, and so on |
++| [enclosure/](enclosure/README.md) | Enclosure |
++
++## For developers
++
++Building from source, tests and how the firmware works. Terms such as XIP, MPU, SAI and PendSV are only needed here and are explained in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+ 
+ ### Getting the sources
+ 
+@@ -73,7 +100,7 @@ git clone https://github.com/purrrock/purrmidi
+ 
+ Everything needed for the build is in the repository itself (third-party code is in `Middlewares/Third_Party/` and `Platform/display/st7735/`).
+ 
+-### STM32 firmware
++### STM32 firmware from source
+ 
+ ```bash
+ cmake --preset Debug
+@@ -87,11 +114,7 @@ cmake --preset Release
+ cmake --build --preset Release
+ ```
+ 
+-### Flashing the board
+-
+-Prebuilt `purrmidi.elf` are available as the CI artifact `purrmidi-stm32h743-firmware`. Flash through STM32CubeProgrammer.
+-
+-No programmer and no software to install: the [web flasher](https://purrrock.github.io/purrmidi/flash/) writes the firmware over the board's USB bootloader (DFU) straight from a Chromium-based browser (WebUSB). Step-by-step manual with STM32CubeProgrammer: [docs/FLASHING.md](docs/FLASHING.md) (Russian).
++The `purrmidi.elf` of every CI build is available as the artifact `purrmidi-stm32h743-firmware`.
+ 
+ ### Windows version
+ 
+@@ -104,16 +127,14 @@ cmake --build --preset win-msvc-release
+ 
+ Command-line options, the virtual keyboard and tests: [docs/WINDOWS_BUILD.md](docs/WINDOWS_BUILD.md) (in Russian).
+ 
+-## Documentation (in Russian)
++### Documentation for developers (in Russian)
+ 
+ | Document | Contents |
+ | -------- | -------- |
+-| [docs/HARDWARE.md](docs/HARDWARE.md) | Pinout, DAC jumpers, UART, VBAT battery |
+-| [docs/ENGINES.md](docs/ENGINES.md) | Sound engines, Program Change, volume, all CCs |
+-| [docs/SOUNDFONT.md](docs/SOUNDFONT.md) | SoundFont bank, QSPI Flash (XIP), SD card, CubeMX settings, diagnostics |
+ | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | MIDI path, DMA, memory, repository layout, USB Host |
++| [docs/SOUNDFONT.md](docs/SOUNDFONT.md) | SoundFont bank, QSPI Flash (XIP), SD card, CubeMX settings, diagnostics |
+ | [docs/WINDOWS_BUILD.md](docs/WINDOWS_BUILD.md) | Windows app and tests |
+-| [enclosure/](enclosure/README.md) | Enclosure |
++| [ROADMAP.md](ROADMAP.md) | Development plans (in Russian) |
+ 
+ ## Licenses
+ 
+diff --git a/README_RU.md b/README_RU.md
+index fb26c54..0f8891d 100644
+--- a/README_RU.md
++++ b/README_RU.md
+@@ -13,7 +13,14 @@ https://purrrock.github.io/purrmidi/
+ В проекте есть прошивка STM32H743, Windows-приложение для проверки звуковых движков на ПК (может работать без MIDI-клавиатуры), шесть звуковых движков (электропиано, гитара (нейлоновая струна), лид, орган, скрипка, SoundFont).
+ Аппаратная часть и прошивка версии 1.0.
+ 
+-## Аппаратное обеспечение
++* **[Для сборки и игры](#для-сборки-и-игры)**: что купить, как прошить плату и играть. Собирать проект из исходников и разбираться в электронике не нужно.
++* **[Для разработчиков](#для-разработчиков)**: сборка из исходников, тесты, устройство прошивки.
++
++## Для сборки и игры
++
++Этот раздел для тех, кто хочет собрать прибор и играть. Готовая прошивка и пошаговые инструкции есть, компилятор не нужен.
++
++### Аппаратное обеспечение
+ 
+ * **Микроконтроллер:** WeAct STM32H743VIT6 Mini (Cortex-M7).
+ * **Аудио ЦАП:** PCM5102A.
+@@ -24,7 +31,7 @@ https://purrrock.github.io/purrmidi/
+ 
+ Подключения и распиновка — в [docs/HARDWARE.md](docs/HARDWARE.md).
+ 
+-## Основы работы
++### Основы работы
+ 
+ **Подключение.** USB MIDI-клавиатуру подключите к USB OTG разъёму платы (прибор работает как USB Host), аудиовыход PCM5102A — к усилителю или наушникам. Включите питание: запускается последний выбраный инструмент. Если первый запуск, то E-Piano.
+ Если для питания платы используется тот же USB разъём, что и для подключения MIDI-клавиатуры (да, так можно!), то вам понадобится Y-разветвитель.
+@@ -55,13 +62,33 @@ https://purrrock.github.io/purrmidi/
+ | Violin | CC1 добавляет вибрато, CC70 / CC71 / CC75 положение, прижим и шум смычка, aftertouch |
+ | SoundFont | CC1 вибрато (диапазон Pitch Bend — по RPN 0) |
+ 
+-Полный список контроллеров и диапазоны — в [docs/ENGINES.md](docs/ENGINES.md).
++![Ручки и колёса клавиатуры и что они делают в PurrMidi](docs/controls_ru.svg)
++
++Какая ручка что меняет в каждом инструменте — в [таблице контроллеров](docs/ENGINES.md#что-делают-ручки-и-колёса-вашей-клавиатуры); двигаете ручку — на дисплее появляется её название и значение. Полный список и диапазоны — в [docs/ENGINES.md](docs/ENGINES.md).
+ 
+ **Свой SoundFont.** Положите файл банка в корень microSD-карты под именем `SNDFNT.SF2`, вставьте карту и включите прибор: банк автоматически запишется во флеш-память (30–60 секунд, ход виден на дисплее). Дальше карта не нужна. Подробности и диагностика — в [docs/SOUNDFONT.md](docs/SOUNDFONT.md).
+ Размер `SNDFNT.SF2` не должен превышать 8 МБ (точнее, 8 384 512 байт), иначе он не поместится во флеш-память. Уменьшить размер файла можно онлайн-инструментом на сайте проекта, раздел «Свой SoundFont» (работает в браузере, файл никуда не отправляется), скриптом `SoundFonts/sf2_shrink.py` (тот же алгоритм из командной строки) или бесплатной утилитой Polyphone.
+ В каталоге `SoundFonts/` лежат несколько небольших банков инструментов.
+ 
+-## Сборка
++### Прошивка платы
++
++Готовая прошивка лежит на странице [Releases](https://github.com/purrrock/purrmidi/releases/latest), собирать её самостоятельно не нужно. Прошить можно через STM32CubeProgrammer.
++
++Можно обойтись без программатора и без установки программ: [веб-прошивальщик](https://purrrock.github.io/purrmidi/ru/flash/) записывает прошивку через USB-загрузчик платы (DFU) прямо из браузера на Chromium (WebUSB). Пошаговая инструкция с STM32CubeProgrammer — в [docs/FLASHING.md](docs/FLASHING.md).
++
++### Документация для пользователя
++
++| Документ | О чём |
++| -------- | ----- |
++| [docs/FLASHING.md](docs/FLASHING.md) | Как прошить плату, пошагово |
++| [docs/HARDWARE.md](docs/HARDWARE.md) | Распиновка, подключение ЦАП (перемычки), UART, батарейка VBAT |
++| [docs/ENGINES.md](docs/ENGINES.md) | Звуковые движки, Program Change, громкость, таблица контроллеров |
++| [docs/FAQ.md](docs/FAQ.md) | Вопросы и ответы: нет звука, клавиатура не определяется и т. д. |
++| [enclosure/](enclosure/README.md) | Корпус |
++
++## Для разработчиков
++
++Сборка из исходников, тесты и устройство прошивки. Термины вроде XIP, MPU, SAI и PendSV нужны только здесь и описаны в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+ 
+ ### Получение исходников
+ 
+@@ -71,7 +98,7 @@ git clone https://github.com/purrrock/purrmidi
+ 
+ Всё, что нужно для сборки, лежит в самом репозитории (сторонний код — в `Middlewares/Third_Party/` и `Platform/display/st7735/`).
+ 
+-### Прошивка STM32
++### Прошивка STM32 из исходников
+ 
+ ```bash
+ cmake --preset Debug
+@@ -85,11 +112,7 @@ cmake --preset Release
+ cmake --build --preset Release
+ ```
+ 
+-### Прошивка платы
+-
+-Готовый `purrmidi.elf` лежит в `purrmidi-stm32h743-firmware`. Прошить можно через STM32CubeProgrammer.
+-
+-Можно обойтись без программатора и без установки программ: [веб-прошивальщик](https://purrrock.github.io/purrmidi/ru/flash/) записывает прошивку через USB-загрузчик платы (DFU) прямо из браузера на Chromium (WebUSB). Пошаговая инструкция с STM32CubeProgrammer — в [docs/FLASHING.md](docs/FLASHING.md).
++Готовый `purrmidi.elf` каждой сборки лежит в артефакте CI `purrmidi-stm32h743-firmware`.
+ 
+ ### Windows-версия
+ 
+@@ -102,16 +125,14 @@ cmake --build --preset win-msvc-release
+ 
+ Параметры запуска, виртуальная клавиатура и тесты — в [docs/WINDOWS_BUILD.md](docs/WINDOWS_BUILD.md).
+ 
+-## Документация
++### Документация для разработчиков
+ 
+ | Документ | О чём |
+ | -------- | ----- |
+-| [docs/HARDWARE.md](docs/HARDWARE.md) | Распиновка, подключение ЦАП (перемычки), UART, батарейка VBAT |
+-| [docs/ENGINES.md](docs/ENGINES.md) | Звуковые движки, Program Change, громкость, все CC |
+-| [docs/SOUNDFONT.md](docs/SOUNDFONT.md) | Банк SoundFont, QSPI Flash (XIP), SD-карта, настройка CubeMX, диагностика |
+ | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Путь MIDI-событий, DMA, память, структура репозитория, USB Host |
++| [docs/SOUNDFONT.md](docs/SOUNDFONT.md) | Банк SoundFont, QSPI Flash (XIP), SD-карта, настройка CubeMX, диагностика |
+ | [docs/WINDOWS_BUILD.md](docs/WINDOWS_BUILD.md) | Windows-приложение и тесты |
+-| [enclosure/](enclosure/README.md) | Корпус |
++| [ROADMAP.md](ROADMAP.md) | Планы развития |
+ 
+ ## Лицензии
+ 
+diff --git a/ROADMAP.md b/ROADMAP.md
+index 37b78dc..2f5bfb3 100644
+--- a/ROADMAP.md
++++ b/ROADMAP.md
+@@ -11,7 +11,7 @@
+ | Очередь | Что делаем | Зачем | Статус |
+ | ------- | ---------- | ----- | ------ |
+ | 1 | Сайт на GitHub Pages, фото и видео, FAQ, «Что умеет и чего нет» | Проект понятен новичку | сделана заготовка, нужны фото и видео |
+-| 2 | Единая таблица CC | Понятно, что делают ручки клавиатуры | — |
++| 2 | Единая таблица CC | Понятно, что делают ручки клавиатуры | таблица и иллюстрация готовы, осталось описать конкретные клавиатуры |
+ | 2 | Подбор ЦАП без пайки | Меньше барьеров при сборке | — |
+ | 2 | Опрос: нужен ли вариант без внешнего ЦАП | Понять, что важнее: простота сборки или качество звука | форма и блок на сайте добавлены, ждём ответов |
+ | 3 | Общая реверберация (и, возможно, хорус) | Заметно более «взрослый» звук | — |
+@@ -39,7 +39,7 @@
+ 
+ Для новичка полезнее картинка «что делают ручки вашей клавиатуры», чем описание по движкам.
+ 
+-- [ ] Таблица типовых контроллеров: что делает каждый CC в каждом движке одной строкой на контроллер:
++- [x] Таблица типовых контроллеров: что делает каждый CC в каждом движке одной строкой на контроллер (готовая версия — в `docs/ENGINES.md`, раздел «Что делают ручки и колёса вашей клавиатуры»; ниже сохранён исходный набросок):
+ 
+   | CC | Типичное название на клавиатуре | Что меняет |
+   | -- | ------------------------------- | ---------- |
+@@ -51,8 +51,8 @@
+   | 91 | Reverb | глубина реверберации (после появления эффекта) |
+   | 93 | Chorus | глубина хоруса (после появления эффекта) |
+ 
+-- [ ] Нарисовать иллюстрацию «ручки и колёса клавиатуры → что они делают» (SVG), использовать в README и на сайте.
+-- [ ] Отдельно описать, какие контроллеры есть на типовых недорогих клавиатурах (например, у NTK-61 и SMK-25 их набор отличается), чтобы пользователь понимал, что доступно именно ему.
++- [x] Иллюстрация «ручки и колёса клавиатуры → что они делают» (SVG, русская и английская): `docs/controls_{ru,en}.svg`, `site/controls_{ru,en}.svg`; используется в README, `docs/ENGINES.md` и на сайте. Пересборка: `python3 tools/gen_controls_svg.py`.
++- [ ] Отдельно описать, какие контроллеры есть на типовых недорогих клавиатурах (например, у NTK-61 и SMK-25 их набор отличается), чтобы пользователь понимал, что доступно именно ему. Общая подсказка («двигайте ручку, на дисплее появится её название или номер CC») уже в `docs/ENGINES.md`; конкретные модели нужно проверить на приборе, это пересекается с `docs/KEYBOARDS.md` (раздел 7).
+ - [x] Коротко показывать на дисплее подсказку при изменении CC («Bright 80%») и статус педалей (SUSTAIN ON/OFF): `Display_ShowControl()`.
+ 
+ ## 4. Звук: эффекты и SoundFont
+@@ -86,7 +86,7 @@
+ ## 7. Документация и сообщество
+ 
+ - [ ] **Фото готового устройства и короткое видео** (подключение и первый звук) в начале README и на сайте.
+-- [ ] **Явно разделить в README «Для сборки и игры» и «Для разработчиков».** Термины вроде XIP, MPU, PendSV, SAI, ECC нужны только разработчикам и остаются в `ARCHITECTURE.md`.
++- [x] **Явно разделить в README «Для сборки и игры» и «Для разработчиков».** Термины вроде XIP, MPU, PendSV, SAI, ECC нужны только разработчикам и остаются в `ARCHITECTURE.md`. Сделано в `README.md` и `README_RU.md`: прошивка платы и FAQ в пользовательской части, сборка из исходников и архитектура в разработческой.
+ - [ ] **Список проверенных клавиатур** (`docs/KEYBOARDS.md`). Сейчас проверены:
+   - NTK-61;
+   - SMK-25.
+diff --git a/docs/ENGINES.md b/docs/ENGINES.md
+index badb9b8..fce3093 100644
+--- a/docs/ENGINES.md
++++ b/docs/ENGINES.md
+@@ -61,6 +61,41 @@
+ * Громкость не сбрасывается при смене инструмента; начальное значение — `SYNTH_MASTER_VOLUME_DEFAULT` (127).
+ * Макросы `SYNTH_MASTER_VOLUME_CC`, `SYNTH_MASTER_VOLUME_DEFAULT`; API: `SynthEngine_SetMasterVolume()` / `GetMasterVolume()`.
+ 
++## Что делают ручки и колёса вашей клавиатуры
++
++![Ручки и колёса клавиатуры и что они делают в PurrMidi](controls_ru.svg)
++
++Одна строка на контроллер. Названия в колонке «Как называется на клавиатуре» типовые: на вашей модели надпись может быть
++другой, важен **номер CC**. Если инструмент контроллер не использует, он просто игнорируется.
++
++| CC | Как называется на клавиатуре | Что меняет |
++| -: | ---------------------------- | ---------- |
++| Pitch Bend | Колесо высоты тона | Высота звука ±2 полутона, во всех инструментах |
++| 1 | Mod wheel, мод-колесо | «Живее, ярче»; в нуле звук не меняется. E-Piano, Pluck: яркость. Lead: глубина огибающей фильтра. Violin, SoundFont: вибрато. Organ: с 64 и выше включает хорус |
++| 2, 11 | Breath, Expression | Violin: экспрессия (сила смычка). SoundFont: CC11 меняет экспрессию (TinySoundFont); CC2 не используется. Остальные: ничего |
++| 7 | Volume, громкость | Общая громкость, во всех инструментах |
++| 10 | Pan, панорама | Только SoundFont (обрабатывает TinySoundFont) |
++| 20–28 | Drawbars, фейдеры | Только Organ: регистры 16′ … 1′ |
++| 64 | Sustain, педаль | Педаль сустейна, во всех инструментах, кроме Organ (у органа сустейна нет) |
++| 70 | Sound Variation | Organ: хорус вкл/выкл. Violin: положение смычка |
++| 71 | Resonance, Harmonic | E-Piano, Pluck: яркость. Lead: резонанс фильтра. Organ: скорость хоруса. Violin: прижим смычка |
++| 72 | Release, отпускание | E-Piano, Lead, Violin: время отпускания. Pluck: длительность затухания. Organ: глубина хоруса |
++| 73 | Attack, атака | Lead, Violin: время атаки |
++| 74 | Brightness, Cutoff | E-Piano, Pluck, Violin: яркость. Lead: частота среза фильтра |
++| 75 | Sound Controller 6 | Violin: шум смычка |
++| 77, 78 | Sound Controller 8, 9 | Только Organ: атака и отпускание |
++| 91 | Reverb | Пока не используется (появится вместе с общей реверберацией) |
++| 93 | Chorus | Пока не используется (появится вместе с общим хорусом) |
++| 120 | All Sound Off | Мгновенная тишина, во всех инструментах |
++| 123 | All Notes Off | Отпустить все ноты, во всех инструментах |
++
++Channel Pressure (aftertouch) использует только Violin: сильнее нажали на уже взятые клавиши, смычок звучит активнее.
++
++**Как узнать, что отправляет ваша ручка.** Двигайте её при включённом приборе: на дисплее примерно на секунду появится
++название контроллера и полоса со значением («Bright 80%»). Для ручек без названия показывается номер («CC 21»), а
++педали показывают «ON» и «OFF». Ручка, номера которой нет в таблице, просто ничего не меняет; многие клавиатуры позволяют
++назначить ручке другой CC в собственном редакторе.
++
+ ## Управление с клавиатуры
+ 
+ Общее для **всех** движков (одинаково, независимо от выбранного инструмента):
+diff --git a/docs/controls_en.svg b/docs/controls_en.svg
+new file mode 100644
+index 0000000..0e493a2
+--- /dev/null
++++ b/docs/controls_en.svg
+@@ -0,0 +1,143 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 590" width="900" height="590" role="img" aria-labelledby="t d">
++<title id="t">What the knobs and wheels of your MIDI keyboard do</title>
++<desc id="d">Diagram of a typical MIDI keyboard: pitch wheel, mod wheel, volume and brightness knobs, an instrument-change button and a sustain pedal, with a note on what each one does in PurrMidi.</desc>
++<style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;fill:#2a2a38}.h{font-size:22px;font-weight:700}.s{font-size:13px;fill:#5d5d70}.l{font-size:15px;font-weight:700}.d{font-size:13px;fill:#5d5d70}.cc{font-size:12.5px;font-weight:700;fill:#fff;text-anchor:middle}.num{font-size:13px;font-weight:700;fill:#fff;text-anchor:middle}.n{font-size:12.5px;fill:#5d5d70}</style>
++<rect x="0" y="0" width="900" height="590" rx="20" fill="#fffaf5" stroke="#efe6dd"/>
++<text class="h" x="30" y="42">What your keyboard's knobs and wheels do in PurrMidi</text>
++<text class="s" x="30" y="64">Labels on your keyboard may differ; the CC number is what matters. Which of these you have depends on the model.</text>
++<rect x="130" y="106" width="640" height="140" rx="14" fill="#3b3b4f"/>
++<rect x="140" y="116" width="620" height="58" rx="8" fill="#4b4b63"/>
++<rect x="140.0" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="168.2" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="196.4" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="224.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="252.7" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="280.9" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="309.1" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="337.3" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="365.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="393.6" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="421.8" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="450.0" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="478.2" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="506.4" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="534.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="562.7" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="590.9" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="619.1" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="647.3" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="675.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="703.6" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="731.8" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="159.7" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="187.9" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="244.3" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="272.5" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="300.6" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="357.0" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="385.2" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="441.5" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="469.7" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="497.9" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="554.3" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="582.5" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="638.8" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="667.0" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="695.2" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="157" y="120" width="22" height="50" rx="8" fill="#e0668f" stroke="#fff" stroke-width="2"/>
++<rect x="195" y="120" width="22" height="50" rx="8" fill="#5a74d6" stroke="#fff" stroke-width="2"/>
++<circle cx="320" cy="145" r="19" fill="#fffaf5" stroke="#e0668f" stroke-width="3"/>
++<line x1="320" y1="145" x2="329" y2="134" stroke="#e0668f" stroke-width="3" stroke-linecap="round"/>
++<circle cx="410" cy="145" r="19" fill="#fffaf5" stroke="#5a74d6" stroke-width="3"/>
++<line x1="410" y1="145" x2="419" y2="134" stroke="#5a74d6" stroke-width="3" stroke-linecap="round"/>
++<circle cx="500" cy="145" r="19" fill="#fffaf5" stroke="#2f9b80" stroke-width="3"/>
++<line x1="500" y1="145" x2="509" y2="134" stroke="#2f9b80" stroke-width="3" stroke-linecap="round"/>
++<circle cx="590" cy="145" r="19" fill="#fffaf5" stroke="#c97a12" stroke-width="3"/>
++<line x1="590" y1="145" x2="599" y2="134" stroke="#c97a12" stroke-width="3" stroke-linecap="round"/>
++<rect x="672" y="132" width="36" height="26" rx="7" fill="#fffaf5" stroke="#8a6cd6" stroke-width="3"/>
++<rect x="395" y="260" width="110" height="22" rx="7" fill="#3b3b4f"/>
++<rect x="403" y="264" width="94" height="14" rx="5" fill="#4b4b63"/>
++<circle cx="168" cy="94" r="10" fill="#e0668f" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="168" y="98.5">1</text>
++<circle cx="206" cy="94" r="10" fill="#5a74d6" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="206" y="98.5">2</text>
++<circle cx="320" cy="94" r="10" fill="#e0668f" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="320" y="98.5">3</text>
++<circle cx="410" cy="94" r="10" fill="#5a74d6" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="410" y="98.5">4</text>
++<circle cx="500" cy="94" r="10" fill="#2f9b80" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="500" y="98.5">5</text>
++<circle cx="590" cy="94" r="10" fill="#c97a12" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="590" y="98.5">6</text>
++<circle cx="690" cy="94" r="10" fill="#8a6cd6" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="690" y="98.5">7</text>
++<circle cx="528" cy="271" r="10" fill="#2f9b80" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="528" y="275.5">8</text>
++<rect x="30" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="52" cy="320" r="10" fill="#e0668f"/>
++<text class="num" x="52" y="324.5">1</text>
++<rect x="122" y="310" width="94" height="20" rx="10" fill="#e0668f"/>
++<text class="cc" x="169" y="324.3">Pitch Bend</text>
++<text class="l" x="44" y="354">Pitch wheel</text>
++<text class="d" x="44" y="374">Pitch Bend: ±2</text>
++<text class="d" x="44" y="390">semitones, everywhere</text>
++<rect x="242" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="264" cy="320" r="10" fill="#5a74d6"/>
++<text class="num" x="264" y="324.5">2</text>
++<rect x="387" y="310" width="41" height="20" rx="10" fill="#5a74d6"/>
++<text class="cc" x="408" y="324.3">CC1</text>
++<text class="l" x="256" y="354">Mod wheel</text>
++<text class="d" x="256" y="374">“Livelier, brighter”; at</text>
++<text class="d" x="256" y="390">zero the sound is</text>
++<text class="d" x="256" y="406">unchanged</text>
++<rect x="454" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="476" cy="320" r="10" fill="#e0668f"/>
++<text class="num" x="476" y="324.5">3</text>
++<rect x="599" y="310" width="41" height="20" rx="10" fill="#e0668f"/>
++<text class="cc" x="620" y="324.3">CC7</text>
++<text class="l" x="468" y="354">Volume</text>
++<text class="d" x="468" y="374">Master volume,</text>
++<text class="d" x="468" y="390">everywhere</text>
++<rect x="666" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="688" cy="320" r="10" fill="#5a74d6"/>
++<text class="num" x="688" y="324.5">4</text>
++<rect x="804" y="310" width="48" height="20" rx="10" fill="#5a74d6"/>
++<text class="cc" x="828" y="324.3">CC74</text>
++<text class="l" x="680" y="354">Brightness / cutoff</text>
++<text class="d" x="680" y="374">Tone brightness; filter</text>
++<text class="d" x="680" y="390">cutoff on Lead</text>
++<rect x="30" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="52" cy="458" r="10" fill="#2f9b80"/>
++<text class="num" x="52" y="462.5">5</text>
++<rect x="168" y="448" width="48" height="20" rx="10" fill="#2f9b80"/>
++<text class="cc" x="192" y="462.3">CC71</text>
++<text class="l" x="44" y="492">Resonance</text>
++<text class="d" x="44" y="512">Brightness or resonance</text>
++<text class="d" x="44" y="528">(per instrument)</text>
++<rect x="242" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="264" cy="458" r="10" fill="#c97a12"/>
++<text class="num" x="264" y="462.5">6</text>
++<rect x="380" y="448" width="48" height="20" rx="10" fill="#c97a12"/>
++<text class="cc" x="404" y="462.3">CC72</text>
++<text class="l" x="256" y="492">Release</text>
++<text class="d" x="256" y="512">How long the sound fades</text>
++<text class="d" x="256" y="528">after the key</text>
++<rect x="454" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="476" cy="458" r="10" fill="#8a6cd6"/>
++<text class="num" x="476" y="462.5">7</text>
++<rect x="516" y="448" width="124" height="20" rx="10" fill="#8a6cd6"/>
++<text class="cc" x="578" y="462.3">Program Change</text>
++<text class="l" x="468" y="492">Instrument button</text>
++<text class="d" x="468" y="512">Pick an instrument (127</text>
++<text class="d" x="468" y="528">= next)</text>
++<rect x="666" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="688" cy="458" r="10" fill="#2f9b80"/>
++<text class="num" x="688" y="462.5">8</text>
++<rect x="804" y="448" width="48" height="20" rx="10" fill="#2f9b80"/>
++<text class="cc" x="828" y="462.3">CC64</text>
++<text class="l" x="680" y="492">Sustain pedal</text>
++<text class="d" x="680" y="512">Sound rings while</text>
++<text class="d" x="680" y="528">pressed (no sustain on</text>
++<text class="d" x="680" y="544">Organ)</text>
++<text class="n" x="30" y="576">Can't find your knob? It may send another CC: full list in docs/ENGINES.md (Russian)</text>
++</svg>
+diff --git a/docs/controls_ru.svg b/docs/controls_ru.svg
+new file mode 100644
+index 0000000..6223751
+--- /dev/null
++++ b/docs/controls_ru.svg
+@@ -0,0 +1,141 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 590" width="900" height="590" role="img" aria-labelledby="t d">
++<title id="t">Что делают ручки и колёса вашей MIDI-клавиатуры</title>
++<desc id="d">Схема типовой MIDI-клавиатуры: колесо высоты тона, мод-колесо, ручки громкости и яркости, кнопка смены инструмента и педаль сустейна, с пояснением, что каждый элемент делает в PurrMidi.</desc>
++<style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;fill:#2a2a38}.h{font-size:22px;font-weight:700}.s{font-size:13px;fill:#5d5d70}.l{font-size:15px;font-weight:700}.d{font-size:13px;fill:#5d5d70}.cc{font-size:12.5px;font-weight:700;fill:#fff;text-anchor:middle}.num{font-size:13px;font-weight:700;fill:#fff;text-anchor:middle}.n{font-size:12.5px;fill:#5d5d70}</style>
++<rect x="0" y="0" width="900" height="590" rx="20" fill="#fffaf5" stroke="#efe6dd"/>
++<text class="h" x="30" y="42">Что делают ручки и колёса клавиатуры в PurrMidi</text>
++<text class="s" x="30" y="64">Названия на вашей клавиатуре могут отличаться; важен номер CC. Что из этого есть именно у вас, зависит от модели.</text>
++<rect x="130" y="106" width="640" height="140" rx="14" fill="#3b3b4f"/>
++<rect x="140" y="116" width="620" height="58" rx="8" fill="#4b4b63"/>
++<rect x="140.0" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="168.2" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="196.4" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="224.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="252.7" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="280.9" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="309.1" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="337.3" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="365.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="393.6" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="421.8" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="450.0" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="478.2" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="506.4" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="534.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="562.7" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="590.9" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="619.1" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="647.3" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="675.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="703.6" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="731.8" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="159.7" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="187.9" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="244.3" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="272.5" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="300.6" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="357.0" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="385.2" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="441.5" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="469.7" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="497.9" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="554.3" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="582.5" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="638.8" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="667.0" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="695.2" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="157" y="120" width="22" height="50" rx="8" fill="#e0668f" stroke="#fff" stroke-width="2"/>
++<rect x="195" y="120" width="22" height="50" rx="8" fill="#5a74d6" stroke="#fff" stroke-width="2"/>
++<circle cx="320" cy="145" r="19" fill="#fffaf5" stroke="#e0668f" stroke-width="3"/>
++<line x1="320" y1="145" x2="329" y2="134" stroke="#e0668f" stroke-width="3" stroke-linecap="round"/>
++<circle cx="410" cy="145" r="19" fill="#fffaf5" stroke="#5a74d6" stroke-width="3"/>
++<line x1="410" y1="145" x2="419" y2="134" stroke="#5a74d6" stroke-width="3" stroke-linecap="round"/>
++<circle cx="500" cy="145" r="19" fill="#fffaf5" stroke="#2f9b80" stroke-width="3"/>
++<line x1="500" y1="145" x2="509" y2="134" stroke="#2f9b80" stroke-width="3" stroke-linecap="round"/>
++<circle cx="590" cy="145" r="19" fill="#fffaf5" stroke="#c97a12" stroke-width="3"/>
++<line x1="590" y1="145" x2="599" y2="134" stroke="#c97a12" stroke-width="3" stroke-linecap="round"/>
++<rect x="672" y="132" width="36" height="26" rx="7" fill="#fffaf5" stroke="#8a6cd6" stroke-width="3"/>
++<rect x="395" y="260" width="110" height="22" rx="7" fill="#3b3b4f"/>
++<rect x="403" y="264" width="94" height="14" rx="5" fill="#4b4b63"/>
++<circle cx="168" cy="94" r="10" fill="#e0668f" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="168" y="98.5">1</text>
++<circle cx="206" cy="94" r="10" fill="#5a74d6" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="206" y="98.5">2</text>
++<circle cx="320" cy="94" r="10" fill="#e0668f" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="320" y="98.5">3</text>
++<circle cx="410" cy="94" r="10" fill="#5a74d6" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="410" y="98.5">4</text>
++<circle cx="500" cy="94" r="10" fill="#2f9b80" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="500" y="98.5">5</text>
++<circle cx="590" cy="94" r="10" fill="#c97a12" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="590" y="98.5">6</text>
++<circle cx="690" cy="94" r="10" fill="#8a6cd6" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="690" y="98.5">7</text>
++<circle cx="528" cy="271" r="10" fill="#2f9b80" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="528" y="275.5">8</text>
++<rect x="30" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="52" cy="320" r="10" fill="#e0668f"/>
++<text class="num" x="52" y="324.5">1</text>
++<rect x="122" y="310" width="94" height="20" rx="10" fill="#e0668f"/>
++<text class="cc" x="169" y="324.3">Pitch Bend</text>
++<text class="l" x="44" y="354">Колесо высоты тона</text>
++<text class="d" x="44" y="374">Pitch Bend: ±2 полутона,</text>
++<text class="d" x="44" y="390">везде</text>
++<rect x="242" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="264" cy="320" r="10" fill="#5a74d6"/>
++<text class="num" x="264" y="324.5">2</text>
++<rect x="387" y="310" width="41" height="20" rx="10" fill="#5a74d6"/>
++<text class="cc" x="408" y="324.3">CC1</text>
++<text class="l" x="256" y="354">Мод-колесо</text>
++<text class="d" x="256" y="374">«Живее, ярче»; в нуле</text>
++<text class="d" x="256" y="390">звук не меняется</text>
++<rect x="454" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="476" cy="320" r="10" fill="#e0668f"/>
++<text class="num" x="476" y="324.5">3</text>
++<rect x="599" y="310" width="41" height="20" rx="10" fill="#e0668f"/>
++<text class="cc" x="620" y="324.3">CC7</text>
++<text class="l" x="468" y="354">Громкость</text>
++<text class="d" x="468" y="374">Общая громкость, везде</text>
++<rect x="666" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="688" cy="320" r="10" fill="#5a74d6"/>
++<text class="num" x="688" y="324.5">4</text>
++<rect x="804" y="310" width="48" height="20" rx="10" fill="#5a74d6"/>
++<text class="cc" x="828" y="324.3">CC74</text>
++<text class="l" x="680" y="354">Яркость / срез</text>
++<text class="d" x="680" y="374">Яркость тембра; у Lead —</text>
++<text class="d" x="680" y="390">срез фильтра</text>
++<rect x="30" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="52" cy="458" r="10" fill="#2f9b80"/>
++<text class="num" x="52" y="462.5">5</text>
++<rect x="168" y="448" width="48" height="20" rx="10" fill="#2f9b80"/>
++<text class="cc" x="192" y="462.3">CC71</text>
++<text class="l" x="44" y="492">Резонанс</text>
++<text class="d" x="44" y="512">Яркость или резонанс (по</text>
++<text class="d" x="44" y="528">инструменту)</text>
++<rect x="242" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="264" cy="458" r="10" fill="#c97a12"/>
++<text class="num" x="264" y="462.5">6</text>
++<rect x="380" y="448" width="48" height="20" rx="10" fill="#c97a12"/>
++<text class="cc" x="404" y="462.3">CC72</text>
++<text class="l" x="256" y="492">Отпускание</text>
++<text class="d" x="256" y="512">Как долго звук затухает</text>
++<text class="d" x="256" y="528">после клавиши</text>
++<rect x="454" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="476" cy="458" r="10" fill="#8a6cd6"/>
++<text class="num" x="476" y="462.5">7</text>
++<rect x="516" y="448" width="124" height="20" rx="10" fill="#8a6cd6"/>
++<text class="cc" x="578" y="462.3">Program Change</text>
++<text class="l" x="468" y="492">Кнопка смены звука</text>
++<text class="d" x="468" y="512">Выбор инструмента (127 =</text>
++<text class="d" x="468" y="528">следующий)</text>
++<rect x="666" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="688" cy="458" r="10" fill="#2f9b80"/>
++<text class="num" x="688" y="462.5">8</text>
++<rect x="804" y="448" width="48" height="20" rx="10" fill="#2f9b80"/>
++<text class="cc" x="828" y="462.3">CC64</text>
++<text class="l" x="680" y="492">Педаль сустейна</text>
++<text class="d" x="680" y="512">Звук тянется, пока</text>
++<text class="d" x="680" y="528">педаль нажата (у органа</text>
++<text class="d" x="680" y="544">нет)</text>
++<text class="n" x="30" y="576">Не нашли свою ручку? Она может отправлять другой CC: полный список в docs/ENGINES.md</text>
++</svg>
+diff --git a/site/controls_en.svg b/site/controls_en.svg
+new file mode 100644
+index 0000000..0e493a2
+--- /dev/null
++++ b/site/controls_en.svg
+@@ -0,0 +1,143 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 590" width="900" height="590" role="img" aria-labelledby="t d">
++<title id="t">What the knobs and wheels of your MIDI keyboard do</title>
++<desc id="d">Diagram of a typical MIDI keyboard: pitch wheel, mod wheel, volume and brightness knobs, an instrument-change button and a sustain pedal, with a note on what each one does in PurrMidi.</desc>
++<style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;fill:#2a2a38}.h{font-size:22px;font-weight:700}.s{font-size:13px;fill:#5d5d70}.l{font-size:15px;font-weight:700}.d{font-size:13px;fill:#5d5d70}.cc{font-size:12.5px;font-weight:700;fill:#fff;text-anchor:middle}.num{font-size:13px;font-weight:700;fill:#fff;text-anchor:middle}.n{font-size:12.5px;fill:#5d5d70}</style>
++<rect x="0" y="0" width="900" height="590" rx="20" fill="#fffaf5" stroke="#efe6dd"/>
++<text class="h" x="30" y="42">What your keyboard's knobs and wheels do in PurrMidi</text>
++<text class="s" x="30" y="64">Labels on your keyboard may differ; the CC number is what matters. Which of these you have depends on the model.</text>
++<rect x="130" y="106" width="640" height="140" rx="14" fill="#3b3b4f"/>
++<rect x="140" y="116" width="620" height="58" rx="8" fill="#4b4b63"/>
++<rect x="140.0" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="168.2" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="196.4" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="224.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="252.7" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="280.9" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="309.1" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="337.3" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="365.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="393.6" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="421.8" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="450.0" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="478.2" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="506.4" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="534.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="562.7" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="590.9" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="619.1" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="647.3" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="675.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="703.6" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="731.8" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="159.7" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="187.9" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="244.3" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="272.5" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="300.6" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="357.0" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="385.2" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="441.5" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="469.7" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="497.9" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="554.3" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="582.5" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="638.8" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="667.0" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="695.2" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="157" y="120" width="22" height="50" rx="8" fill="#e0668f" stroke="#fff" stroke-width="2"/>
++<rect x="195" y="120" width="22" height="50" rx="8" fill="#5a74d6" stroke="#fff" stroke-width="2"/>
++<circle cx="320" cy="145" r="19" fill="#fffaf5" stroke="#e0668f" stroke-width="3"/>
++<line x1="320" y1="145" x2="329" y2="134" stroke="#e0668f" stroke-width="3" stroke-linecap="round"/>
++<circle cx="410" cy="145" r="19" fill="#fffaf5" stroke="#5a74d6" stroke-width="3"/>
++<line x1="410" y1="145" x2="419" y2="134" stroke="#5a74d6" stroke-width="3" stroke-linecap="round"/>
++<circle cx="500" cy="145" r="19" fill="#fffaf5" stroke="#2f9b80" stroke-width="3"/>
++<line x1="500" y1="145" x2="509" y2="134" stroke="#2f9b80" stroke-width="3" stroke-linecap="round"/>
++<circle cx="590" cy="145" r="19" fill="#fffaf5" stroke="#c97a12" stroke-width="3"/>
++<line x1="590" y1="145" x2="599" y2="134" stroke="#c97a12" stroke-width="3" stroke-linecap="round"/>
++<rect x="672" y="132" width="36" height="26" rx="7" fill="#fffaf5" stroke="#8a6cd6" stroke-width="3"/>
++<rect x="395" y="260" width="110" height="22" rx="7" fill="#3b3b4f"/>
++<rect x="403" y="264" width="94" height="14" rx="5" fill="#4b4b63"/>
++<circle cx="168" cy="94" r="10" fill="#e0668f" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="168" y="98.5">1</text>
++<circle cx="206" cy="94" r="10" fill="#5a74d6" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="206" y="98.5">2</text>
++<circle cx="320" cy="94" r="10" fill="#e0668f" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="320" y="98.5">3</text>
++<circle cx="410" cy="94" r="10" fill="#5a74d6" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="410" y="98.5">4</text>
++<circle cx="500" cy="94" r="10" fill="#2f9b80" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="500" y="98.5">5</text>
++<circle cx="590" cy="94" r="10" fill="#c97a12" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="590" y="98.5">6</text>
++<circle cx="690" cy="94" r="10" fill="#8a6cd6" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="690" y="98.5">7</text>
++<circle cx="528" cy="271" r="10" fill="#2f9b80" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="528" y="275.5">8</text>
++<rect x="30" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="52" cy="320" r="10" fill="#e0668f"/>
++<text class="num" x="52" y="324.5">1</text>
++<rect x="122" y="310" width="94" height="20" rx="10" fill="#e0668f"/>
++<text class="cc" x="169" y="324.3">Pitch Bend</text>
++<text class="l" x="44" y="354">Pitch wheel</text>
++<text class="d" x="44" y="374">Pitch Bend: ±2</text>
++<text class="d" x="44" y="390">semitones, everywhere</text>
++<rect x="242" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="264" cy="320" r="10" fill="#5a74d6"/>
++<text class="num" x="264" y="324.5">2</text>
++<rect x="387" y="310" width="41" height="20" rx="10" fill="#5a74d6"/>
++<text class="cc" x="408" y="324.3">CC1</text>
++<text class="l" x="256" y="354">Mod wheel</text>
++<text class="d" x="256" y="374">“Livelier, brighter”; at</text>
++<text class="d" x="256" y="390">zero the sound is</text>
++<text class="d" x="256" y="406">unchanged</text>
++<rect x="454" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="476" cy="320" r="10" fill="#e0668f"/>
++<text class="num" x="476" y="324.5">3</text>
++<rect x="599" y="310" width="41" height="20" rx="10" fill="#e0668f"/>
++<text class="cc" x="620" y="324.3">CC7</text>
++<text class="l" x="468" y="354">Volume</text>
++<text class="d" x="468" y="374">Master volume,</text>
++<text class="d" x="468" y="390">everywhere</text>
++<rect x="666" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="688" cy="320" r="10" fill="#5a74d6"/>
++<text class="num" x="688" y="324.5">4</text>
++<rect x="804" y="310" width="48" height="20" rx="10" fill="#5a74d6"/>
++<text class="cc" x="828" y="324.3">CC74</text>
++<text class="l" x="680" y="354">Brightness / cutoff</text>
++<text class="d" x="680" y="374">Tone brightness; filter</text>
++<text class="d" x="680" y="390">cutoff on Lead</text>
++<rect x="30" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="52" cy="458" r="10" fill="#2f9b80"/>
++<text class="num" x="52" y="462.5">5</text>
++<rect x="168" y="448" width="48" height="20" rx="10" fill="#2f9b80"/>
++<text class="cc" x="192" y="462.3">CC71</text>
++<text class="l" x="44" y="492">Resonance</text>
++<text class="d" x="44" y="512">Brightness or resonance</text>
++<text class="d" x="44" y="528">(per instrument)</text>
++<rect x="242" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="264" cy="458" r="10" fill="#c97a12"/>
++<text class="num" x="264" y="462.5">6</text>
++<rect x="380" y="448" width="48" height="20" rx="10" fill="#c97a12"/>
++<text class="cc" x="404" y="462.3">CC72</text>
++<text class="l" x="256" y="492">Release</text>
++<text class="d" x="256" y="512">How long the sound fades</text>
++<text class="d" x="256" y="528">after the key</text>
++<rect x="454" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="476" cy="458" r="10" fill="#8a6cd6"/>
++<text class="num" x="476" y="462.5">7</text>
++<rect x="516" y="448" width="124" height="20" rx="10" fill="#8a6cd6"/>
++<text class="cc" x="578" y="462.3">Program Change</text>
++<text class="l" x="468" y="492">Instrument button</text>
++<text class="d" x="468" y="512">Pick an instrument (127</text>
++<text class="d" x="468" y="528">= next)</text>
++<rect x="666" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="688" cy="458" r="10" fill="#2f9b80"/>
++<text class="num" x="688" y="462.5">8</text>
++<rect x="804" y="448" width="48" height="20" rx="10" fill="#2f9b80"/>
++<text class="cc" x="828" y="462.3">CC64</text>
++<text class="l" x="680" y="492">Sustain pedal</text>
++<text class="d" x="680" y="512">Sound rings while</text>
++<text class="d" x="680" y="528">pressed (no sustain on</text>
++<text class="d" x="680" y="544">Organ)</text>
++<text class="n" x="30" y="576">Can't find your knob? It may send another CC: full list in docs/ENGINES.md (Russian)</text>
++</svg>
+diff --git a/site/controls_ru.svg b/site/controls_ru.svg
+new file mode 100644
+index 0000000..6223751
+--- /dev/null
++++ b/site/controls_ru.svg
+@@ -0,0 +1,141 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 590" width="900" height="590" role="img" aria-labelledby="t d">
++<title id="t">Что делают ручки и колёса вашей MIDI-клавиатуры</title>
++<desc id="d">Схема типовой MIDI-клавиатуры: колесо высоты тона, мод-колесо, ручки громкости и яркости, кнопка смены инструмента и педаль сустейна, с пояснением, что каждый элемент делает в PurrMidi.</desc>
++<style>text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;fill:#2a2a38}.h{font-size:22px;font-weight:700}.s{font-size:13px;fill:#5d5d70}.l{font-size:15px;font-weight:700}.d{font-size:13px;fill:#5d5d70}.cc{font-size:12.5px;font-weight:700;fill:#fff;text-anchor:middle}.num{font-size:13px;font-weight:700;fill:#fff;text-anchor:middle}.n{font-size:12.5px;fill:#5d5d70}</style>
++<rect x="0" y="0" width="900" height="590" rx="20" fill="#fffaf5" stroke="#efe6dd"/>
++<text class="h" x="30" y="42">Что делают ручки и колёса клавиатуры в PurrMidi</text>
++<text class="s" x="30" y="64">Названия на вашей клавиатуре могут отличаться; важен номер CC. Что из этого есть именно у вас, зависит от модели.</text>
++<rect x="130" y="106" width="640" height="140" rx="14" fill="#3b3b4f"/>
++<rect x="140" y="116" width="620" height="58" rx="8" fill="#4b4b63"/>
++<rect x="140.0" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="168.2" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="196.4" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="224.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="252.7" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="280.9" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="309.1" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="337.3" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="365.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="393.6" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="421.8" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="450.0" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="478.2" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="506.4" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="534.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="562.7" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="590.9" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="619.1" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="647.3" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="675.5" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="703.6" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="731.8" y="184" width="26.7" height="52" rx="2" fill="#fffdf9"/>
++<rect x="159.7" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="187.9" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="244.3" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="272.5" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="300.6" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="357.0" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="385.2" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="441.5" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="469.7" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="497.9" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="554.3" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="582.5" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="638.8" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="667.0" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="695.2" y="184" width="16.9" height="31.2" rx="2" fill="#2a2a38"/>
++<rect x="157" y="120" width="22" height="50" rx="8" fill="#e0668f" stroke="#fff" stroke-width="2"/>
++<rect x="195" y="120" width="22" height="50" rx="8" fill="#5a74d6" stroke="#fff" stroke-width="2"/>
++<circle cx="320" cy="145" r="19" fill="#fffaf5" stroke="#e0668f" stroke-width="3"/>
++<line x1="320" y1="145" x2="329" y2="134" stroke="#e0668f" stroke-width="3" stroke-linecap="round"/>
++<circle cx="410" cy="145" r="19" fill="#fffaf5" stroke="#5a74d6" stroke-width="3"/>
++<line x1="410" y1="145" x2="419" y2="134" stroke="#5a74d6" stroke-width="3" stroke-linecap="round"/>
++<circle cx="500" cy="145" r="19" fill="#fffaf5" stroke="#2f9b80" stroke-width="3"/>
++<line x1="500" y1="145" x2="509" y2="134" stroke="#2f9b80" stroke-width="3" stroke-linecap="round"/>
++<circle cx="590" cy="145" r="19" fill="#fffaf5" stroke="#c97a12" stroke-width="3"/>
++<line x1="590" y1="145" x2="599" y2="134" stroke="#c97a12" stroke-width="3" stroke-linecap="round"/>
++<rect x="672" y="132" width="36" height="26" rx="7" fill="#fffaf5" stroke="#8a6cd6" stroke-width="3"/>
++<rect x="395" y="260" width="110" height="22" rx="7" fill="#3b3b4f"/>
++<rect x="403" y="264" width="94" height="14" rx="5" fill="#4b4b63"/>
++<circle cx="168" cy="94" r="10" fill="#e0668f" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="168" y="98.5">1</text>
++<circle cx="206" cy="94" r="10" fill="#5a74d6" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="206" y="98.5">2</text>
++<circle cx="320" cy="94" r="10" fill="#e0668f" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="320" y="98.5">3</text>
++<circle cx="410" cy="94" r="10" fill="#5a74d6" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="410" y="98.5">4</text>
++<circle cx="500" cy="94" r="10" fill="#2f9b80" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="500" y="98.5">5</text>
++<circle cx="590" cy="94" r="10" fill="#c97a12" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="590" y="98.5">6</text>
++<circle cx="690" cy="94" r="10" fill="#8a6cd6" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="690" y="98.5">7</text>
++<circle cx="528" cy="271" r="10" fill="#2f9b80" stroke="#fffaf5" stroke-width="2"/>
++<text class="num" x="528" y="275.5">8</text>
++<rect x="30" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="52" cy="320" r="10" fill="#e0668f"/>
++<text class="num" x="52" y="324.5">1</text>
++<rect x="122" y="310" width="94" height="20" rx="10" fill="#e0668f"/>
++<text class="cc" x="169" y="324.3">Pitch Bend</text>
++<text class="l" x="44" y="354">Колесо высоты тона</text>
++<text class="d" x="44" y="374">Pitch Bend: ±2 полутона,</text>
++<text class="d" x="44" y="390">везде</text>
++<rect x="242" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="264" cy="320" r="10" fill="#5a74d6"/>
++<text class="num" x="264" y="324.5">2</text>
++<rect x="387" y="310" width="41" height="20" rx="10" fill="#5a74d6"/>
++<text class="cc" x="408" y="324.3">CC1</text>
++<text class="l" x="256" y="354">Мод-колесо</text>
++<text class="d" x="256" y="374">«Живее, ярче»; в нуле</text>
++<text class="d" x="256" y="390">звук не меняется</text>
++<rect x="454" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="476" cy="320" r="10" fill="#e0668f"/>
++<text class="num" x="476" y="324.5">3</text>
++<rect x="599" y="310" width="41" height="20" rx="10" fill="#e0668f"/>
++<text class="cc" x="620" y="324.3">CC7</text>
++<text class="l" x="468" y="354">Громкость</text>
++<text class="d" x="468" y="374">Общая громкость, везде</text>
++<rect x="666" y="296" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="688" cy="320" r="10" fill="#5a74d6"/>
++<text class="num" x="688" y="324.5">4</text>
++<rect x="804" y="310" width="48" height="20" rx="10" fill="#5a74d6"/>
++<text class="cc" x="828" y="324.3">CC74</text>
++<text class="l" x="680" y="354">Яркость / срез</text>
++<text class="d" x="680" y="374">Яркость тембра; у Lead —</text>
++<text class="d" x="680" y="390">срез фильтра</text>
++<rect x="30" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="52" cy="458" r="10" fill="#2f9b80"/>
++<text class="num" x="52" y="462.5">5</text>
++<rect x="168" y="448" width="48" height="20" rx="10" fill="#2f9b80"/>
++<text class="cc" x="192" y="462.3">CC71</text>
++<text class="l" x="44" y="492">Резонанс</text>
++<text class="d" x="44" y="512">Яркость или резонанс (по</text>
++<text class="d" x="44" y="528">инструменту)</text>
++<rect x="242" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="264" cy="458" r="10" fill="#c97a12"/>
++<text class="num" x="264" y="462.5">6</text>
++<rect x="380" y="448" width="48" height="20" rx="10" fill="#c97a12"/>
++<text class="cc" x="404" y="462.3">CC72</text>
++<text class="l" x="256" y="492">Отпускание</text>
++<text class="d" x="256" y="512">Как долго звук затухает</text>
++<text class="d" x="256" y="528">после клавиши</text>
++<rect x="454" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="476" cy="458" r="10" fill="#8a6cd6"/>
++<text class="num" x="476" y="462.5">7</text>
++<rect x="516" y="448" width="124" height="20" rx="10" fill="#8a6cd6"/>
++<text class="cc" x="578" y="462.3">Program Change</text>
++<text class="l" x="468" y="492">Кнопка смены звука</text>
++<text class="d" x="468" y="512">Выбор инструмента (127 =</text>
++<text class="d" x="468" y="528">следующий)</text>
++<rect x="666" y="434" width="198" height="124" rx="14" fill="#ffffff" stroke="#efe6dd"/>
++<circle cx="688" cy="458" r="10" fill="#2f9b80"/>
++<text class="num" x="688" y="462.5">8</text>
++<rect x="804" y="448" width="48" height="20" rx="10" fill="#2f9b80"/>
++<text class="cc" x="828" y="462.3">CC64</text>
++<text class="l" x="680" y="492">Педаль сустейна</text>
++<text class="d" x="680" y="512">Звук тянется, пока</text>
++<text class="d" x="680" y="528">педаль нажата (у органа</text>
++<text class="d" x="680" y="544">нет)</text>
++<text class="n" x="30" y="576">Не нашли свою ручку? Она может отправлять другой CC: полный список в docs/ENGINES.md</text>
++</svg>
+diff --git a/site/index.html b/site/index.html
+index db14662..e96ab6a 100644
+--- a/site/index.html
++++ b/site/index.html
+@@ -118,7 +118,8 @@
+       <tr><td><code>127</code></td><td>Next instrument (K1 does the same)</td></tr>
+     </table>
+     </div>
+-    <p style="margin-top:18px">Volume is CC7 and sustain pedal is CC64. Other controllers depend on the instrument; the full list is in <a href="https://github.com/purrrock/purrmidi/blob/main/docs/ENGINES.md">ENGINES.md</a> (Russian). The selected instrument and volume are remembered; they survive a power cut only if a 3 V battery is fitted to the VBAT pin.</p>
++    <p style="margin-top:18px">Volume is CC7 and sustain pedal is CC64. Other knobs and wheels depend on the instrument; the picture below shows the usual ones, and the full list is in <a href="https://github.com/purrrock/purrmidi/blob/main/docs/ENGINES.md">ENGINES.md</a> (Russian). Move a knob and its name and value appear on the display. The selected instrument and volume are remembered; they survive a power cut only if a 3 V battery is fitted to the VBAT pin.</p>
++    <img src="controls_en.svg" width="900" height="590" style="display:block;margin:24px auto 0" alt="Diagram of a MIDI keyboard: pitch wheel, mod wheel (CC1), volume (CC7), brightness (CC74), resonance (CC71), release (CC72), an instrument button (Program Change) and the sustain pedal (CC64), with what each one does in PurrMidi" loading="lazy">
+   </div>
+ </section>
+ 
+diff --git a/site/ru/index.html b/site/ru/index.html
+index 57ba521..1e66d7e 100644
+--- a/site/ru/index.html
++++ b/site/ru/index.html
+@@ -117,7 +117,8 @@
+       <tr><td><code>127</code></td><td>Следующий инструмент (то же делает K1)</td></tr>
+     </table>
+     </div>
+-    <p style="margin-top:18px">Громкость — ручка CC7, сустейн — педаль CC64. Остальные контроллеры зависят от инструмента, полный список — в <a href="https://github.com/purrrock/purrmidi/blob/main/docs/ENGINES.md">ENGINES.md</a>. Выбранный инструмент и громкость запоминаются; после отключения питания они сохраняются только при батарейке 3 В на выводе VBAT.</p>
++    <p style="margin-top:18px">Громкость — ручка CC7, сустейн — педаль CC64. Остальные ручки и колёса зависят от инструмента; на картинке ниже самые частые, полный список — в <a href="https://github.com/purrrock/purrmidi/blob/main/docs/ENGINES.md">ENGINES.md</a>. Двигаете ручку — на дисплее появляется её название и значение. Выбранный инструмент и громкость запоминаются; после отключения питания они сохраняются только при батарейке 3 В на выводе VBAT.</p>
++    <img src="../controls_ru.svg" width="900" height="590" style="display:block;margin:24px auto 0" alt="Схема MIDI-клавиатуры: колесо высоты тона, мод-колесо (CC1), громкость (CC7), яркость (CC74), резонанс (CC71), отпускание (CC72), кнопка смены инструмента (Program Change) и педаль сустейна (CC64), с пояснением, что каждый элемент делает в PurrMidi" loading="lazy">
+   </div>
+ </section>
+ 
+diff --git a/tools/gen_controls_svg.py b/tools/gen_controls_svg.py
+new file mode 100644
+index 0000000..4f553dd
+--- /dev/null
++++ b/tools/gen_controls_svg.py
+@@ -0,0 +1,157 @@
++#!/usr/bin/env python3
++"""Генерирует иллюстрацию «ручки и колёса клавиатуры -> что они делают» (RU и EN).
++
++Запуск из корня репозитория:  python3 tools/gen_controls_svg.py
++Результат: docs/controls_{ru,en}.svg (для README и docs) и site/controls_{ru,en}.svg (для сайта).
++Тексты — в словаре T ниже; при изменении таблицы CC в docs/ENGINES.md обновите их и пересоберите.
++"""
++
++T = {
++ "ru": {
++  "title": "Что делают ручки и колёса вашей MIDI-клавиатуры",
++  "desc": "Схема типовой MIDI-клавиатуры: колесо высоты тона, мод-колесо, ручки громкости и яркости, кнопка смены инструмента и педаль сустейна, с пояснением, что каждый элемент делает в PurrMidi.",
++  "head": "Что делают ручки и колёса клавиатуры в PurrMidi",
++  "sub": "Названия на вашей клавиатуре могут отличаться; важен номер CC. Что из этого есть именно у вас, зависит от модели.",
++  "pitch": "Колесо высоты тона", "pitch_d": "Pitch Bend: ±2 полутона, везде",
++  "mod": "Мод-колесо", "mod_cc": "CC1", "mod_d": "«Живее, ярче»; в нуле звук не меняется",
++  "vol": "Громкость", "vol_cc": "CC7", "vol_d": "Общая громкость, везде",
++  "bri": "Яркость / срез", "bri_cc": "CC74", "bri_d": "Яркость тембра; у Lead — срез фильтра",
++  "res": "Резонанс", "res_cc": "CC71", "res_d": "Яркость или резонанс (по инструменту)",
++  "rel": "Отпускание", "rel_cc": "CC72", "rel_d": "Как долго звук затухает после клавиши",
++  "pc": "Кнопка смены звука", "pc_cc": "Program Change", "pc_d": "Выбор инструмента (127 = следующий)",
++  "sus": "Педаль сустейна", "sus_cc": "CC64", "sus_d": "Звук тянется, пока педаль нажата (у органа нет)",
++  "note": "Не нашли свою ручку? Она может отправлять другой CC: полный список в docs/ENGINES.md",
++  "keys": "клавиши",
++ },
++ "en": {
++  "title": "What the knobs and wheels of your MIDI keyboard do",
++  "desc": "Diagram of a typical MIDI keyboard: pitch wheel, mod wheel, volume and brightness knobs, an instrument-change button and a sustain pedal, with a note on what each one does in PurrMidi.",
++  "head": "What your keyboard's knobs and wheels do in PurrMidi",
++  "sub": "Labels on your keyboard may differ; the CC number is what matters. Which of these you have depends on the model.",
++  "pitch": "Pitch wheel", "pitch_d": "Pitch Bend: ±2 semitones, everywhere",
++  "mod": "Mod wheel", "mod_cc": "CC1", "mod_d": "“Livelier, brighter”; at zero the sound is unchanged",
++  "vol": "Volume", "vol_cc": "CC7", "vol_d": "Master volume, everywhere",
++  "bri": "Brightness / cutoff", "bri_cc": "CC74", "bri_d": "Tone brightness; filter cutoff on Lead",
++  "res": "Resonance", "res_cc": "CC71", "res_d": "Brightness or resonance (per instrument)",
++  "rel": "Release", "rel_cc": "CC72", "rel_d": "How long the sound fades after the key",
++  "pc": "Instrument button", "pc_cc": "Program Change", "pc_d": "Pick an instrument (127 = next)",
++  "sus": "Sustain pedal", "sus_cc": "CC64", "sus_d": "Sound rings while pressed (no sustain on Organ)",
++  "note": "Can't find your knob? It may send another CC: full list in docs/ENGINES.md (Russian)",
++  "keys": "keys",
++ },
++}
++
++def esc(s):
++    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
++
++def wrap(text, width):
++    lines, cur = [], ""
++    for wd in text.split():
++        if cur and len(cur) + len(wd) + 1 > width:
++            lines.append(cur); cur = wd
++        else:
++            cur = (cur + " " + wd).strip()
++    lines.append(cur)
++    return lines
++
++def build(lang):
++    t = T[lang]
++    W, H = 900, 590
++    o = []
++    a = o.append
++    a(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" role="img" aria-labelledby="t d">')
++    a(f'<title id="t">{esc(t["title"])}</title>')
++    a(f'<desc id="d">{esc(t["desc"])}</desc>')
++    a('<style>'
++      'text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;fill:#2a2a38}'
++      '.h{font-size:22px;font-weight:700}.s{font-size:13px;fill:#5d5d70}'
++      '.l{font-size:15px;font-weight:700}.d{font-size:13px;fill:#5d5d70}'
++      '.cc{font-size:12.5px;font-weight:700;fill:#fff;text-anchor:middle}'
++      '.num{font-size:13px;font-weight:700;fill:#fff;text-anchor:middle}'
++      '.n{font-size:12.5px;fill:#5d5d70}'
++      '</style>')
++    a(f'<rect x="0" y="0" width="{W}" height="{H}" rx="20" fill="#fffaf5" stroke="#efe6dd"/>')
++    a(f'<text class="h" x="30" y="42">{esc(t["head"])}</text>')
++    a(f'<text class="s" x="30" y="64">{esc(t["sub"])}</text>')
++
++    # --- клавиатура ---
++    kx, ky, kw, kh = 130, 106, 640, 140
++    a(f'<rect x="{kx}" y="{ky}" width="{kw}" height="{kh}" rx="14" fill="#3b3b4f"/>')
++    a(f'<rect x="{kx+10}" y="{ky+10}" width="{kw-20}" height="58" rx="8" fill="#4b4b63"/>')
++    key_top = ky + 78
++    n_white = 22
++    kwid = (kw - 20) / n_white
++    for i in range(n_white):
++        x = kx + 10 + i * kwid
++        a(f'<rect x="{x:.1f}" y="{key_top}" width="{kwid-1.5:.1f}" height="{kh-88}" rx="2" fill="#fffdf9"/>')
++    for i in range(n_white - 1):
++        if i % 7 in (2, 6):
++            continue
++        x = kx + 10 + (i + 1) * kwid - kwid * 0.3
++        a(f'<rect x="{x:.1f}" y="{key_top}" width="{kwid*0.6:.1f}" height="{(kh-88)*0.6:.1f}" rx="2" fill="#2a2a38"/>')
++
++    pink, blue, green, orange, purple = "#e0668f", "#5a74d6", "#2f9b80", "#c97a12", "#8a6cd6"
++    cy = ky + 39  # центр панели
++    pw_x, mw_x = kx + 38, kx + 76
++    knob_x = [kx + 190, kx + 280, kx + 370, kx + 460]
++    btn_x = kx + 560
++    ped_x, ped_y = kx + kw // 2, ky + kh + 14
++
++    # колёса
++    a(f'<rect x="{pw_x-11}" y="{ky+14}" width="22" height="50" rx="8" fill="{pink}" stroke="#fff" stroke-width="2"/>')
++    a(f'<rect x="{mw_x-11}" y="{ky+14}" width="22" height="50" rx="8" fill="{blue}" stroke="#fff" stroke-width="2"/>')
++    # ручки
++    for x, c in zip(knob_x, (pink, blue, green, orange)):
++        a(f'<circle cx="{x}" cy="{cy}" r="19" fill="#fffaf5" stroke="{c}" stroke-width="3"/>')
++        a(f'<line x1="{x}" y1="{cy}" x2="{x+9}" y2="{cy-11}" stroke="{c}" stroke-width="3" stroke-linecap="round"/>')
++    # кнопка
++    a(f'<rect x="{btn_x-18}" y="{cy-13}" width="36" height="26" rx="7" fill="#fffaf5" stroke="{purple}" stroke-width="3"/>')
++    # педаль
++    a(f'<rect x="{ped_x-55}" y="{ped_y}" width="110" height="22" rx="7" fill="#3b3b4f"/>')
++    a(f'<rect x="{ped_x-47}" y="{ped_y+4}" width="94" height="14" rx="5" fill="#4b4b63"/>')
++
++    # карточки: (ключ, cc-ключ или None, цвет, x маркера, y маркера)
++    items = [
++        ("pitch", None,     pink,   pw_x,       ky - 12),
++        ("mod",   "mod_cc", blue,   mw_x,       ky - 12),
++        ("vol",   "vol_cc", pink,   knob_x[0],  ky - 12),
++        ("bri",   "bri_cc", blue,   knob_x[1],  ky - 12),
++        ("res",   "res_cc", green,  knob_x[2],  ky - 12),
++        ("rel",   "rel_cc", orange, knob_x[3],  ky - 12),
++        ("pc",    "pc_cc",  purple, btn_x,      ky - 12),
++        ("sus",   "sus_cc", green,  ped_x + 78, ped_y + 11),
++    ]
++    # маркеры на рисунке
++    for n, (key, cckey, c, mx, my) in enumerate(items, 1):
++        a(f'<circle cx="{mx}" cy="{my}" r="10" fill="{c}" stroke="#fffaf5" stroke-width="2"/>')
++        a(f'<text class="num" x="{mx}" y="{my+4.5}">{n}</text>')
++
++    # карточки 4 x 2
++    cw, ch, gap = 198, 124, 14
++    gx, gy = 30, 296
++    for n, (key, cckey, c, mx, my) in enumerate(items, 1):
++        col, row = (n - 1) % 4, (n - 1) // 4
++        x = gx + col * (cw + gap)
++        y = gy + row * (ch + gap)
++        a(f'<rect x="{x}" y="{y}" width="{cw}" height="{ch}" rx="14" fill="#ffffff" stroke="#efe6dd"/>')
++        a(f'<circle cx="{x+22}" cy="{y+24}" r="10" fill="{c}"/>')
++        a(f'<text class="num" x="{x+22}" y="{y+28.5}">{n}</text>')
++        cc = t[cckey] if cckey else "Pitch Bend"
++        w = len(cc) * 7.6 + 18
++        a(f'<rect x="{x+cw-w-12:.0f}" y="{y+14}" width="{w:.0f}" height="20" rx="10" fill="{c}"/>')
++        a(f'<text class="cc" x="{x+cw-w/2-12:.0f}" y="{y+28.3}">{esc(cc)}</text>')
++        a(f'<text class="l" x="{x+14}" y="{y+58}">{esc(t[key])}</text>')
++        for j, ln in enumerate(wrap(t[key + "_d"], 24)[:3]):
++            a(f'<text class="d" x="{x+14}" y="{y+78+j*16}">{esc(ln)}</text>')
++    a(f'<text class="n" x="30" y="{H-14}">{esc(t["note"])}</text>')
++    a('</svg>')
++    return "\n".join(o)
++
++if __name__ == "__main__":
++    import os
++    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++    for lang in ("ru", "en"):
++        svg = build(lang) + "\n"
++        for d in ("docs", "site"):
++            with open(os.path.join(root, d, f"controls_{lang}.svg"), "w", encoding="utf-8", newline="\n") as f:
++                f.write(svg)
+-- 
+2.43.0
+
