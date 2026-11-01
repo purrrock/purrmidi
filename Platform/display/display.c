@@ -63,6 +63,7 @@ static bool splash_active = false;   /* заставка на экране: Disp
 #define MIN_DRAW_INTERVAL_MS   10U   /* пауза между отрисовками полей        */
 #define ERROR_TIMEOUT_MS     3000U   /* время показа "временной" ошибки      */
 #define ENUM_TIMEOUT_MS      5000U   /* энумерация дольше этого -> E01       */
+#define CC_TOAST_MS          1200U   /* сколько держится подсказка CC/педали  */
 
 #define RGB565(r, g, b) \
     ((uint16_t)((((r) & 0xF8U) << 8) | (((g) & 0xFCU) << 3) | (((b) & 0xFFU) >> 3)))
@@ -157,6 +158,37 @@ static struct
     .patch_index = 1,
     .patch_name  = "Pluck",
     .dirty       = F_ALL,
+};
+
+/* ---- Кратковременная подсказка (toast) в строке инструмента: ручка (CC) или педаль ----
+ * Живёт в ui-состоянии только пока не истёк expire; Display_Task() убирает её и возвращает строку инструмента. */
+typedef enum { TOAST_NONE = 0, TOAST_CC, TOAST_PEDAL } ToastKind_t;
+
+static struct
+{
+    ToastKind_t kind;
+    uint32_t    expire;     /* tick, когда подсказка гаснет */
+    uint8_t     cc;
+    uint8_t     value;      /* 0..127 (для педали не используется) */
+    bool        on;         /* для педали */
+} toast;
+
+/* Состояние педалей (CC64/66/67): подсказка показывается только при смене ON/OFF, а не на каждое значение
+ * (полупедаль шлёт CC потоком). */
+static const struct { uint8_t cc; const char *name; } pedal_info[3] =
+{
+    { 64, "SUSTAIN"   },
+    { 66, "SOSTENUTO" },
+    { 67, "SOFT"      },
+};
+static bool pedal_on[3];
+
+/* Имена CC для подсказки (до 8 символов, ASCII). Остальные показываются как "CC <номер>". */
+static const struct { uint8_t cc; const char *name; } cc_names[] =
+{
+    {  1, "Mod"     }, {  2, "Breath"  }, { 10, "Pan"     }, { 11, "Expr"    },
+    { 71, "Reson"   }, { 72, "Release" }, { 73, "Attack"  }, { 74, "Bright"  },
+    { 91, "Reverb"  }, { 93, "Chorus"  },
 };
 
 static const char * const note_names[12] =
@@ -559,8 +591,72 @@ static void Draw_Header(void)
     Canvas_Flush(0, HDR_Y);
 }
 
+/* true для CC, которые не нужно показывать ручкой: педали (у них своя подсказка), Bank Select, Data Entry,
+ * (N)RPN и канальные команды 120..127 (All Sound Off, Reset Controllers, All Notes Off и т. д.) */
+static bool Toast_IsIgnoredCC(uint8_t cc)
+{
+    return cc == 0U || cc == 32U || cc == 6U || cc == 38U ||
+           (cc >= 96U && cc <= 101U) || cc >= 120U;
+}
+
+static void Draw_Toast(void)
+{
+    Canvas_Begin(DISPLAY_WIDTH, INS_H, C_BLACK);
+
+    if (toast.kind == TOAST_PEDAL)
+    {
+        const char *name = "PEDAL";
+        for (uint8_t i = 0; i < 3U; i++)
+        {
+            if (pedal_info[i].cc == toast.cc) { name = pedal_info[i].name; }
+        }
+        Canvas_Text(2, 0, name, 16, 1, C_WHITE);
+
+        /* Плашка справа: ON - залитая янтарная, OFF - серая рамка */
+        if (toast.on)
+        {
+            Canvas_Rect(112, 0, 46, 16, C_AMBER);
+            Canvas_Text(127, 0, "ON", 16, 1, C_BLACK);
+        }
+        else
+        {
+            Canvas_Rect(112, 0, 46, 16, C_GRAY);
+            Canvas_Rect(113, 1, 44, 14, C_BLACK);
+            Canvas_Text(123, 0, "OFF", 16, 1, C_DIM);
+        }
+    }
+    else
+    {
+        char label[10] = "";
+        for (size_t i = 0; i < sizeof(cc_names) / sizeof(cc_names[0]); i++)
+        {
+            if (cc_names[i].cc == toast.cc) { snprintf(label, sizeof(label), "%s", cc_names[i].name); }
+        }
+        if (label[0] == '\0') { snprintf(label, sizeof(label), "CC %u", (unsigned)toast.cc); }
+        Canvas_Text(2, 0, label, 16, 1, C_AMBER);
+
+        /* Полоса 56x10 (внутри 54x8) и проценты справа */
+        const unsigned percent = ((unsigned)toast.value * 100U + 63U) / 127U;
+        Canvas_Rect(74, 3, 56, 10, C_GRAY);
+        Canvas_Rect(75, 4, 54, 8, C_BLACK);
+        Canvas_Rect(75, 4, ((int)toast.value * 54) / 127, 8, C_CYAN);
+
+        char text[8];
+        snprintf(text, sizeof(text), "%3u%%", percent);
+        Canvas_Text(134, 2, text, 12, 1, C_WHITE);
+    }
+
+    Canvas_Flush(0, INS_Y);
+}
+
 static void Draw_Instrument(void)
 {
+    if (toast.kind != TOAST_NONE)
+    {
+        Draw_Toast();
+        return;
+    }
+
     char number[4];
     snprintf(number, sizeof(number), "%02u", (unsigned)(ui.patch_index % 100U));
 
@@ -846,6 +942,13 @@ void Display_Task(void)
         }
     }
 
+    /* Гасим подсказку CC/педали: возвращаем строку с названием инструмента */
+    if (toast.kind != TOAST_NONE && (int32_t)(now - toast.expire) >= 0)
+    {
+        toast.kind = TOAST_NONE;
+        MarkDirty(F_INSTR);
+    }
+
     /* Энумерация затянулась: библиотека USB-хоста сама об этом не сообщает */
     if (ui.link == DISPLAY_LINK_ENUMERATING && !ui.errors[DISPLAY_ERR_USB_ENUM].active &&
         (now - ui.link_since) >= ENUM_TIMEOUT_MS)
@@ -880,6 +983,12 @@ void Display_SetLinkState(Display_Link_t state)
         /* Клавиатуры нет: сбрасываем всё, что от неё зависело */
         ui.sustain     = false;
         ui.voices_used = 0;
+        memset(pedal_on, 0, sizeof(pedal_on));
+        if (toast.kind != TOAST_NONE)
+        {
+            toast.kind = TOAST_NONE;
+            MarkDirty(F_INSTR);
+        }
 
         if (ui.note_live)
         {
@@ -1000,6 +1109,7 @@ void Display_SetPatch(uint8_t index, const char *name)
 
     ui.patch_index = index;
     memcpy(ui.patch_name, tmp, sizeof(ui.patch_name));
+    toast.kind = TOAST_NONE;   /* новый инструмент должен быть виден сразу, а не через 1,2 с */
     MarkDirty(F_INSTR);
 }
 
@@ -1029,6 +1139,46 @@ void Display_SetClip(bool clipping)
 
     ui.clip = clipping;
     MarkDirty(F_VOLUME);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Public API: controllers (knobs, pedals)                                   */
+/* ------------------------------------------------------------------------- */
+
+void Display_ShowControl(uint8_t cc, uint8_t value)
+{
+    if (!display_ready || splash_active) { return; }
+
+    cc    &= 0x7FU;
+    value &= 0x7FU;
+
+    /* Педали: подсказка только при смене состояния */
+    for (uint8_t i = 0; i < 3U; i++)
+    {
+        if (pedal_info[i].cc != cc) { continue; }
+
+        const bool on = (value >= 64U);
+        if (on == pedal_on[i]) { return; }
+
+        pedal_on[i]  = on;
+        toast.kind   = TOAST_PEDAL;
+        toast.cc     = cc;
+        toast.on     = on;
+        toast.expire = HAL_GetTick() + CC_TOAST_MS;
+        MarkDirty(F_INSTR);
+        return;
+    }
+
+    if (Toast_IsIgnoredCC(cc)) { return; }
+
+    /* Тот же CC с тем же значением (повтор от клавиатуры): только продлеваем показ */
+    const bool same = (toast.kind == TOAST_CC && toast.cc == cc && toast.value == value);
+
+    toast.kind   = TOAST_CC;
+    toast.cc     = cc;
+    toast.value  = value;
+    toast.expire = HAL_GetTick() + CC_TOAST_MS;
+    if (!same) { MarkDirty(F_INSTR); }
 }
 
 /* ------------------------------------------------------------------------- */

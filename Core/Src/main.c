@@ -546,9 +546,13 @@ int main(void)
                 Display_SyncVolume();
                 Settings_MarkDirty();
             }
-            else if (event.data1 == 64U)
+            else
             {
-                Display_SetSustain(event.data2 >= 64U);
+                if (event.data1 == 64U)
+                {
+                    Display_SetSustain(event.data2 >= 64U);
+                }
+                Display_ShowControl(event.data1, event.data2);   /* ручка -> "Bright 80%", педаль -> "SUSTAIN ON" на 1,2 с */
             }
         }
 
