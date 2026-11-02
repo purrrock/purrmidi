@@ -38,6 +38,13 @@ add_executable(${CMAKE_PROJECT_NAME})
 # STM32CubeMX-generated sources and libraries
 add_subdirectory(cmake/stm32cubemx)
 
+# Debug: -O0 везде замедляет не только сам синтез, но и все прерывания, которые вытесняют рендер (PendSV имеет
+# самый низкий приоритет): USB Host (HAL_HCD, USBH-стек, usbh_midi), SDMMC/QSPI/DMA/SAI HAL, разбор MIDI. Время
+# рендера в логе "[AUDIO] ... fill" включает это вытеснение, поэтому в Debug собирается с -O2 весь "рантайм-путь"
+# (синтез, DaisySP, HAL, USB, MIDI), а main.c, дисплей и прочее остаются на -O0 -g3 для удобной отладки.
+# Отключить (полный -O0): -DPURRMIDI_FAST_DEBUG=OFF.
+option(PURRMIDI_FAST_DEBUG "Debug build: compile the audio/IRQ/USB runtime path with -O2 (rest stays -O0)" ON)
+
 # ---------------------------------------------------------------------------
 # DaisySP (урезанная копия: только Oscillator, Svf, Adsr для движка Lead)
 # ---------------------------------------------------------------------------
@@ -70,7 +77,8 @@ target_compile_features(DaisySP PUBLIC cxx_std_17)
 
 # DaisySP (Lead: Oscillator/Svf/Adsr) считается на каждом сэмпле в аудио-прерывании: скорость важнее размера.
 # Только Release (в Debug остаётся -O0 -g3). Подробности - в блоке "Оптимизация по скорости" ниже.
-target_compile_options(DaisySP PRIVATE $<$<CONFIG:Release>:-O2>)
+# В Debug тоже -O2 (см. PURRMIDI_FAST_DEBUG ниже): иначе движок Lead в Debug выходит за бюджет блока.
+target_compile_options(DaisySP PRIVATE $<$<OR:$<CONFIG:Release>,$<BOOL:${PURRMIDI_FAST_DEBUG}>>:-O2>)
 
 # ---------------------------------------------------------------------------
 # Application sources
@@ -205,3 +213,32 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
     DaisySP
 )
+
+# ---------------------------------------------------------------------------
+# Debug: быстрый рантайм-путь (прерывания, USB, HAL, DaisySP) при сохранении -O0 для остального кода
+# ---------------------------------------------------------------------------
+if(PURRMIDI_FAST_DEBUG)
+    foreach(_t STM32_Drivers USB_Host_Library)
+        if(TARGET ${_t})
+            target_compile_options(${_t} PRIVATE $<$<CONFIG:Debug>:-O2>)
+        endif()
+    endforeach()
+    set(_purrmidi_fast_debug_sources
+        Engine/audio/audio_halves.c
+        Engine/midi/midi_queue.c
+        Engine/midi/midi_dispatch.c
+        Engine/midi/usb_midi_packet.c
+        Engine/midi/chord_detector.c
+        Platform/midi_usb/usbh_midi.c
+        Platform/midi_usb/midi_usb.c
+        Platform/midi_usb/usb_port_recover.c
+        Platform/system/diag.c
+        Platform/system/watchdog.c
+        Platform/qspi_xip/xip_mpu.c
+        Platform/qspi_xip/qspi_flash.c
+        Core/Src/stm32h7xx_it.c
+        Core/Src/dma.c
+        Core/Src/sai.c
+    )
+    set_property(SOURCE ${_purrmidi_fast_debug_sources} APPEND PROPERTY COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
+endif()
