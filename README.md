@@ -53,7 +53,7 @@ By default, the device is silent upon startup. To test the sound (DAC, jumpers, 
 
 The instrument name and active notes are shown on the display. The selected instrument and the volume are saved and restored after a restart. After power is removed they survive only if a 3V battery is connected to VBAT (see [docs/HARDWARE.md](docs/HARDWARE.md#батарейка-vbat-необязательно)); without it the device starts with the E-Piano.
 
-**Keyboard controls.** The same on all instruments: Pitch Bend (±2 semitones), master volume CC7, sustain pedal CC64 (not on the Organ), All Sound Off CC120, All Notes Off CC123, and the mod wheel CC1 always means “livelier / brighter” (at zero the sound is unchanged).
+**Keyboard controls.** The same on all instruments: Pitch Bend (±2 semitones), master volume CC7, shared reverb CC91 (always “a little” after power-on, never remembered), sustain pedal CC64 (not on the Organ), All Sound Off CC120, All Notes Off CC123, and the mod wheel CC1 always means “livelier / brighter” (at zero the sound is unchanged).
 
 | Instrument | MIDI |
 | ---------- | ---- |

@@ -27,11 +27,28 @@
 #include "pluck_synth.h"
 #include "soundfont_synth.h"
 #include "violin_synth.h"
+#if SYNTH_REVERB_ENABLE
+#include "reverb.h"
+#endif
 
 #include <atomic>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+
+/* Те же правила, что в soundfont_synth.cpp: на ПК (и в тестах) тактов DWT нет. */
+#ifndef SYNTH_HOST_MODE
+#if defined(PURRMIDI_HOST_BUILD) || defined(_WIN32) || defined(WIN32) || defined(__unix__) || defined(__APPLE__)
+#define SYNTH_HOST_MODE 1
+#else
+#define SYNTH_HOST_MODE 0
+#endif
+#endif
+
+#if SYNTH_REVERB_ENABLE && !SYNTH_HOST_MODE
+#include "stm32h7xx.h"   /* DWT->CYCCNT: время рендера движка для защиты реверберации от перегрузки */
+#endif
 
 namespace {
 
@@ -85,6 +102,40 @@ float                g_master_gain_applied = 1.0f;   /* коэффициент �
 /* Индекс пресета SF2, выбранный пользователем (имеет смысл, пока активен SoundFont; хранится в main-контексте).
  * Переживает Panic() и повторную активацию движка. */
 uint32_t             g_sf_preset = 0;
+
+#if SYNTH_REVERB_ENABLE
+/*
+ * Общая реверберация. Состояние (около 38 КБ) лежит в .bss, на STM32 это DTCM. Глубина - как громкость: пишется из main,
+ * читается из аудио-контекста, атомарно. Решение «разрешена ли» принимает защита по времени рендера движка.
+ */
+synth::Reverb          g_reverb;
+std::atomic<uint8_t>   g_reverb_level{SYNTH_REVERB_DEFAULT};
+synth::ReverbLoadGuard g_reverb_guard{SYNTH_REVERB_SHED_PCT, SYNTH_REVERB_RESTORE_PCT, 2U, SYNTH_REVERB_RESTORE_BLOCKS};
+std::atomic<bool>      g_reverb_shed{false};   /* зеркало состояния защиты для SynthEngine_IsReverbShed() */
+
+#if !SYNTH_HOST_MODE
+inline uint32_t clock_cycles() { return DWT->CYCCNT; }
+inline uint32_t block_budget_cycles(uint32_t frames) { return (SystemCoreClock / 48000U) * frames; }
+#else
+uint32_t (*g_test_clock)(void) = nullptr;
+uint32_t   g_test_block_budget = 0U;   /* такты на блок из 128 кадров */
+inline uint32_t clock_cycles() { return g_test_clock ? g_test_clock() : 0U; }
+inline uint32_t block_budget_cycles(uint32_t frames)
+{
+    return g_test_clock ? (uint32_t)(((uint64_t)g_test_block_budget * frames) / 128U) : 0U;
+}
+#endif
+
+/* Глубина 0..127 -> усиление мокрого сигнала: MAX * n^1.25 (n^1.25 = n * sqrt(sqrt(n)), без powf). */
+float reverb_level_to_wet(uint8_t level)
+{
+    if (level == 0U) {
+        return 0.0f;
+    }
+    const float n = (float)level * (1.0f / 127.0f);
+    return SYNTH_REVERB_MAX_WET * n * std::sqrt(std::sqrt(n));
+}
+#endif /* SYNTH_REVERB_ENABLE */
 
 /* Короткие имена встроенных движков для дисплея (до 17 символов, ASCII). Порядок = SynthEngineId. */
 const char * const kDisplayNames[SYNTH_ENGINE_SOUNDFONT] = {
@@ -173,6 +224,11 @@ void activate(SynthEngineId id)
         /* ждём, пока аудио-поток (ПК) закончит текущий блок */
     }
     next->init();
+#if SYNTH_REVERB_ENABLE
+    g_reverb.Init();          /* хвост предыдущего инструмента не переходит в новый: состояние как после включения */
+    g_reverb_guard.Reset();
+    g_reverb_shed.store(false, std::memory_order_relaxed);
+#endif
     held_clear();   /* новый движок стартует «с нуля»: ни одной удерживаемой ноты */
     if (id == SYNTH_ENGINE_SOUNDFONT) {
         SoundFontSynth_SelectPreset(g_sf_preset);   /* Init() ставит пресет 0: возвращаем выбранный */
@@ -192,6 +248,9 @@ void SynthEngine_Init(void)
 {
     g_master_vol.store(SYNTH_MASTER_VOLUME_DEFAULT, std::memory_order_relaxed);
     g_master_gain_applied = volume_to_gain(SYNTH_MASTER_VOLUME_DEFAULT);
+#if SYNTH_REVERB_ENABLE
+    g_reverb_level.store(SYNTH_REVERB_DEFAULT, std::memory_order_relaxed);   /* глубина после включения всегда одна и та же */
+#endif
     g_pitch_bend = 0;
     held_clear();
     activate(SYNTH_ENGINE_DEFAULT);
@@ -216,6 +275,41 @@ uint8_t SynthEngine_GetMasterVolume(void)
 {
     return g_master_vol.load(std::memory_order_relaxed);
 }
+
+void SynthEngine_SetReverb(uint8_t level)
+{
+#if SYNTH_REVERB_ENABLE
+    g_reverb_level.store(level > 127U ? (uint8_t)127U : level, std::memory_order_relaxed);
+#else
+    (void)level;
+#endif
+}
+
+uint8_t SynthEngine_GetReverb(void)
+{
+#if SYNTH_REVERB_ENABLE
+    return g_reverb_level.load(std::memory_order_relaxed);
+#else
+    return 0U;
+#endif
+}
+
+int SynthEngine_IsReverbShed(void)
+{
+#if SYNTH_REVERB_ENABLE
+    return g_reverb_shed.load(std::memory_order_relaxed) ? 1 : 0;
+#else
+    return 0;
+#endif
+}
+
+#if SYNTH_REVERB_ENABLE && SYNTH_HOST_MODE
+void SynthEngine_SetClockForTest(uint32_t (*now)(void), uint32_t block_budget_cycles_per_128)
+{
+    g_test_clock        = now;
+    g_test_block_budget = block_budget_cycles_per_128;
+}
+#endif
 
 int SynthEngine_Select(SynthEngineId id)
 {
@@ -369,6 +463,13 @@ void SynthEngine_ControlChange(uint8_t control, uint8_t value)
         SynthEngine_SetMasterVolume(value);
         return;
     }
+#if SYNTH_REVERB_ENABLE
+    if (control == SYNTH_REVERB_CC) {
+        /* Общая реверберация: тоже обрабатывается здесь, движки CC91 не видят. */
+        SynthEngine_SetReverb(value);
+        return;
+    }
+#endif
 
     const Engine *e = g_active.load(std::memory_order_relaxed);
     if (!e) {
@@ -384,6 +485,9 @@ void SynthEngine_ControlChange(uint8_t control, uint8_t value)
         /* All Sound Off: каждый движок гасит свои голоса быстро и без щелчка и сбрасывает педаль; нажатые клавиши
          * после этого считаются отпущенными. Остальные настройки (яркость, регистры органа и т.д.) не меняются. */
         held_clear();
+#if SYNTH_REVERB_ENABLE
+        g_reverb.Kill();   /* хвост реверберации гаснет вместе с голосами (за ~21 мс) */
+#endif
     }
     e->control_change(control, value);
 }
@@ -426,7 +530,16 @@ void SynthEngine_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
 
     const Engine *e = g_active.load(std::memory_order_relaxed);
     if (e) {
+#if SYNTH_REVERB_ENABLE
+        const uint32_t t0 = clock_cycles();
         e->fill(buffer, num_frames);
+        const uint32_t dt = clock_cycles() - t0;   /* только движок: эффект не должен раскачивать собственное решение */
+        const bool allowed = g_reverb_guard.Update(dt, block_budget_cycles(num_frames));
+        g_reverb_shed.store(!allowed, std::memory_order_relaxed);
+        g_reverb.Process(buffer, num_frames, allowed ? reverb_level_to_wet(g_reverb_level.load(std::memory_order_relaxed)) : 0.0f);
+#else
+        e->fill(buffer, num_frames);
+#endif
         apply_master_volume(buffer, num_frames);
     } else {
         std::memset(buffer, 0, (size_t)num_frames * 2U * sizeof(int16_t));

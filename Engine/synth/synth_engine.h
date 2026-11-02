@@ -75,6 +75,39 @@ typedef enum {
 #define SYNTH_MASTER_VOLUME_DEFAULT 127
 #endif
 
+/*
+ * Общая реверберация (Engine/synth/reverb.h): Control Change SYNTH_REVERB_CC (по умолчанию CC91 - «Reverb Send»), 0..127.
+ * Как и громкость, это общая настройка прибора, а не движка: она не сбрасывается сменой инструмента и Panic().
+ * В отличие от громкости она НЕ сохраняется при выключении питания. 0 = эффект выключен
+ * (выход бит-в-бит как без него, процессор не тратится). Канал не учитывается; в движки CC91 не передаётся.
+ * Кривая: усиление мокрого сигнала = SYNTH_REVERB_MAX_WET * (CC/127)^1.25. Уровень SYNTH_REVERB_DEFAULT (20 - значение
+ * по умолчанию) даёт «немного».
+ * Если времени на блок не хватает (движок занял больше SYNTH_REVERB_SHED_PCT бюджета), эффект плавно отключается раньше,
+ * чем начнут гаситься голоса, и возвращается после паузы (см. ReverbLoadGuard).
+ * SYNTH_REVERB_ENABLE=0 убирает эффект из сборки целиком (и 38 КБ ОЗУ).
+ */
+#ifndef SYNTH_REVERB_ENABLE
+#define SYNTH_REVERB_ENABLE 1
+#endif
+#ifndef SYNTH_REVERB_CC
+#define SYNTH_REVERB_CC 91
+#endif
+#ifndef SYNTH_REVERB_DEFAULT
+#define SYNTH_REVERB_DEFAULT 20
+#endif
+#ifndef SYNTH_REVERB_MAX_WET
+#define SYNTH_REVERB_MAX_WET 0.8f
+#endif
+#ifndef SYNTH_REVERB_SHED_PCT
+#define SYNTH_REVERB_SHED_PCT 70      /* движок занял больше этой доли бюджета блока 2 блока подряд: реверберация выкл. */
+#endif
+#ifndef SYNTH_REVERB_RESTORE_PCT
+#define SYNTH_REVERB_RESTORE_PCT 55   /* вернуть эффект, когда движок ниже этой доли бюджета ... */
+#endif
+#ifndef SYNTH_REVERB_RESTORE_BLOCKS
+#define SYNTH_REVERB_RESTORE_BLOCKS 128   /* ... в течение стольких блоков подряд (около 0,34 с) */
+#endif
+
 /* Синтезатор, который звучит после включения питания. */
 #define SYNTH_ENGINE_DEFAULT SYNTH_ENGINE_EPIANO
 
@@ -86,7 +119,8 @@ void SynthEngine_NoteOff(uint8_t midi_note);
 /*
  * Control Change. Одинаково для всех движков (подробно - docs/ENGINES.md, «Единое поведение движков»):
  *   CC7   - общая громкость (в движки не передаётся);
- *   CC120 - All Sound Off: движок быстро (10-20 мс) гасит все голоса, педаль сбрасывается;
+ *   CC91  - общая реверберация (в движки не передаётся, см. SYNTH_REVERB_CC);
+ *   CC120 - All Sound Off: движок быстро (10-20 мс) гасит все голоса, педаль сбрасывается, хвост реверберации гаснет за ~21 мс;
  *   CC123 - All Notes Off: выполняется здесь, в общем коде - Note Off по всем удерживаемым нотам и снятие педали;
  *   CC1   - мод-колесо: «живее, ярче»; в нуле звук не отличается от звука без колеса.
  * Остальные CC передаются активному движку.
@@ -163,6 +197,20 @@ void SynthEngine_SetMasterVolume(uint8_t level);
 
 /** Текущий уровень общей громкости 0..127. */
 uint8_t SynthEngine_GetMasterVolume(void);
+
+/** Глубина общей реверберации 0..127 (значения выше 127 ограничиваются); 0 - выключена. Можно вызывать из main. Не сохраняется. */
+void SynthEngine_SetReverb(uint8_t level);
+
+/** Текущая глубина реверберации 0..127 (не учитывает временное отключение защитой от перегрузки). */
+uint8_t SynthEngine_GetReverb(void);
+
+/** 1, если реверберация сейчас временно отключена защитой от перегрузки (движку не хватает времени на блок). */
+int SynthEngine_IsReverbShed(void);
+
+#if defined(PURRMIDI_HOST_BUILD) || defined(_WIN32) || defined(__unix__) || defined(__APPLE__)
+/** Только для тестов на хосте: свои «часы» (такты) и бюджет блока из 128 кадров; now == NULL выключает защиту. */
+void SynthEngine_SetClockForTest(uint32_t (*now)(void), uint32_t block_budget_cycles);
+#endif
 
 /** Текущий активный синтезатор. */
 SynthEngineId SynthEngine_GetCurrent(void);

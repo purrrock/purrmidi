@@ -18,6 +18,7 @@ T = {
   "bri": "Яркость / срез", "bri_cc": "CC74", "bri_d": "Яркость тембра; у Lead — срез фильтра",
   "res": "Резонанс", "res_cc": "CC71", "res_d": "Яркость или резонанс (по инструменту)",
   "rel": "Отпускание", "rel_cc": "CC72", "rel_d": "Как долго звук затухает после клавиши",
+  "rev": "Реверберация", "rev_cc": "CC91", "rev_d": "Гулкость помещения; после включения всегда «немного»",
   "pc": "Кнопка смены звука", "pc_cc": "Program Change", "pc_d": "Выбор инструмента (127 = следующий)",
   "sus": "Педаль сустейна", "sus_cc": "CC64", "sus_d": "Звук тянется, пока педаль нажата (у органа нет)",
   "note": "Не нашли свою ручку? Она может отправлять другой CC: полный список в docs/ENGINES.md",
@@ -34,6 +35,7 @@ T = {
   "bri": "Brightness / cutoff", "bri_cc": "CC74", "bri_d": "Tone brightness; filter cutoff on Lead",
   "res": "Resonance", "res_cc": "CC71", "res_d": "Brightness or resonance (per instrument)",
   "rel": "Release", "rel_cc": "CC72", "rel_d": "How long the sound fades after the key",
+  "rev": "Reverb", "rev_cc": "CC91", "rev_d": "Room ambience; always “a little” after power-on",
   "pc": "Instrument button", "pc_cc": "Program Change", "pc_d": "Pick an instrument (127 = next)",
   "sus": "Sustain pedal", "sus_cc": "CC64", "sus_d": "Sound rings while pressed (no sustain on Organ)",
   "note": "Can't find your knob? It may send another CC: full list in docs/ENGINES.md (Russian)",
@@ -56,7 +58,7 @@ def wrap(text, width):
 
 def build(lang):
     t = T[lang]
-    W, H = 900, 590
+    W, H = 900, 690
     o = []
     a = o.append
     a(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" role="img" aria-labelledby="t d">')
@@ -90,18 +92,18 @@ def build(lang):
         x = kx + 10 + (i + 1) * kwid - kwid * 0.3
         a(f'<rect x="{x:.1f}" y="{key_top}" width="{kwid*0.6:.1f}" height="{(kh-88)*0.6:.1f}" rx="2" fill="#2a2a38"/>')
 
-    pink, blue, green, orange, purple = "#e0668f", "#5a74d6", "#2f9b80", "#c97a12", "#8a6cd6"
+    pink, blue, green, orange, purple, cyan = "#e0668f", "#5a74d6", "#2f9b80", "#c97a12", "#8a6cd6", "#1a8fb0"
     cy = ky + 39  # центр панели
     pw_x, mw_x = kx + 38, kx + 76
-    knob_x = [kx + 190, kx + 280, kx + 370, kx + 460]
-    btn_x = kx + 560
+    knob_x = [kx + 170, kx + 250, kx + 330, kx + 410, kx + 490]
+    btn_x = kx + 580
     ped_x, ped_y = kx + kw // 2, ky + kh + 14
 
     # колёса
     a(f'<rect x="{pw_x-11}" y="{ky+14}" width="22" height="50" rx="8" fill="{pink}" stroke="#fff" stroke-width="2"/>')
     a(f'<rect x="{mw_x-11}" y="{ky+14}" width="22" height="50" rx="8" fill="{blue}" stroke="#fff" stroke-width="2"/>')
     # ручки
-    for x, c in zip(knob_x, (pink, blue, green, orange)):
+    for x, c in zip(knob_x, (pink, blue, green, orange, cyan)):
         a(f'<circle cx="{x}" cy="{cy}" r="19" fill="#fffaf5" stroke="{c}" stroke-width="3"/>')
         a(f'<line x1="{x}" y1="{cy}" x2="{x+9}" y2="{cy-11}" stroke="{c}" stroke-width="3" stroke-linecap="round"/>')
     # кнопка
@@ -118,6 +120,7 @@ def build(lang):
         ("bri",   "bri_cc", blue,   knob_x[1],  ky - 12),
         ("res",   "res_cc", green,  knob_x[2],  ky - 12),
         ("rel",   "rel_cc", orange, knob_x[3],  ky - 12),
+        ("rev",   "rev_cc", cyan,   knob_x[4],  ky - 12),
         ("pc",    "pc_cc",  purple, btn_x,      ky - 12),
         ("sus",   "sus_cc", green,  ped_x + 78, ped_y + 11),
     ]
@@ -127,10 +130,10 @@ def build(lang):
         a(f'<text class="num" x="{mx}" y="{my+4.5}">{n}</text>')
 
     # карточки 4 x 2
-    cw, ch, gap = 198, 124, 14
+    cw, ch, gap = 270, 112, 14
     gx, gy = 30, 296
     for n, (key, cckey, c, mx, my) in enumerate(items, 1):
-        col, row = (n - 1) % 4, (n - 1) // 4
+        col, row = (n - 1) % 3, (n - 1) // 3
         x = gx + col * (cw + gap)
         y = gy + row * (ch + gap)
         a(f'<rect x="{x}" y="{y}" width="{cw}" height="{ch}" rx="14" fill="#ffffff" stroke="#efe6dd"/>')
@@ -141,7 +144,7 @@ def build(lang):
         a(f'<rect x="{x+cw-w-12:.0f}" y="{y+14}" width="{w:.0f}" height="20" rx="10" fill="{c}"/>')
         a(f'<text class="cc" x="{x+cw-w/2-12:.0f}" y="{y+28.3}">{esc(cc)}</text>')
         a(f'<text class="l" x="{x+14}" y="{y+58}">{esc(t[key])}</text>')
-        for j, ln in enumerate(wrap(t[key + "_d"], 24)[:3]):
+        for j, ln in enumerate(wrap(t[key + "_d"], 31)[:2]):
             a(f'<text class="d" x="{x+14}" y="{y+78+j*16}">{esc(ln)}</text>')
     a(f'<text class="n" x="30" y="{H-14}">{esc(t["note"])}</text>')
     a('</svg>')

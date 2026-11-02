@@ -83,6 +83,7 @@ void select_epiano_fresh()
 void test_dispatch_pitch_bend_epiano()
 {
     SynthEngine_Init();
+    SynthEngine_SetReverb(0);   // тест измеряет высоту тона самого движка: хвост реверберации (test_engine_reverb) не нужен
     select_epiano_fresh();
     send(MIDI_STATUS_NOTE_ON, 69, 100);
     const double f0 = measure(440.0);

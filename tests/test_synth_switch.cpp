@@ -276,6 +276,7 @@ static void send_cc(uint8_t cc, uint8_t value, uint8_t channel = 0) {
 // Общая громкость: CC7 с клавиатуры масштабирует выход любого движка (программно, т.к. у PCM5102A нет регулировки).
 static void test_master_volume_cc7() {
     SynthEngine_Init();
+    SynthEngine_SetReverb(0);   // сравниваются пики самого движка; реверберация проверяется в test_engine_reverb
     CHECK(SynthEngine_GetMasterVolume() == SYNTH_MASTER_VOLUME_DEFAULT);
 
     // Берём движок Lead: стабильная амплитуда, удобно сравнивать пики.

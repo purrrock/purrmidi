@@ -113,6 +113,7 @@ const double kNoteHz = 220.0;
 
 void test_pitch_bend()
 {
+    SynthEngine_SetReverb(0);   // измеряется высота тона движка; хвост реверберации прежней высоты исказил бы измерение
     for (const EngineCase &e : g_engines) {
         const int positions[] = { 8191, -8192 };
         const double expected_cents[] = { 200.0, -200.0 };
@@ -160,6 +161,7 @@ void test_pitch_bend()
         const double hz_back = measure_hz(render(8192), 0, 8192, kNoteHz);
         CHECK(std::fabs(cents_of(hz_back / hz0)) < 20.0);
     }
+    SynthEngine_SetReverb(SYNTH_REVERB_DEFAULT);   // остальные проверки идут с реверберацией, как на приборе
 }
 
 // Максимум модуля второй разности: «щелчок» (скачок фазы или амплитуды) на гладком сигнале виден как выброс.

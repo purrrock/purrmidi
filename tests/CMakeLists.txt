@@ -128,6 +128,23 @@ target_link_libraries(test_synth_common PRIVATE purrmidi_synth_common)
 target_compile_features(test_synth_common PRIVATE cxx_std_17)
 add_test(NAME test_synth_common COMMAND test_synth_common)
 
+# Общая реверберация (Engine/synth/reverb.h): алгоритм и защита по нагрузке, без диспетчера движков.
+add_executable(test_reverb
+    test_reverb.cpp
+)
+target_link_libraries(test_reverb PRIVATE purrmidi_synth_common)
+target_compile_features(test_reverb PRIVATE cxx_std_17)
+add_test(NAME test_reverb COMMAND test_reverb)
+
+# Реверберация на уровне диспетчера: CC91, смена инструмента, All Sound Off, отключение под нагрузкой.
+add_executable(test_engine_reverb
+    test_engine_reverb.cpp
+)
+find_package(Threads REQUIRED)
+target_link_libraries(test_engine_reverb PRIVATE purrmidi_core Threads::Threads)
+target_compile_features(test_engine_reverb PRIVATE cxx_std_17)
+add_test(NAME test_engine_reverb COMMAND test_engine_reverb)
+
 add_executable(test_engine_golden
     test_engine_golden.cpp
 )
