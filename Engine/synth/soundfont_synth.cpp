@@ -45,10 +45,10 @@
 
 /* 1 = collect per-block statistics (render time, voices, clipping) and print them from the main loop.
  * Costs extra work in the audio context (e.g. one more tsf_channel_get_note_start_samples() per Note On), so it is
- * OFF in firmware Release builds (the ARM build without DEBUG) and ON in Debug and in host builds/tests.
+ * OFF in all firmware builds (Release and Debug) and ON in host builds/tests.
  * Override with -DSF2_DIAG_STATS=0/1. */
 #ifndef SF2_DIAG_STATS
-#if defined(__arm__) && !defined(DEBUG)
+#if defined(__arm__)   /* прошивка: выключено и в Debug (иначе лишняя работа в аудио-контексте); включить: -DSF2_DIAG_STATS=1 */
 #define SF2_DIAG_STATS 0
 #else
 #define SF2_DIAG_STATS 1
