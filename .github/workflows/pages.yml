@@ -51,15 +51,17 @@ jobs:
 
       # Веб-прошивальщик предлагает последний релиз. Файл кладётся рядом со страницей (тот же origin),
       # потому что браузер не даст скачать вложение релиза с github.com из-за CORS.
-      # Релиза ещё нет - не ошибка: страница тогда принимает только файл пользователя.
+      # Берётся самый свежий опубликованный (не черновик, не pre-release) релиз, у которого есть И purrmidi.elf,
+      # И SHA256SUMS. Релиза нет или у него нет файлов (например, создан вручную, а workflow Release упал) - не ошибка:
+      # страница тогда принимает только файл пользователя, а деплой сайта не должен из-за этого падать.
       - name: Fetch latest release firmware for the web flasher
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="$(gh api "repos/${{ github.repository }}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          tag="$(gh api "repos/${{ github.repository }}/releases?per_page=30" --jq '[.[] | select(.draft == false and .prerelease == false) | select([.assets[].name] | (index("purrmidi.elf") != null and index("SHA256SUMS") != null))][0].tag_name // empty' 2>/dev/null || true)"
           if [ -z "$tag" ]; then
-            echo "::notice::Релизов пока нет: веб-прошивальщик примет только файл пользователя."
+            echo "::notice::Нет релиза с файлами purrmidi.elf и SHA256SUMS: веб-прошивальщик примет только файл пользователя."
             exit 0
           fi
           dir=site/flash/firmware

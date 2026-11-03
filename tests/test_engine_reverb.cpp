@@ -58,7 +58,7 @@ const uint8_t kPrograms[] = {0, 1, 2, 3, 4};
 void test_defaults_and_api()
 {
     SynthEngine_Init();
-    CHECK(SYNTH_REVERB_DEFAULT == 40);
+    CHECK(SYNTH_REVERB_DEFAULT == 20);
     CHECK(SynthEngine_GetReverb() == SYNTH_REVERB_DEFAULT);
 
     cc(SYNTH_REVERB_CC, 90, 5);                  // канал не важен
