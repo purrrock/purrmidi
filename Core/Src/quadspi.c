@@ -22,6 +22,14 @@
 
 /* USER CODE BEGIN 0 */
 
+/* QSPI SCLK = kernel clock (HCLK = 240 MHz) / (ClockPrescaler + 1). 2 -> 80 MHz (safe default), 1 -> 120 MHz.
+ * Set with -DPURRMIDI_QSPI_PRESCALER=1 (CMake: -DPURRMIDI_QSPI_PRESCALER=1) only if the flash chip allows
+ * the 0xEB quad read at that frequency (W25Q64JV: 133 MHz, W25Q64FV: 104 MHz only!). */
+#ifndef PURRMIDI_QSPI_PRESCALER
+#define PURRMIDI_QSPI_PRESCALER 2
+#endif
+
+
 /* USER CODE END 0 */
 
 QSPI_HandleTypeDef hqspi;
@@ -38,7 +46,7 @@ void MX_QUADSPI_Init(void)
 
   /* USER CODE END QUADSPI_Init 1 */
   hqspi.Instance = QUADSPI;
-  hqspi.Init.ClockPrescaler = 2;
+  hqspi.Init.ClockPrescaler = PURRMIDI_QSPI_PRESCALER;
   hqspi.Init.FifoThreshold = 1;
   hqspi.Init.SampleShifting = QSPI_SAMPLE_SHIFTING_HALFCYCLE;
   hqspi.Init.FlashSize = 22;

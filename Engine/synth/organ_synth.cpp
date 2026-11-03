@@ -240,7 +240,7 @@ void OrganSynth_FillStereoBuffer(int16_t *buffer, uint32_t num_frames)
             if (std::fabs(target - g_bend_semitones) < 1e-4f) g_bend_semitones = target;
             int32_t delta = 0;
             if (g_bend_semitones != 0.0f) {
-                const double ratio = std::exp2((double)g_bend_semitones * (1.0 / 12.0));
+                const double ratio = (double)std::exp2(g_bend_semitones * (1.0f / 12.0f)); /* float exp2f: double exp2 is ~10x slower, precision is enough for the Q32 delta */
                 delta = (int32_t)((ratio - 1.0) * 4294967296.0);
             }
             g_organ.set_pitch_delta(delta);

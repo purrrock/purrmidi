@@ -36,6 +36,12 @@ option(PURRMIDI_WERROR "Treat compiler warnings in project code as errors" OFF)
 add_executable(${CMAKE_PROJECT_NAME})
 
 # STM32CubeMX-generated sources and libraries
+# Частота QSPI (чтение сэмплов SoundFont через XIP): SCLK = HCLK(240 МГц) / (prescaler + 1).
+#   2 -> 80 МГц (по умолчанию, как было), 1 -> 120 МГц. Включать 1 только если флеш допускает команду 0xEB на этой частоте
+#   (W25Q64JV - до 133 МГц, W25Q64FV - до 104 МГц!). После смены прогнать проверку SF2 (CRC банка, Quad read).
+set(PURRMIDI_QSPI_PRESCALER 2 CACHE STRING "QUADSPI ClockPrescaler (SCLK = HCLK / (N+1))")
+# Глобально (до add_subdirectory): quadspi.c компилируется в цели из cmake/stm32cubemx, а не в основной.
+add_compile_definitions(PURRMIDI_QSPI_PRESCALER=${PURRMIDI_QSPI_PRESCALER})
 add_subdirectory(cmake/stm32cubemx)
 
 # Debug: -O0 везде замедляет не только сам синтез, но и все прерывания, которые вытесняют рендер (PendSV имеет
@@ -150,10 +156,12 @@ set(PURRMIDI_AUDIO_HOT_SOURCES
 # из 128 кадров (-O2 - в разы меньше), поэтому горячие файлы по умолчанию собираются с -O2 и в Debug
 # (отладочная информация -g3 остаётся). Отключить: -DPURRMIDI_HOT_OPT_IN_DEBUG=OFF.
 option(PURRMIDI_HOT_OPT_IN_DEBUG "Compile audio hot sources with -O2 also in Debug builds" ON)
+# -fno-math-errno: sqrtf/sqrt становятся одной инструкцией VSQRT вместо вызова libm с обработкой errno.
+# Ничего не меняет в результатах (аргументы вне области определения по-прежнему дают NaN), errno нигде не читается.
 if(PURRMIDI_HOT_OPT_IN_DEBUG)
-    set(PURRMIDI_HOT_OPT "-O2")
+    set(PURRMIDI_HOT_OPT "-O2;-fno-math-errno")
 else()
-    set(PURRMIDI_HOT_OPT "$<$<CONFIG:Release>:-O2>")
+    set(PURRMIDI_HOT_OPT "$<$<CONFIG:Release>:-O2;-fno-math-errno>")
 endif()
 set_source_files_properties(${PURRMIDI_AUDIO_HOT_SOURCES}
     Platform/qspi_xip/pm_crc32.c

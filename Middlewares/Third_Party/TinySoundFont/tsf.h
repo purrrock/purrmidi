@@ -515,10 +515,12 @@ struct tsf_channels
 	struct tsf_channel channels[1];
 };
 
-static double tsf_timecents2Secsd(double timecents) { return TSF_POW(2.0, timecents / 1200.0); }
-static float tsf_timecents2Secsf(float timecents) { return TSF_POWF(2.0f, timecents / 1200.0f); }
-static float tsf_cents2Hertz(float cents) { return 8.176f * TSF_POWF(2.0f, cents / 1200.0f); }
-static float tsf_decibelsToGain(float db) { return (db > -100.f ? TSF_POWF(10.0f, db * 0.05f) : 0); }
+/* PurrMidi modification: single-precision exp2f instead of double pow()/powf() (Cortex-M7: float FPU is much cheaper than libm double).
+   Error of exp2f is ~1e-7 relative, i.e. < 0.001 cent of pitch. */
+static double tsf_timecents2Secsd(double timecents) { return (double)exp2f((float)(timecents * (1.0 / 1200.0))); }
+static float tsf_timecents2Secsf(float timecents) { return exp2f(timecents * (1.0f / 1200.0f)); }
+static float tsf_cents2Hertz(float cents) { return 8.176f * exp2f(cents * (1.0f / 1200.0f)); }
+static float tsf_decibelsToGain(float db) { return (db > -100.f ? exp2f(db * 0.16609640474f) : 0); } /* 10^(db/20) = 2^(db*log2(10)/20) */
 static float tsf_gainToDecibels(float gain) { return (gain <= .00001f ? -100.f : (float)(20.0 * TSF_LOG10(gain))); }
 
 static TSF_BOOL tsf_riffchunk_read(struct tsf_riffchunk* parent, struct tsf_riffchunk* chunk, struct tsf_stream* stream)
@@ -1100,7 +1102,7 @@ static void tsf_voice_envelope_nextsegment(struct tsf_voice_envelope* e, short a
 				{
 					// I don't truly understand this; just following what LinuxSampler does.
 					float mysterySlope = -9.226f / e->samplesUntilNextSegment;
-					e->slope = TSF_EXPF(mysterySlope);
+					e->slope = mysterySlope; /* PurrMidi modification: ln(slope); the level is advanced with one expf() per block, see tsf_voice_envelope_process */
 					e->segmentIsExponential = TSF_TRUE;
 					if (e->parameters.sustain > 0.0f)
 					{
@@ -1135,7 +1137,7 @@ static void tsf_voice_envelope_nextsegment(struct tsf_voice_envelope* e, short a
 			{
 				// I don't truly understand this; just following what LinuxSampler does.
 				float mysterySlope = -9.226f / e->samplesUntilNextSegment;
-				e->slope = TSF_EXPF(mysterySlope);
+				e->slope = mysterySlope; /* PurrMidi modification: ln(slope); the level is advanced with one expf() per block, see tsf_voice_envelope_process */
 				e->segmentIsExponential = TSF_TRUE;
 			}
 			else
@@ -1175,7 +1177,7 @@ static void tsf_voice_envelope_process(struct tsf_voice_envelope* e, int numSamp
 {
 	if (e->slope)
 	{
-		if (e->segmentIsExponential) e->level *= TSF_POWF(e->slope, (float)numSamples);
+		if (e->segmentIsExponential) e->level *= TSF_EXPF(e->slope * (float)numSamples); /* == powf(exp(ln), n) */
 		else e->level += (e->slope * numSamples);
 	}
 	if ((e->samplesUntilNextSegment -= numSamples) <= 0)
@@ -1185,7 +1187,7 @@ static void tsf_voice_envelope_process(struct tsf_voice_envelope* e, int numSamp
 static void tsf_voice_lowpass_setup(struct tsf_voice_lowpass* e, float Fc)
 {
 	// Lowpass filter from http://www.earlevel.com/main/2012/11/26/biquad-c-source-code/
-	double K = TSF_TAN(TSF_PI * Fc), KK = K * K;
+	double K = (double)tanf((float)(TSF_PI * Fc)), KK = K * K; /* PurrMidi modification: tanf instead of double tan() */
 	double norm = 1 / (1 + K * e->QInv + KK);
 	e->a0 = KK * norm;
 	e->a1 = 2 * e->a0;
