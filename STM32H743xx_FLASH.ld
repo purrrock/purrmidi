@@ -84,20 +84,44 @@ SECTIONS
     . = ALIGN(4);
   } >FLASH
 
-  /* Hot audio code of the organ engine runs from ITCM RAM (0 wait states, independent of the I-cache).
+  /* Static constructors / main stay in flash. Must be listed BEFORE .itcm_text: ld takes the first matching statement. */
+  .startup_text :
+  {
+    . = ALIGN(4);
+    *(.text.startup .text.startup.*)
+  } >FLASH
+
+  /* Hot audio code runs from ITCM RAM (0 wait states, independent of the I-cache).
      Executing it from flash made every voice ~10x slower than its instruction count suggests.
-     Only normal function sections are listed (.text._Z* = C++ mangled, .text.Organ* = extern "C" API);
-     .text.startup (static constructors) deliberately stays in flash: it runs before ITCM could matter.
-     Loaded from FLASH, copied to ITCM by startup_stm32h743xx.s. */
+     Loaded from FLASH, copied to ITCM by startup_stm32h743xx.s.
+     Whole objects of all synth engines are placed here (matched by object name: do not enable LTO, it renames objects).
+     Estimated size ~50 KB of 64 KB; the link fails with "region ITCMRAM overflowed" if it stops fitting:
+     then drop the least critical lines (cold init code such as tsf_load/ViolinSynth_Init lives in the same objects). */
   .itcm_text :
   {
     . = ALIGN(4);
     _sitcm_text = .;
+    /* Organ (bfreeOrgan2): only mangled C++ and the extern "C" API, as before */
     *organ_synth.cpp.obj(.text._Z* .text.Organ*)
     *synth_organ.cpp.obj(.text._Z*)
     *voice_organ.cpp.obj(.text._Z*)
     *env_ar.cpp.obj(.text._Z*)
+    *env_click.cpp.obj(.text._Z*)
     *efx_chorus.cpp.obj(.text._Z*)
+    /* Other engines: whole objects */
+    *epiano_synth.cpp.obj(.text .text.*)
+    *lead_synth.cpp.obj(.text .text.*)
+    *pluck_synth.cpp.obj(.text .text.*)
+    *violin_synth.cpp.obj(.text .text.*)
+    *soundfont_synth.cpp.obj(.text .text.*)
+    *tinysoundfont_impl.cpp.obj(.text .text.*)
+    *synth_engine.cpp.obj(.text .text.*)
+    *audio_halves.c.obj(.text .text.*)
+    *libDaisySP.a:*(.text .text.*)
+    /* Float math and memcpy/memset called from the voices (otherwise every call goes back to flash through a veneer) */
+    *libm.a:*(.text .text.*)
+    *libc*.a:*memcpy*.o(.text .text.*)
+    *libc*.a:*memset*.o(.text .text.*)
     *(.itcm_code .itcm_code.*)   /* explicit: functions tagged __attribute__((section(".itcm_code"))) */
     . = ALIGN(4);
     _eitcm_text = .;
