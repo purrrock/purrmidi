@@ -91,12 +91,28 @@ SECTIONS
     *(.text.startup .text.startup.*)
   } >FLASH
 
+  /* Cold code that lives in the same objects as the hot code (SF2 parser, engine init) stays in flash:
+     ~9 KB less ITCM. Must be listed BEFORE .itcm_text (ld takes the first matching statement).
+     Matching is by -ffunction-sections names; a name that does not match simply stays in ITCM (harmless). */
+  .cold_text :
+  {
+    . = ALIGN(4);
+    *tinysoundfont_impl.cpp.obj(.text.tsf_load* .text.tsf_region_operator* .text.tsf_region_envtosecs* .text.tsf_riffchunk_read* .text.tsf_hydra_read_* .text.tsf_close* .text.tsf_set_max_voices*)
+    *soundfont_synth.cpp.obj(.text.SoundFontSynth_Init .text.SoundFontSynth_InitSF2* .text.SoundFontSynth_GetPresetName*)
+    *epiano_synth.cpp.obj(.text.EPianoSynth_Init*)
+    *lead_synth.cpp.obj(.text.LeadSynth_Init*)
+    *pluck_synth.cpp.obj(.text.PluckSynth_Init*)
+    *violin_synth.cpp.obj(.text.ViolinSynth_Init*)
+    *synth_engine.cpp.obj(.text.SynthEngine_Init*)
+    *organ_synth.cpp.obj(.text.OrganSynth_Init*)
+  } >FLASH
+
   /* Hot audio code runs from ITCM RAM (0 wait states, independent of the I-cache).
      Executing it from flash made every voice ~10x slower than its instruction count suggests.
      Loaded from FLASH, copied to ITCM by startup_stm32h743xx.s.
      Whole objects of all synth engines are placed here (matched by object name: do not enable LTO, it renames objects).
-     Estimated size ~50 KB of 64 KB; the link fails with "region ITCMRAM overflowed" if it stops fitting:
-     then drop the least critical lines (cold init code such as tsf_load/ViolinSynth_Init lives in the same objects). */
+     Size ~55 KB of 64 KB; the link fails with "region ITCMRAM overflowed" if it stops fitting:
+     then drop the least critical lines. */
   .itcm_text :
   {
     . = ALIGN(4);
@@ -120,8 +136,18 @@ SECTIONS
     *libDaisySP.a:*(.text .text.*)
     /* Float math and memcpy/memset called from the voices (otherwise every call goes back to flash through a veneer) */
     *libm.a:*(.text .text.*)
-    *libc*.a:*memcpy*.o(.text .text.*)
-    *libc*.a:*memset*.o(.text .text.*)
+    *lib[cg]*.a:*memcpy*.o(.text .text.*)   /* newlib-nano ships libc as libg_nano.a */
+    *lib[cg]*.a:*memset*.o(.text .text.*)
+    /* ISR path: these preempt the PendSV renderer (DMA1_Stream0 = SAI audio, DMA2_Stream0/SPI4 = display at priority 0/5, OTG_FS = USB host SOF every 1 ms).
+       Running them from ITCM shortens every preemption of the render. Only the handlers and what they call, not Init/Msp code. */
+    *stm32h7xx_it.c.obj(.text.DMA1_Stream0_IRQHandler .text.DMA2_Stream0_IRQHandler .text.SPI4_IRQHandler .text.OTG_FS_IRQHandler .text.SysTick_Handler)
+    *stm32h7xx_hal_dma.c.obj(.text.HAL_DMA_IRQHandler)
+    *stm32h7xx_hal_spi.c.obj(.text.HAL_SPI_IRQHandler .text.SPI_DMA* .text.SPI_CloseTransfer*)
+    *stm32h7xx_hal_sai.c.obj(.text.SAI_DMA*)
+    *main.c.obj(.text.HAL_SAI_TxHalfCpltCallback .text.HAL_SAI_TxCpltCallback)
+    *stm32h7xx_hal_hcd.c.obj(.text.HAL_HCD_IRQHandler)
+    *stm32h7xx_ll_usb.c.obj(.text.USB_ReadInterrupts .text.USB_ReadChInterrupts .text.USB_HC_ReadInterrupt .text.USB_ReadPacket)
+    *stm32h7xx_hal.c.obj(.text.HAL_IncTick)
     *(.itcm_code .itcm_code.*)   /* explicit: functions tagged __attribute__((section(".itcm_code"))) */
     . = ALIGN(4);
     _eitcm_text = .;

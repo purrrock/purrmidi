@@ -36,12 +36,6 @@ option(PURRMIDI_WERROR "Treat compiler warnings in project code as errors" OFF)
 add_executable(${CMAKE_PROJECT_NAME})
 
 # STM32CubeMX-generated sources and libraries
-# Частота QSPI (чтение сэмплов SoundFont через XIP): SCLK = HCLK(240 МГц) / (prescaler + 1).
-#   2 -> 80 МГц (по умолчанию, как было), 1 -> 120 МГц. Включать 1 только если флеш допускает команду 0xEB на этой частоте
-#   (W25Q64JV - до 133 МГц, W25Q64FV - до 104 МГц!). После смены прогнать проверку SF2 (CRC банка, Quad read).
-set(PURRMIDI_QSPI_PRESCALER 2 CACHE STRING "QUADSPI ClockPrescaler (SCLK = HCLK / (N+1))")
-# Глобально (до add_subdirectory): quadspi.c компилируется в цели из cmake/stm32cubemx, а не в основной.
-add_compile_definitions(PURRMIDI_QSPI_PRESCALER=${PURRMIDI_QSPI_PRESCALER})
 add_subdirectory(cmake/stm32cubemx)
 
 # Debug: -O0 везде замедляет не только сам синтез, но и все прерывания, которые вытесняют рендер (PendSV имеет
