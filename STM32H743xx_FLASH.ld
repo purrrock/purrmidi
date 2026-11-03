@@ -105,6 +105,12 @@ SECTIONS
     *violin_synth.cpp.obj(.text.ViolinSynth_Init*)
     *synth_engine.cpp.obj(.text.SynthEngine_Init*)
     *organ_synth.cpp.obj(.text.OrganSynth_Init*)
+    /* libm parts that are never on the audio path: double pow() (only tsf_note_on), __kernel_rem_pio2f (arguments > 2^27 only;
+       the common __ieee754_rem_pio2f used by tanf stays in ITCM), errno/overflow handlers. */
+    *libm.a:libm_a-pow.o(.text .text.*)
+    *libm.a:*kf_rem_pio2.o(.text .text.*)
+    *libm.a:*math_err.o(.text .text.*)
+    *libm.a:*math_errf.o(.text .text.*)
   } >FLASH
 
   /* Hot audio code runs from ITCM RAM (0 wait states, independent of the I-cache).
@@ -136,6 +142,8 @@ SECTIONS
     *libDaisySP.a:*(.text .text.*)
     /* Float math and memcpy/memset called from the voices (otherwise every call goes back to flash through a veneer) */
     *libm.a:*(.text .text.*)
+    *synth_arena.cpp.obj(.text._Z18SynthArena_IsOwnerPKv)   /* called once per block by Lead/Pluck/Violin */
+    *libgcc.a:_arm_addsubdf3.o(.text .text.*)               /* __aeabi_l2d etc.: sinf/cosf call it on every evaluation */
     *lib[cg]*.a:*memcpy*.o(.text .text.*)   /* newlib-nano ships libc as libg_nano.a */
     *lib[cg]*.a:*memset*.o(.text .text.*)
     /* ISR path: these preempt the PendSV renderer (DMA1_Stream0 = SAI audio, DMA2_Stream0/SPI4 = display at priority 0/5, OTG_FS = USB host SOF every 1 ms).
