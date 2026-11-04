@@ -132,6 +132,7 @@ struct DiagStats {
     volatile uint32_t peak_permille;   /* largest |sample| of the MIX before limiting, 1000 = full scale */
     volatile uint32_t over_fs_blocks;  /* blocks whose mix exceeded full scale (would clip)            */
     volatile uint32_t over_fs_samples; /* samples of the mix above full scale                          */
+    volatile uint32_t agc_cut_permille;/* largest gain reduction of the AGC in the window, 1000 = silence */
     volatile uint32_t notes_on;        /* NoteOn events applied                                        */
     volatile uint32_t regions_wanted;  /* voices the bank asks for (regions matching key/velocity)     */
     volatile uint32_t voices_started;  /* growth of the active voice count after NoteOn                */
@@ -184,6 +185,38 @@ inline float soft_limit(float x)
 
 constexpr uint32_t kRenderChunkFrames = 128U;
 
+#if SF2_AGC
+float g_agc_gain = 1.0f;   /* audio context; 1.0 = no reduction */
+
+/* Slow gain control on one rendered chunk (stereo interleaved float): `peak` is |mix| peak of the chunk before gain.
+ * Lowering is fast (a 32-sample ramp), recovery is slow (SF2_AGC_RELEASE_S), the gain is the same for both channels. */
+void agc_apply(float *mix, uint32_t frames, float peak)
+{
+    const float target = (peak > SF2_AGC_TARGET) ? (SF2_AGC_TARGET / peak) : 1.0f;
+    const float g0 = g_agc_gain;
+    float goal;
+    uint32_t ramp;
+    if (target < g0) {
+        goal = target;
+        ramp = (frames < 32U) ? frames : 32U;
+    } else if (g0 >= 1.0f) {
+        return;   /* common path: no reduction active, nothing to do */
+    } else {
+        const float k = 1.0f - std::exp(-(float)frames / (48000.0f * SF2_AGC_RELEASE_S));
+        goal = g0 + (target - g0) * k;
+        ramp = frames;
+    }
+    const float step = (ramp != 0U) ? (goal - g0) / (float)ramp : 0.0f;
+    float g = g0;
+    for (uint32_t i = 0; i < frames; ++i) {
+        if (i < ramp) g += step; else g = goal;
+        mix[2U * i]      *= g;
+        mix[2U * i + 1U] *= g;
+    }
+    g_agc_gain = goal;
+}
+#endif
+
 #ifndef SF2_VIBRATO_CENTS
 #define SF2_VIBRATO_CENTS 30.0f   /* глубина вибрато при CC1 = 127, центов в каждую сторону */
 #endif
@@ -229,10 +262,21 @@ void render_block(int16_t *out, uint32_t num_frames)
         float peak = 0.0f;
         uint32_t over = 0;
         for (uint32_t i = 0, cnt = n * 2U; i < cnt; ++i) {
-            float x = mix[i];
-            const float a = (x < 0.0f) ? -x : x;
+            const float a = (mix[i] < 0.0f) ? -mix[i] : mix[i];
             if (a > peak) peak = a;
             if (a > 1.0f) ++over;
+        }
+#if SF2_AGC
+        agc_apply(mix, n, peak);   /* diagnostics below keep reporting the mix BEFORE the gain */
+#if SF2_DIAG_STATS
+        {
+            const uint32_t cut = (uint32_t)((1.0f - g_agc_gain) * 1000.0f);
+            if (cut > g_diag.agc_cut_permille) g_diag.agc_cut_permille = cut;
+        }
+#endif
+#endif
+        for (uint32_t i = 0, cnt = n * 2U; i < cnt; ++i) {
+            float x = mix[i];
 #if SF2_SOFT_LIMITER
             x = soft_limit(x);
 #else
@@ -427,6 +471,9 @@ void SoundFontSynth_Init(void)
     g_mod_wheel.store(0, std::memory_order_relaxed);
     g_vib_phase = 0.0f;
     g_vib_active = false;
+#if SF2_AGC
+    g_agc_gain = 1.0f;
+#endif
 }
 
 void SoundFontSynth_NoteOn(uint8_t note, uint8_t velocity)
@@ -701,7 +748,7 @@ void SoundFontSynth_ReportStats(uint32_t now_ms)
         "[SF2] 1s: render avg=%lu max=%lu us (over budget=%lu of %lu blocks) | voices max=%lu now=%lu"
         " | notes=%lu regions want=%lu started=%lu short=%lu (max/note=%lu) shed_voices=%lu"
         " | events max=%lu us deferred=%lu shed_sounding=%lu"
-        " | mix peak=%lu.%02lu FS, over 1.0 FS: %lu samples in %lu blocks%s | fifo dropped=%lu\n",
+        " | mix peak=%lu.%02lu FS, over 1.0 FS: %lu samples in %lu blocks%s | agc cut=%lu permille | fifo dropped=%lu\n",
         avg_us, max_us, (unsigned long)g_diag.over_budget, (unsigned long)blocks,
         (unsigned long)g_diag.voices_max, (unsigned long)g_diag.voices_last,
         (unsigned long)g_diag.notes_on, (unsigned long)g_diag.regions_wanted, (unsigned long)g_diag.voices_started,
@@ -711,6 +758,7 @@ void SoundFontSynth_ReportStats(uint32_t now_ms)
         (unsigned long)(g_diag.peak_permille / 1000U), (unsigned long)((g_diag.peak_permille / 10U) % 100U),
         (unsigned long)g_diag.over_fs_samples, (unsigned long)g_diag.over_fs_blocks,
         SF2_SOFT_LIMITER ? " (soft limiter ON)" : " (HARD CLIP)",
+        (unsigned long)g_diag.agc_cut_permille,
         (unsigned long)(dropped - g_diag_fifo_dropped_seen));
     g_diag_fifo_dropped_seen = dropped;
 

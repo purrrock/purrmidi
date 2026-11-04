@@ -26,8 +26,26 @@
 #ifndef SF2_SOFT_LIMITER
 #define SF2_SOFT_LIMITER 1
 #endif
+/* 1 = slow automatic gain on the mix (same idea as synth::AutoGain in the organ): keeps the peak of a block at or below
+ * SF2_AGC_TARGET by lowering the gain smoothly and equally for all samples of a block, so a chord gets quieter instead of
+ * being squashed by the limiter (static curves flatten the tops of every period = harmonic distortion). Up to the
+ * target the gain is exactly 1.0 and the output is bit-identical to the version without AGC. The soft limiter stays as a
+ * safety net for the first 32 samples of a sudden attack. */
+#ifndef SF2_AGC
+#define SF2_AGC 1
+#endif
+#ifndef SF2_AGC_TARGET
+#define SF2_AGC_TARGET 0.80f      /* peak of the mix the AGC holds, fraction of full scale */
+#endif
+#ifndef SF2_AGC_RELEASE_S
+#define SF2_AGC_RELEASE_S 0.30f   /* time constant of the gain recovery after a dense chord has decayed, s */
+#endif
 #ifndef SF2_LIMITER_KNEE
+#if SF2_AGC
+#define SF2_LIMITER_KNEE 0.85f    /* with AGC the limiter is only a safety net above the AGC target */
+#else
 #define SF2_LIMITER_KNEE 0.6f     /* fraction of full scale where the limiter starts to act */
+#endif
 #endif
 #ifndef SF2_LIMITER_CEILING
 #define SF2_LIMITER_CEILING 0.98f /* the output never goes above this fraction of full scale */
